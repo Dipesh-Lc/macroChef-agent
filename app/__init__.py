@@ -1,0 +1,1 @@
+"""MacroChef Agent application package."""

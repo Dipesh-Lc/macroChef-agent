@@ -1,0 +1,21 @@
+[
+  {
+    "name": "High protein pantry",
+    "typed_ingredients": "chicken breast, spinach, rice, bell pepper, Greek yogurt",
+    "allergies": [],
+    "cuisine_preference": "Mediterranean"
+  },
+  {
+    "name": "Peanut allergy dinner",
+    "typed_ingredients": "tofu, broccoli, rice noodles, bell pepper",
+    "allergies": ["peanut"],
+    "cuisine_preference": "Thai"
+  },
+  {
+    "name": "Vegan quick lunch",
+    "typed_ingredients": "brown rice, black beans, corn, avocado, tomato",
+    "allergies": [],
+    "diet_type": "vegan",
+    "cuisine_preference": "Mexican"
+  }
+]
