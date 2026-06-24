@@ -54,55 +54,55 @@ class SequentialMacroChefGraph:
 def build_macrochef_graph():
     try:
         from langgraph.graph import END, START, StateGraph
+
+        graph = StateGraph(MacroChefState)
+        graph.add_node("intake_node", intake_node)
+        graph.add_node("inventory_confirmation_node", inventory_confirmation_node)
+        graph.add_node("constraint_builder_node", constraint_builder_node)
+        graph.add_node("recipe_retriever_node", recipe_retriever_node)
+        graph.add_node("safety_filter_node", safety_filter_node)
+        graph.add_node("fallback_relaxation_node", fallback_relaxation_node)
+        graph.add_node("nutrition_scoring_node", nutrition_scoring_node)
+        graph.add_node("meal_ranking_node", meal_ranking_node)
+        graph.add_node("chef_explanation_node", chef_explanation_node)
+        graph.add_node("procurement_node", procurement_node)
+        graph.add_node("memory_update_node", memory_update_node)
+
+        graph.add_edge(START, "intake_node")
+        graph.add_conditional_edges(
+            "intake_node",
+            after_intake,
+            {"inventory_confirmation": "inventory_confirmation_node", "end": END},
+        )
+        graph.add_conditional_edges(
+            "inventory_confirmation_node",
+            after_inventory_confirmation,
+            {"constraint_builder": "constraint_builder_node", "end": END},
+        )
+        graph.add_edge("constraint_builder_node", "recipe_retriever_node")
+        graph.add_edge("recipe_retriever_node", "safety_filter_node")
+        graph.add_conditional_edges(
+            "safety_filter_node",
+            after_safety_filter,
+            {
+                "fallback_relaxation": "fallback_relaxation_node",
+                "nutrition_scoring": "nutrition_scoring_node",
+                "end": END,
+            },
+        )
+        graph.add_conditional_edges(
+            "fallback_relaxation_node",
+            after_fallback,
+            {"nutrition_scoring": "nutrition_scoring_node", "end": END},
+        )
+        graph.add_edge("nutrition_scoring_node", "meal_ranking_node")
+        graph.add_edge("meal_ranking_node", "chef_explanation_node")
+        graph.add_edge("chef_explanation_node", "procurement_node")
+        graph.add_edge("procurement_node", "memory_update_node")
+        graph.add_edge("memory_update_node", END)
+        return graph.compile()
     except Exception:
         return SequentialMacroChefGraph()
-
-    graph = StateGraph(MacroChefState)
-    graph.add_node("intake_node", intake_node)
-    graph.add_node("inventory_confirmation_node", inventory_confirmation_node)
-    graph.add_node("constraint_builder_node", constraint_builder_node)
-    graph.add_node("recipe_retriever_node", recipe_retriever_node)
-    graph.add_node("safety_filter_node", safety_filter_node)
-    graph.add_node("fallback_relaxation_node", fallback_relaxation_node)
-    graph.add_node("nutrition_scoring_node", nutrition_scoring_node)
-    graph.add_node("meal_ranking_node", meal_ranking_node)
-    graph.add_node("chef_explanation_node", chef_explanation_node)
-    graph.add_node("procurement_node", procurement_node)
-    graph.add_node("memory_update_node", memory_update_node)
-
-    graph.add_edge(START, "intake_node")
-    graph.add_conditional_edges(
-        "intake_node",
-        after_intake,
-        {"inventory_confirmation": "inventory_confirmation_node", "end": END},
-    )
-    graph.add_conditional_edges(
-        "inventory_confirmation_node",
-        after_inventory_confirmation,
-        {"constraint_builder": "constraint_builder_node", "end": END},
-    )
-    graph.add_edge("constraint_builder_node", "recipe_retriever_node")
-    graph.add_edge("recipe_retriever_node", "safety_filter_node")
-    graph.add_conditional_edges(
-        "safety_filter_node",
-        after_safety_filter,
-        {
-            "fallback_relaxation": "fallback_relaxation_node",
-            "nutrition_scoring": "nutrition_scoring_node",
-            "end": END,
-        },
-    )
-    graph.add_conditional_edges(
-        "fallback_relaxation_node",
-        after_fallback,
-        {"nutrition_scoring": "nutrition_scoring_node", "end": END},
-    )
-    graph.add_edge("nutrition_scoring_node", "meal_ranking_node")
-    graph.add_edge("meal_ranking_node", "chef_explanation_node")
-    graph.add_edge("chef_explanation_node", "procurement_node")
-    graph.add_edge("procurement_node", "memory_update_node")
-    graph.add_edge("memory_update_node", END)
-    return graph.compile()
 
 
 def request_to_state(request: RecommendationRequest) -> MacroChefState:
