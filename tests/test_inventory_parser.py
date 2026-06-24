@@ -28,7 +28,7 @@ def test_fuzzy_normalizes_common_typos_when_rapidfuzz_is_available() -> None:
     if ingredient_normalizer.process is None:
         pytest.skip("rapidfuzz is optional and is not installed")
 
-    observations = parse_typed_inventory("chikcen brest, greeek yogrt, bell peper")
+    observations = parse_typed_inventory("chikcen brest, greeek yogurt, bell peper")
 
     assert [item.normalized_name for item in observations] == [
         "chicken breast",
