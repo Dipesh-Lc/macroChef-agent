@@ -32,7 +32,7 @@ PROVIDER_ALIASES = {
 
 DEFAULT_MODELS = {
     "openai": {"chat": "gpt-4.1-mini", "vision": "gpt-4.1-mini"},
-    "gemini": {"chat": "gemini-3-flash-preview", "vision": "gemini-3-flash-preview"},
+    "gemini": {"chat": "gemini-2.5-flash", "vision": "gemini-2.5-flash"},
     "anthropic": {"chat": "claude-sonnet-4-5", "vision": "claude-sonnet-4-5"},
     "ollama": {"chat": "llama3.2", "vision": "gemma3"},
 }

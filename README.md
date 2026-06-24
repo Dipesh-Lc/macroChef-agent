@@ -1,6 +1,29 @@
 # MacroChef Agent
 
+![CI](https://github.com/Dipesh-Lc/macroChef-agent/actions/workflows/ci.yml/badge.svg)
+
 MacroChef Agent is a multimodal, constraint-aware meal planning system that turns a fridge photo or typed pantry list into safe, macro-aware recipe recommendations. It combines ChromaDB recipe RAG, a LangGraph workflow, deterministic allergy and nutrition logic, and a Streamlit product UI.
+
+> Runs with zero API keys (mock mode) — clone and try in two commands.
+
+## Workflow
+
+```mermaid
+flowchart TD
+    START([START]) --> A[intake_node]
+    A --> B[inventory_confirmation_node]
+    B --> C[constraint_builder_node]
+    C --> D[recipe_retriever_node]
+    D --> E[safety_filter_node]
+    E --> F[nutrition_scoring_node]
+    F --> G[meal_ranking_node]
+    G --> H[chef_explanation_node]
+    H --> I[procurement_node]
+    I --> J[memory_update_node]
+    J --> END([END])
+```
+
+The graph handles conditional paths for empty inventory, low-confidence vision items, retrieval fallback when ChromaDB is unavailable, and no valid recipes surviving the safety filter.
 
 ## Problem Statement
 Generic recipe chatbots are weak at hard constraints. MacroChef treats meal planning as a structured decision workflow: extract inventory, retrieve feasible recipes, enforce allergies and dietary rules, score nutrition fit, rank meals, explain tradeoffs, and build a shopping list.
@@ -363,6 +386,12 @@ Invoke-RestMethod `
 ```
 
 ## Screenshots
+
+> TODO: screenshots coming soon — add the images below to `assets/screenshots/`.
+
+- TODO `assets/screenshots/inventory.png` — inventory extraction view
+- TODO `assets/screenshots/recommendations.png` — recommendation cards
+- TODO `assets/screenshots/library.png` — recipe library builder
 
 ## Limitations
 
