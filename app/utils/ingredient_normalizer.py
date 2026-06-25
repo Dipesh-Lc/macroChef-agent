@@ -1,10 +1,11 @@
 import re
 
 try:
-    from rapidfuzz import fuzz, process
+    from rapidfuzz import fuzz, process, utils as fuzz_utils
 except ImportError:  # pragma: no cover - optional dependency fallback
     fuzz = None
     process = None
+    fuzz_utils = None
 
 
 SYNONYMS = {
@@ -157,13 +158,24 @@ def normalize_ingredient(name: str) -> str:
     return fuzzy_normalize_ingredient(key)
 
 
-def fuzzy_normalize_ingredient(name: str, threshold: int = 88) -> str:
-    """Map close misspellings to known pantry names when rapidfuzz is installed."""
+def fuzzy_normalize_ingredient(name: str, threshold: int = 85) -> str:
+    """Map close misspellings to known pantry names when rapidfuzz is installed.
 
-    if not name or process is None or fuzz is None:
+    Uses token_sort_ratio so that multi-token inputs (e.g. "greeek yogurt") prefer
+    the canonical that covers all tokens ("Greek yogurt") over shorter subsets
+    ("yogurt").  default_process normalises case so that canonicals like "Greek
+    yogurt" aren't penalised for their capital letter.
+    """
+
+    if not name or process is None or fuzz is None or fuzz_utils is None:
         return name
 
-    match = process.extractOne(name, CANONICAL_INGREDIENTS, scorer=fuzz.WRatio)
+    match = process.extractOne(
+        name,
+        CANONICAL_INGREDIENTS,
+        scorer=fuzz.token_sort_ratio,
+        processor=fuzz_utils.default_process,
+    )
     if match and match[1] >= threshold:
         return match[0]
     return name
