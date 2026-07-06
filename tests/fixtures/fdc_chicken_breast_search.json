@@ -1,0 +1,32 @@
+{
+  "totalHits": 2,
+  "currentPage": 1,
+  "totalPages": 1,
+  "foods": [
+    {
+      "fdcId": 999001,
+      "description": "CHICKEN BREAST NUGGETS, CHICKEN BREAST",
+      "dataType": "Branded",
+      "foodNutrients": [
+        {"nutrientId": 1008, "nutrientName": "Energy", "nutrientNumber": "208", "unitName": "KCAL", "value": 250},
+        {"nutrientId": 1003, "nutrientName": "Protein", "nutrientNumber": "203", "unitName": "G", "value": 14},
+        {"nutrientId": 1004, "nutrientName": "Total lipid (fat)", "nutrientNumber": "204", "unitName": "G", "value": 15},
+        {"nutrientId": 1005, "nutrientName": "Carbohydrate, by difference", "nutrientNumber": "205", "unitName": "G", "value": 18},
+        {"nutrientId": 1079, "nutrientName": "Fiber, total dietary", "nutrientNumber": "291", "unitName": "G", "value": 1}
+      ]
+    },
+    {
+      "fdcId": 171077,
+      "description": "Chicken, broilers or fryers, breast, meat only, raw",
+      "dataType": "SR Legacy",
+      "foodNutrients": [
+        {"nutrientId": 1008, "nutrientName": "Energy", "nutrientNumber": "208", "unitName": "KCAL", "value": 165},
+        {"nutrientId": 1062, "nutrientName": "Energy", "nutrientNumber": "957", "unitName": "kJ", "value": 690},
+        {"nutrientId": 1003, "nutrientName": "Protein", "nutrientNumber": "203", "unitName": "G", "value": 31},
+        {"nutrientId": 1004, "nutrientName": "Total lipid (fat)", "nutrientNumber": "204", "unitName": "G", "value": 3.57},
+        {"nutrientId": 1005, "nutrientName": "Carbohydrate, by difference", "nutrientNumber": "205", "unitName": "G", "value": 0},
+        {"nutrientId": 1079, "nutrientName": "Fiber, total dietary", "nutrientNumber": "291", "unitName": "G", "value": 0}
+      ]
+    }
+  ]
+}

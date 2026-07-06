@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     chroma_collection_name: str = "macrochef_recipes"
     low_confidence_threshold: float = 0.75
     enable_vision: bool = Field(default=False, alias="MACROCHEF_ENABLE_VISION")
+    fdc_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FDC_API_KEY", "USDA_API_KEY"),
+    )
+    fdc_base_url: str = Field(
+        default="https://api.nal.usda.gov/fdc/v1", alias="FDC_BASE_URL"
+    )
+    fdc_cache_path: str = "./data/cache/fdc_cache.json"
 
     @property
     def chroma_dir(self) -> Path:
