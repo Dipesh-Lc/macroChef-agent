@@ -1,3 +1,4 @@
+from app.config import get_settings
 from app.data.recipe_library_repository import RecipeLibraryRepository
 from app.graph.state import MacroChefState, ensure_state, state_update
 from app.rag.loaders import load_recipes
@@ -41,8 +42,12 @@ def intake_node(state: MacroChefState | dict):
 
     text_observations = parse_typed_inventory(current.typed_ingredients)
     image_observations = []
+    vision_skipped = False
     if current.image_path and current.input_type in {"image", "mixed"}:
-        image_observations = extract_inventory_from_image(current.image_path)
+        if get_settings().enable_vision:
+            image_observations = extract_inventory_from_image(current.image_path)
+        else:
+            vision_skipped = True
     observations = merge_inventory_observations(observations, text_observations, image_observations)
 
     if not observations:
@@ -55,9 +60,11 @@ def intake_node(state: MacroChefState | dict):
         )
 
     low_confidence = [item.normalized_name for item in observations if item.needs_confirmation]
+    vision_note = " Vision disabled; uploaded image was not processed." if vision_skipped else ""
     message = (
         f"intake_node: extracted {len(observations)} ingredients"
         + (f"; low confidence: {', '.join(low_confidence)}." if low_confidence else ".")
+        + vision_note
     )
     return state_update(
         current,

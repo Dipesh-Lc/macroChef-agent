@@ -131,6 +131,10 @@ def extract_inventory_with_provider_chain(
                 exc,
             )
 
+    # TODO(Phase 5): before real vision providers are enabled, replace this silent
+    # fallback with explicit, user-visible degradation: surface to the caller that
+    # extraction failed and mock data is being returned rather than quietly
+    # substituting canned inventory. Never silently return fake data for a failed call.
     return mock_extractor(image_path)
 
 

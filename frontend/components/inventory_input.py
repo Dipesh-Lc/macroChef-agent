@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 import requests
 import streamlit as st
+
+_VISION_ENABLED = os.getenv("MACROCHEF_ENABLE_VISION", "false").lower() == "true"
 
 
 def _option_radio(label: str, options: list[str], index: int = 0, key: str | None = None) -> str:
@@ -62,11 +66,18 @@ def render_inventory_input(
     st.session_state["typed_ingredients"] = typed_ingredients
     st.caption("Separate ingredients with commas. You can also add a fridge or pantry photo.")
 
-    upload = st.file_uploader(
-        "Optional fridge or pantry photo",
-        type=["jpg", "jpeg", "png", "webp"],
-        key="inventory_photo",
-    )
+    if _VISION_ENABLED:
+        upload = st.file_uploader(
+            "Optional fridge or pantry photo",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="inventory_photo",
+        )
+    else:
+        upload = None
+        st.caption(
+            "📷 Fridge-photo import is experimental and currently disabled. "
+            "Set `MACROCHEF_ENABLE_VISION=true` in your `.env` to try it."
+        )
 
     detected = st.session_state.get("detected_inventory", [])
     if st.button("Extract inventory", width="stretch"):

@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     recipe_data_path: str = "./data/processed/sample_recipes.jsonl"
     chroma_collection_name: str = "macrochef_recipes"
     low_confidence_threshold: float = 0.75
+    enable_vision: bool = Field(default=False, alias="MACROCHEF_ENABLE_VISION")
 
     @property
     def chroma_dir(self) -> Path:

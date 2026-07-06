@@ -1,3 +1,6 @@
+import pytest
+
+from app.config import get_settings
 from app.graph.builder import run_recommendation_graph
 from app.schemas.recommendation import RecommendationRequest
 from app.schemas.user import MacroTargets, UserProfile
@@ -35,7 +38,13 @@ def test_full_graph_with_text_input_produces_safe_recommendations() -> None:
         assert "peanut" not in [item.lower() for item in recommendation.recipe.allergens]
 
 
-def test_full_graph_with_mixed_text_and_image_inventory() -> None:
+def test_full_graph_with_mixed_text_and_image_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Vision must be enabled for this test; it verifies the mixed text+image path.
+    monkeypatch.setenv("MACROCHEF_ENABLE_VISION", "true")
+    get_settings.cache_clear()
+
     profile = UserProfile(
         user_id="demo_user",
         allergies=[],

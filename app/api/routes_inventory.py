@@ -3,8 +3,9 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.config import get_settings
 from app.schemas.inventory import InventoryObservation
 from app.services.text_inventory_parser import merge_inventory_observations, parse_typed_inventory
 from app.services.vision_service import extract_inventory_from_image
@@ -19,6 +20,14 @@ async def extract_inventory(
 ) -> list[InventoryObservation]:
     text_observations = parse_typed_inventory(typed_ingredients)
     if image is not None:
+        if not get_settings().enable_vision:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "vision_disabled: fridge-photo extraction is experimental and turned off. "
+                    "Set MACROCHEF_ENABLE_VISION=true in your .env to enable it."
+                ),
+            )
         upload_dir = Path("data/raw/uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
         original_name = Path(image.filename or "image.jpg")

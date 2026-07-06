@@ -167,14 +167,16 @@ first; a deterministic hashing-embedding fallback keeps offline demos runnable.
 
 ### Optional / experimental: fridge-photo (vision) inventory
 
-The frontend can accept an optional fridge/pantry image alongside typed inventory
-and merge both into one editable table. **By default this is deterministic mock
-extraction, not a real image recognizer** — it returns a fixed ingredient list so
-the app runs offline with no API keys. Real hosted vision providers can be wired in
-(see *Optional model providers* below), but vision is intentionally isolated: as
-with everything else, it never influences allergy or nutrition decisions, and
-detected items are surfaced for user confirmation (anything below a confidence
-threshold is flagged `needs_confirmation`). Treat it as experimental.
+The feature is **off by default** and gated by `MACROCHEF_ENABLE_VISION` (set to
+`true` in your `.env` to enable it). Even when enabled, extraction is
+deterministic mock unless a real `MODEL_PROVIDER` with credentials is also
+configured (see *Optional model providers* below).
+
+When enabled, the frontend accepts an optional fridge/pantry image alongside typed
+inventory and merges both into one editable table. Vision is intentionally isolated:
+it never influences allergy or nutrition decisions, and detected items are surfaced
+for user confirmation (anything below a confidence threshold is flagged
+`needs_confirmation`). Treat it as experimental.
 
 ---
 
