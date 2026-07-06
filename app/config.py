@@ -4,6 +4,22 @@ from pathlib import Path
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Strings that pydantic-settings treats as True for bool fields.
+# Mirrors pydantic_settings' own bool coercion so any code that cannot import
+# Settings (e.g. the Streamlit frontend) can parse env vars consistently.
+_TRUE_STRINGS: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+
+
+def parse_env_bool(value: str | None, *, default: bool = False) -> bool:
+    """Return the bool equivalent of an env-var string using the same coercion
+    rules as pydantic-settings (with env_ignore_empty=True):
+      truthy  → "1" | "true" | "yes" | "on"  (case-insensitive)
+      falsy   → "0" | "false" | "no" | "off" | "" | None → default
+    """
+    if value is None or value.strip() == "":
+        return default
+    return value.strip().lower() in _TRUE_STRINGS
+
 
 class Settings(BaseSettings):
     """Runtime configuration with mock/local defaults."""

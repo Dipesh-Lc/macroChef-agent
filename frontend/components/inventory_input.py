@@ -6,7 +6,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
-_VISION_ENABLED = os.getenv("MACROCHEF_ENABLE_VISION", "false").lower() == "true"
+from app.config import parse_env_bool
+
+_VISION_ENABLED = parse_env_bool(os.getenv("MACROCHEF_ENABLE_VISION"))
 
 
 def _option_radio(label: str, options: list[str], index: int = 0, key: str | None = None) -> str:

@@ -6,7 +6,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from app.config import Settings, get_settings, parse_env_bool
 from app.main import create_app
 
 
@@ -143,3 +143,68 @@ def test_intake_node_calls_vision_when_enabled(
     observations = result.get("raw_inventory_observations") or []
     sources = {obs.source for obs in observations}
     assert "vision" in sources
+
+
+# ---------------------------------------------------------------------------
+# parse_env_bool / backend agreement tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("true", True),
+        ("True", True),
+        ("1", True),
+        ("yes", True),
+        ("on", True),
+        ("false", False),
+        ("False", False),
+        ("0", False),
+        ("no", False),
+        ("off", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_parse_env_bool_covers_all_canonical_values(
+    raw: str | None, expected: bool
+) -> None:
+    """parse_env_bool must agree with pydantic-settings bool coercion for every
+    canonical truthy/falsy string (and None/empty)."""
+    assert parse_env_bool(raw) is expected
+
+
+@pytest.mark.parametrize("truthy", ["true", "True", "1", "yes", "on"])
+def test_parse_env_bool_agrees_with_backend_settings_for_truthy(
+    monkeypatch: pytest.MonkeyPatch, truthy: str
+) -> None:
+    """For every string parse_env_bool says is True, the backend Settings must
+    also produce enable_vision=True — no split-brain between frontend and API."""
+    monkeypatch.setenv("MACROCHEF_ENABLE_VISION", truthy)
+    get_settings.cache_clear()
+    assert get_settings().enable_vision is True
+    assert parse_env_bool(truthy) is True
+
+
+@pytest.mark.parametrize("falsy", ["false", "False", "0", "no", "off"])
+def test_parse_env_bool_agrees_with_backend_settings_for_falsy(
+    monkeypatch: pytest.MonkeyPatch, falsy: str
+) -> None:
+    """For every string parse_env_bool says is False, the backend Settings must
+    also produce enable_vision=False."""
+    monkeypatch.setenv("MACROCHEF_ENABLE_VISION", falsy)
+    get_settings.cache_clear()
+    assert get_settings().enable_vision is False
+    assert parse_env_bool(falsy) is False
+
+
+def test_parse_env_bool_agrees_with_backend_settings_for_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty string must produce False on both sides (env_ignore_empty=True on
+    the backend falls through to the field default of False)."""
+    monkeypatch.setenv("MACROCHEF_ENABLE_VISION", "")
+    get_settings.cache_clear()
+    assert get_settings().enable_vision is False
+    assert parse_env_bool("") is False
