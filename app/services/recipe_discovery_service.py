@@ -558,9 +558,10 @@ class RecipeDiscoveryService:
         )
 
     def _allowed(self, candidate: RecipeCandidate, request: RecipeDiscoveryRequest) -> bool:
-        if request.allergies and self._has_conflict([*candidate.ingredients, *candidate.allergens], request.allergies):
+        names = [item.name for item in candidate.ingredients]
+        if request.allergies and self._has_conflict([*names, *candidate.allergens], request.allergies):
             return False
-        if request.excluded_ingredients and self._has_conflict(candidate.ingredients, request.excluded_ingredients):
+        if request.excluded_ingredients and self._has_conflict(names, request.excluded_ingredients):
             return False
         if request.diet_type:
             requested = request.diet_type.lower()

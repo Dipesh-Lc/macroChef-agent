@@ -1,6 +1,7 @@
+from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
-from app.services.recipe_dedup_service import RecipeDedupService
+from app.services.recipe_dedup_service import RecipeDedupService, normalized_ingredient_set
 
 
 def _candidate(
@@ -73,3 +74,12 @@ def test_ingredient_overlap_duplicate_logic() -> None:
     result = RecipeDedupService().deduplicate([candidate], existing)
 
     assert result.duplicate_candidates
+
+
+def test_dedup_reads_ingredient_name() -> None:
+    # The overlap set is built from ingredient names, ignoring amount/unit.
+    ingredients = [
+        Ingredient(name="chicken breast", amount=150, unit="g"),
+        Ingredient(name="rice", amount=100, unit="g"),
+    ]
+    assert normalized_ingredient_set(ingredients) == {"chicken breast", "rice"}

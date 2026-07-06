@@ -37,6 +37,24 @@ def test_fuzzy_normalizes_common_typos_when_rapidfuzz_is_available() -> None:
     ]
 
 
+def test_parses_quantity_from_text() -> None:
+    observations = parse_typed_inventory("200 g chicken breast, 2 kg rice, 3 eggs")
+    by_name = {item.normalized_name: item for item in observations}
+
+    assert (by_name["chicken breast"].amount, by_name["chicken breast"].unit) == (200, "g")
+    assert (by_name["rice"].amount, by_name["rice"].unit) == (2, "kg")
+    # A bare count keeps its amount with no unit.
+    assert (by_name["egg"].amount, by_name["egg"].unit) == (3, None)
+
+
+def test_merge_keeps_structured_quantity() -> None:
+    text_items = parse_typed_inventory("500 g chicken breast")
+    merged = merge_inventory_observations(text_items)
+
+    assert merged[0].amount == 500
+    assert merged[0].unit == "g"
+
+
 def test_merge_inventory_keeps_user_text_over_uncertain_vision_duplicate() -> None:
     text_items = parse_typed_inventory("bell pepper, rice")
     vision_items = [

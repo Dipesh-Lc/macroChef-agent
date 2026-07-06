@@ -2,20 +2,13 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.ingredient import Ingredient
 
-class NutritionIngredient(BaseModel):
-    """Quantity-aware ingredient input for macro grounding.
-
-    This mirrors the `{name, amount, unit}` shape that item 1.2 (the
-    quantity/unit data model) will introduce on `Recipe.ingredients`. Item 1.2
-    has not landed yet, so callers build this from whatever quantity source
-    they have; once it lands, its ingredient model should be adapted to this
-    shape rather than duplicated.
-    """
-
-    name: str
-    amount: float | None = Field(default=None, ge=0)
-    unit: str | None = None
+# The quantity/unit data model (item 1.2) landed and made `Ingredient` the one
+# canonical `{name, amount, unit}` shape. `NutritionIngredient` is kept as an
+# alias so existing grounding callers/tests keep working without duplicating the
+# model.
+NutritionIngredient = Ingredient
 
 
 class FoodMacros(BaseModel):

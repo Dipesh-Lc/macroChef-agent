@@ -21,7 +21,12 @@ def _trace(state: MacroChefState, message: str) -> list[str]:
 
 def _inventory_from_observations(state: MacroChefState) -> list[ConfirmedIngredient]:
     return [
-        ConfirmedIngredient(name=observation.normalized_name, quantity=observation.quantity)
+        ConfirmedIngredient(
+            name=observation.normalized_name,
+            quantity=observation.quantity,
+            amount=observation.amount,
+            unit=observation.unit,
+        )
         for observation in state.raw_inventory_observations
     ]
 

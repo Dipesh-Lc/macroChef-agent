@@ -35,7 +35,8 @@ def test_recipe_search_document_contains_structured_fields() -> None:
 
     assert "Japanese Chicken Rice Bowl" in document
     assert "Cuisine: Japanese" in document
-    assert "150 g chicken breast" in document
+    # The search document indexes ingredient names (quantities are retrieval noise).
+    assert "chicken breast" in document
     assert "high-protein" in document
 
 

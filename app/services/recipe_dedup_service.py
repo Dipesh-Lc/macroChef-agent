@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 from app.rag.loaders import load_recipes
+from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.utils.ingredient_normalizer import normalize_ingredient
@@ -98,8 +99,8 @@ def title_similarity(left: str, right: str) -> float:
     return SequenceMatcher(None, normalize_title(left), normalize_title(right)).ratio()
 
 
-def normalized_ingredient_set(ingredients: list[str]) -> set[str]:
-    normalized = [normalize_ingredient(item).lower() for item in ingredients]
+def normalized_ingredient_set(ingredients: list[Ingredient]) -> set[str]:
+    normalized = [normalize_ingredient(item.name).lower() for item in ingredients]
     return {item for item in normalized if item}
 
 

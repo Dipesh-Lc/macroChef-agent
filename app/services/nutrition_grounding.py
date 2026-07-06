@@ -6,41 +6,9 @@ from app.schemas.nutrition import (
     RecipeNutrition,
 )
 from app.services.usda_client import UsdaClient
-
-# Interim mass-only conversion. Item 1.2 (quantity/unit data model) delivers the
-# authoritative unit-conversion layer covering volume and piece units with
-# density handling; this table is a deliberately narrow stand-in so grounding
-# can ship now. Unknown/volume/piece units resolve to `None` (ungrounded)
-# rather than guessing a conversion.
-_MASS_TO_GRAMS: dict[str, float] = {
-    "g": 1.0,
-    "gram": 1.0,
-    "grams": 1.0,
-    "kg": 1000.0,
-    "kilogram": 1000.0,
-    "kilograms": 1000.0,
-    "mg": 0.001,
-    "milligram": 0.001,
-    "milligrams": 0.001,
-    "oz": 28.3495,
-    "ounce": 28.3495,
-    "ounces": 28.3495,
-    "lb": 453.592,
-    "lbs": 453.592,
-    "pound": 453.592,
-    "pounds": 453.592,
-}
+from app.utils.unit_converter import to_grams
 
 _MACRO_FIELDS = ("calories", "protein_g", "carbs_g", "fat_g", "fiber_g")
-
-
-def _mass_to_grams(amount: float | None, unit: str | None) -> float | None:
-    if amount is None or unit is None:
-        return None
-    factor = _MASS_TO_GRAMS.get(unit.strip().lower().rstrip("."))
-    if factor is None:
-        return None
-    return amount * factor
 
 
 def _scale_macros(macros: FoodMacros, grams: float) -> FoodMacros:
@@ -56,8 +24,9 @@ def compute_recipe_macros(
 ) -> RecipeNutrition:
     """Compute a recipe's macros from its quantity-aware ingredient list.
 
-    Each ingredient is converted to grams (mass units only, for now) and
-    looked up in USDA FDC via `client`. Ingredients that can't be converted
+    Each ingredient is converted to grams (mass directly, volume via density,
+    counts via per-piece weight — see `unit_converter`) and looked up in USDA
+    FDC via `client`. Ingredients that can't be converted
     or matched are recorded in `ungrounded_ingredients` and excluded from the
     totals — they are never silently treated as contributing zero, and the
     returned `status` makes the coverage gap explicit to callers. See
@@ -71,7 +40,7 @@ def compute_recipe_macros(
     grounded_count = 0
 
     for ingredient in ingredients:
-        grams = _mass_to_grams(ingredient.amount, ingredient.unit)
+        grams = to_grams(ingredient.amount, ingredient.unit, name=ingredient.name)
         match = None
         macros = None
         grounded = False

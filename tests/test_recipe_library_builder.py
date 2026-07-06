@@ -157,6 +157,13 @@ def test_generation_service_sanitizes_common_llm_shape_mismatches() -> None:
     candidate = RecipeCandidate.model_validate(payload)
 
     assert candidate.home_cookable_score == 1.0
-    assert candidate.ingredients[0] == "150 g chicken breast"
+    # Structured ingredient dicts keep amount/unit instead of being flattened to strings.
+    assert candidate.ingredients[0].name == "chicken breast"
+    assert candidate.ingredients[0].amount == 150
+    assert candidate.ingredients[0].unit == "g"
+    # Quantified strings are parsed into the same structured shape.
+    assert candidate.ingredients[1].name == "cooked rice"
+    assert candidate.ingredients[1].amount == 120
+    assert candidate.ingredients[1].unit == "g"
     assert candidate.instructions == ["Cook rice.", "Sear chicken."]
     assert candidate.calories == 590

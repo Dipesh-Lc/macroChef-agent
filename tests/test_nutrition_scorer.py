@@ -51,6 +51,21 @@ def test_calculates_pantry_match_correctly() -> None:
     assert missing == ["spinach", "bell pepper"]
 
 
+def test_pantry_used_missing_amount_aware() -> None:
+    # Enough chicken, but short on rice -> rice counts as missing despite being present.
+    recipe = _recipe(ingredients=["500 g chicken breast", "300 g rice"])
+    inventory = [
+        ConfirmedIngredient(name="chicken breast", amount=600, unit="g"),
+        ConfirmedIngredient(name="rice", amount=100, unit="g"),
+    ]
+
+    score, used, missing = pantry_match_score(recipe, inventory)
+
+    assert used == ["chicken breast"]
+    assert missing == ["rice"]
+    assert score == 0.5
+
+
 def test_score_recipe_returns_breakdown() -> None:
     recipe = _recipe()
     inventory = [ConfirmedIngredient(name="chicken breast"), ConfirmedIngredient(name="rice")]

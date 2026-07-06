@@ -70,9 +70,9 @@ def normalization_node(state: RecipeLibraryBuilderState | dict):
                 "meal_type": candidate.meal_type.lower() if candidate.meal_type else None,
                 "difficulty": candidate.difficulty.lower() if candidate.difficulty else None,
                 "ingredients": [
-                    " ".join(item.split())
+                    item.model_copy(update={"name": " ".join(item.name.split())})
                     for item in candidate.ingredients
-                    if item.strip()
+                    if item.name.strip()
                 ],
                 "diet_tags": sorted({tag.strip().lower() for tag in candidate.diet_tags if tag}),
                 "allergens": sorted({tag.strip().lower() for tag in candidate.allergens if tag}),
