@@ -2,11 +2,103 @@
 
 ![CI](https://github.com/Dipesh-Lc/macroChef-agent/actions/workflows/ci.yml/badge.svg)
 
-MacroChef Agent is a multimodal, constraint-aware meal planning system that turns a fridge photo or typed pantry list into safe, macro-aware recipe recommendations. It combines ChromaDB recipe RAG, a LangGraph workflow, deterministic allergy and nutrition logic, and a Streamlit product UI.
+**A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
-> Runs with zero API keys (mock mode) — clone and try in two commands.
+> **The LLM never enforces your allergies and never computes your macros.
+> Deterministic code does.** The model is used only for non-safety-critical work —
+> parsing messy inventory text, ranking, and phrasing explanations. Anything that
+> could harm you if it were wrong is handled by plain, testable Python.
 
-## Workflow
+Generic recipe chatbots are confident and wrong about hard constraints — they'll
+happily suggest a peanut-containing "satay" to someone who told them they have a
+peanut allergy. MacroChef treats meal planning as a structured decision workflow
+where safety and nutrition are **not** the model's job.
+
+> Runs with **zero API keys** in mock mode — clone and try in two commands.
+
+---
+
+## Why this is different
+
+| Concern | Who decides in a generic LLM chatbot | Who decides in MacroChef |
+|---|---|---|
+| Is this recipe safe for my allergy? | The LLM (fuzzy, can hallucinate) | **Deterministic code** — `app/services/constraint_engine.py` |
+| What are the macros? | The LLM / recipe self-reported tags | **Deterministic scorer** — `app/services/nutrition_scorer.py` |
+| Which recipes match my pantry & diet? | The LLM | **Deterministic filter + scorer** |
+| Parse "chikcen brest, spinch" into ingredients | — | LLM / fuzzy normalizer (safe to be wrong; user confirms) |
+| Rank and explain the shortlist | — | LLM (phrasing only) |
+
+Allergies, disliked ingredients, diet type, and maximum cook time are enforced as
+**hard constraints** in `constraint_engine.py`. Macro fit is computed
+deterministically by the scorer. The LLM cannot override a safety decision — by
+construction, not by prompt. Macro targets are *soft* constraints used only to
+rank, never to include or exclude on safety grounds.
+
+> A reproducible adversarial safety benchmark (allergy-contradiction traps, hidden
+> allergens like "satay sauce" → peanut, diet-type traps) is planned for a future
+> release to publish a violation-rate comparison vs. direct LLM prompting. See
+> `docs/ROADMAP.md`.
+
+---
+
+## Quickstart
+
+Requires Python 3.11+.
+
+```bash
+# 1. Clone
+git clone https://github.com/Dipesh-Lc/macroChef-agent.git
+cd macroChef-agent
+
+# 2. Install
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# 3. Configure (mock mode — no API keys needed)
+cp .env.example .env
+
+# 4. Build the recipe index (bundled 25-recipe corpus)
+python scripts/ingest_recipes.py
+
+# 5. Run the API and the UI (two terminals)
+uvicorn app.main:app --reload --port 8000
+streamlit run frontend/streamlit_app.py
+```
+
+Then open **http://localhost:8501**.
+
+The default `.env` uses mock/local mode and requires no external API keys.
+
+### One-command local run (Docker)
+
+If you have Docker, skip the manual steps — this starts both the API and the
+Streamlit UI:
+
+```bash
+docker compose up --build
+```
+
+- API: http://localhost:8000  (health check: `GET /health`)
+- UI:  http://localhost:8501
+
+---
+
+## Screenshots & demo
+
+> **TODO:** Add screenshots to `assets/screenshots/` and a demo clip, then replace the placeholders below.
+
+- **TODO** `assets/screenshots/recommendations.png` — recommendation cards with scores and shopping list
+- **TODO** `assets/screenshots/inventory.png` — inventory extraction / confirmation view
+- **TODO** `assets/screenshots/library.png` — Recipe Library Builder
+- **TODO** demo GIF/clip (60–90s) — end-to-end: pantry in → safe, macro-aware plan out
+
+---
+
+## How it works
+
+MacroChef is a LangGraph workflow. Each node has structured Pydantic v2
+inputs/outputs, and the safety-critical nodes are pure deterministic code.
 
 ```mermaid
 flowchart TD
@@ -23,25 +115,11 @@ flowchart TD
     J --> END([END])
 ```
 
-The graph handles conditional paths for empty inventory, low-confidence vision items, retrieval fallback when ChromaDB is unavailable, and no valid recipes surviving the safety filter.
+The graph handles conditional paths for empty inventory, low-confidence vision
+items, retrieval fallback when ChromaDB is unavailable, and no valid recipes
+surviving the safety filter.
 
-## Problem Statement
-Generic recipe chatbots are weak at hard constraints. MacroChef treats meal planning as a structured decision workflow: extract inventory, retrieve feasible recipes, enforce allergies and dietary rules, score nutrition fit, rank meals, explain tradeoffs, and build a shopping list.
-
-## Key Features
-
-- Text inventory parsing, optional fuzzy ingredient normalization, and mock vision extraction that works without API keys
-- ChromaDB RAG over a bundled 25-recipe JSONL corpus
-- LangGraph nodes for intake, inventory confirmation, constraints, retrieval, safety filtering, scoring, ranking, explanation, procurement, and memory
-- Separate Recipe Library Builder Agent for discovering, validating, saving, and indexing personal recipes
-- Deterministic hard constraints for allergies, dislikes, diet type, and cook time
-- Deterministic macro scoring from recipe metadata
-- Structured Pydantic v2 API contracts
-- SQLite user feedback memory
-- Streamlit frontend with recipe cards, scores, shopping list, and debug trace
-- Pytest coverage for parsing, constraints, scoring, retrieval, and graph flow
-
-## Architecture
+### Architecture
 
 ```text
 Streamlit UI
@@ -51,251 +129,109 @@ FastAPI routes
    |
    v
 LangGraph workflow
-   |--> inventory parser / mock vision
+   |--> inventory parser (+ optional fuzzy normalization)
    |--> inventory confirmation
    |--> constraint builder
    |--> ChromaDB recipe retriever + keyword fallback
-   |--> deterministic safety filter
-   |--> nutrition and pantry scoring
-   |--> ranking and explanation
+   |--> deterministic safety filter        <-- LLM never touches this
+   |--> deterministic nutrition & pantry scoring  <-- LLM never touches this
+   |--> ranking and explanation (LLM phrasing only)
    |--> shopping list generation
    |--> SQLite memory
 ```
 
-## Agent Workflow
+### RAG design
 
-```text
-START
-  -> intake_node
-  -> inventory_confirmation_node
-  -> constraint_builder_node
-  -> recipe_retriever_node
-  -> safety_filter_node
-  -> nutrition_scoring_node
-  -> meal_ranking_node
-  -> chef_explanation_node
-  -> procurement_node
-  -> memory_update_node
-  -> END
-```
+`scripts/ingest_recipes.py` loads `data/processed/sample_recipes.jsonl`, builds a
+rich recipe document per recipe, stores recipe metadata, and persists the Chroma
+collection in `data/chroma`. Local sentence-transformers embeddings are attempted
+first; a deterministic hashing-embedding fallback keeps offline demos runnable.
 
-Conditional handling:
+---
 
-- Empty inventory returns a friendly error.
-- No valid recipes after filtering triggers fallback retrieval over all sample recipes.
-- Low-confidence vision items are marked for confirmation.
-- Chroma failures fall back to keyword search.
+## Features
 
-## RAG Design
+- Text inventory parsing with optional fuzzy ingredient normalization
+  (`chikcen brest` → `chicken breast` when `rapidfuzz` is installed)
+- ChromaDB RAG over a bundled 25-recipe JSONL corpus
+- LangGraph nodes for intake, inventory confirmation, constraints, retrieval,
+  safety filtering, scoring, ranking, explanation, procurement, and memory
+- **Deterministic** hard constraints for allergies, dislikes, diet type, and cook time
+- **Deterministic** macro scoring
+- Separate Recipe Library Builder Agent for discovering, validating, saving, and
+  indexing personal recipes
+- Structured Pydantic v2 API contracts
+- SQLite user-feedback memory
+- Streamlit frontend with recipe cards, scores, shopping list, and debug trace
+- Pytest coverage for parsing, constraints, scoring, retrieval, and graph flow
 
-`scripts/ingest_recipes.py` loads `data/processed/sample_recipes.jsonl`, creates a rich recipe document, stores recipe metadata, and persists the Chroma collection in `data/chroma`. Local sentence-transformers embeddings are attempted first; a deterministic hashing embedding fallback keeps offline demos runnable.
+### Optional / experimental: fridge-photo (vision) inventory
+
+The frontend can accept an optional fridge/pantry image alongside typed inventory
+and merge both into one editable table. **By default this is deterministic mock
+extraction, not a real image recognizer** — it returns a fixed ingredient list so
+the app runs offline with no API keys. Real hosted vision providers can be wired in
+(see *Optional model providers* below), but vision is intentionally isolated: as
+with everything else, it never influences allergy or nutrition decisions, and
+detected items are surfaced for user confirmation (anything below a confidence
+threshold is flagged `needs_confirmation`). Treat it as experimental.
+
+---
 
 ## Recipe Library Builder Agent
 
-The Recipe Library Builder is a separate acquisition workflow. The meal planner answers, "Given my pantry and constraints, what should I cook?" The library builder answers, "Help me build a personalized recipe database."
+The Recipe Library Builder is a separate acquisition workflow. The meal planner
+answers "Given my pantry and constraints, what should I cook?" The library builder
+answers "Help me build a personalized recipe database."
 
 ```text
 Streamlit Library Page
-  -> POST /library/discover
-  -> discovery_node
-  -> normalization_node
-  -> recipe_validation_node
-  -> deduplication_node
-  -> candidate_presentation_node
-  -> POST /library/save
-  -> SQLite structured recipe store
-  -> ChromaDB recipe index
+  -> POST /library/discover  -> discovery_node -> normalization_node
+  -> recipe_validation_node  -> deduplication_node -> candidate_presentation_node
+  -> POST /library/save      -> SQLite structured recipe store -> ChromaDB index
 ```
 
-Users choose cuisines, meal type, diet type, cook time, difficulty, allergy exclusions, and preferences such as "minimal equipment" or "no deep frying." Candidate recipes are validated and deduplicated before they can be saved. Saved recipes are stored with `owner_user_id`, `is_user_saved`, source metadata, placeholder image URLs, estimated macros, and allergen tags.
-
-The original recommendation workflow now retrieves from both the base recipe corpus and the current user's saved recipe library. Private recipes are filtered by `user_id`, so one user's saved recipes are not returned for another user.
+Users choose cuisines, meal type, diet type, cook time, difficulty, allergy
+exclusions, and preferences such as "minimal equipment" or "no deep frying."
+Candidate recipes are validated and deduplicated before they can be saved. Saved
+recipes store `owner_user_id`, `is_user_saved`, source metadata, placeholder image
+URLs, estimated macros, and allergen tags. The recommendation workflow retrieves
+from both the base corpus and the current user's saved library; private recipes
+are filtered by `user_id` so one user's recipes are never returned for another.
 
 Recipe Library API endpoints:
 
-- `POST /library/discover`: generate or retrieve candidate recipes
-- `POST /library/save`: save selected validated candidates
-- `GET /library/{user_id}`: list saved recipes
-- `DELETE /library/{user_id}/{recipe_id}`: deactivate a saved recipe
-- `POST /library/reindex`: rebuild Chroma from base and user recipes
+- `POST /library/discover` — generate or retrieve candidate recipes
+- `POST /library/save` — save selected validated candidates
+- `GET /library/{user_id}` — list saved recipes
+- `DELETE /library/{user_id}/{recipe_id}` — deactivate a saved recipe
+- `POST /library/reindex` — rebuild Chroma from base and user recipes
 
-Example discovery request:
+---
 
-```json
-{
-  "user_id": "demo_user",
-  "cuisines": ["Japanese", "Indian"],
-  "meal_type": "dinner",
-  "diet_type": "high-protein",
-  "max_cook_time_min": 35,
-  "difficulty": "easy",
-  "count": 10,
-  "home_cookable": true,
-  "excluded_ingredients": [],
-  "allergies": ["peanut"],
-  "extra_preferences": "minimal equipment, no deep frying",
-  "source_mode": "mock"
-}
-```
+## Optional model providers
 
-Example save request:
-
-```json
-{
-  "user_id": "demo_user",
-  "selected_candidates": [
-    {
-      "candidate_id": "mock_example",
-      "title": "Teriyaki Chicken Rice Bowl",
-      "cuisine": "Japanese",
-      "meal_type": "dinner",
-      "description": "A simple teriyaki-style chicken bowl.",
-      "ingredients": ["150 g chicken breast", "150 g cooked rice", "90 g broccoli"],
-      "instructions": ["Cook rice.", "Sear chicken.", "Serve with vegetables."],
-      "cook_time_min": 25,
-      "difficulty": "easy",
-      "servings": 1,
-      "calories": 590,
-      "protein_g": 48,
-      "carbs_g": 70,
-      "fat_g": 12,
-      "fiber_g": 6,
-      "allergens": ["soy"],
-      "diet_tags": ["high-protein", "dairy-free"],
-      "equipment": ["skillet"],
-      "source_type": "mock"
-    }
-  ]
-}
-```
-
-## Constraint Engine
-
-Allergies, disliked ingredients, diet type, and maximum cook time are hard constraints in `app/services/constraint_engine.py`. LLMs never enforce allergies and never calculate nutrition. Macro targets are soft constraints used only by the scorer.
-
-## Multimodal Inventory Extraction
-
-Typed inventory is parsed by comma, newline, or semicolon. The frontend also accepts an optional fridge or pantry image at the same time, then merges text and vision observations into one editable inventory table. Detected ingredients can be included or excluded with checkboxes, and missed items can be added manually before recommendation. If `rapidfuzz` is installed, common typos like `chikcen brest` can be normalized to known pantry names. Image extraction uses deterministic mock output by default:
-
-- chicken breast
-- spinach
-- eggs
-- bell pepper
-- Greek yogurt
-- rice
-
-Each vision observation includes a confidence score and `needs_confirmation` if confidence is below `0.75`.
-
-## Evaluation Metrics
-
-- Allergy violation rate
-- Pantry utilization rate
-- Macro deviation
-- Missing ingredient count
-- Recommendation validity rate
-
-Run:
-
-```bash
-python scripts/evaluate_demo_set.py
-```
-
-## Tech Stack
-
-- Backend: FastAPI, Pydantic v2, Uvicorn, SQLAlchemy, SQLite
-- Frontend: Streamlit, Requests, Pandas
-- Agent: LangGraph
-- RAG: ChromaDB, sentence-transformers, deterministic embedding fallback
-- Optional AI providers: Gemini, OpenAI, Claude, and local Ollama
-- Testing: Pytest
-- Packaging: Docker, docker-compose
-
-## Setup
-
-Using `venv`:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Using Conda:
-
-```bash
-conda create -n macrochef-agent python=3.11 -y
-conda activate macrochef-agent
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-The default `.env.example` uses mock/local mode and requires no external API keys.
-
-## Optional Model Provider Setup
-
-Mock mode remains the default. If you provide API keys or run Ollama locally, MacroChef can use hosted or local models for image inventory extraction and recommendation explanations.
-
-Install or update dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-If you already installed the project before provider support was added, this smaller install is enough for Gemini:
-
-Create `.env` if you have not already:
-
-```bash
-cp .env.example .env
-```
+Mock mode is the default and needs no keys. If you provide API keys or run Ollama
+locally, MacroChef can use hosted or local models for the fuzzy work only (image
+inventory extraction and explanation phrasing) — never for safety or nutrition.
 
 Supported provider names:
 
-- `mock`: deterministic demo mode, no API key
-- `gemini` or `google`: Gemini API via `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-- `openai`: OpenAI API via `OPENAI_API_KEY`
-- `anthropic` or `claude`: Claude API via `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`
-- `ollama` or `local`: local Ollama server via `OLLAMA_BASE_URL`
+- `mock` — deterministic demo mode, no API key
+- `gemini` / `google` — Gemini API via `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+- `openai` — OpenAI API via `OPENAI_API_KEY`
+- `anthropic` / `claude` — Claude API via `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`
+- `ollama` / `local` — local Ollama server via `OLLAMA_BASE_URL`
 
-`MODEL_PROVIDER` is the primary provider. `MODEL_PROVIDER_FALLBACKS` is an ordered comma-separated list. If the primary provider is missing credentials, unavailable, or returns invalid output, MacroChef tries each fallback and finally uses `mock` so the app remains runnable.
+`MODEL_PROVIDER` is the primary provider; `MODEL_PROVIDER_FALLBACKS` is an ordered
+comma-separated list. If the primary provider is missing credentials, unavailable,
+or returns invalid output, MacroChef tries each fallback and finally falls back to
+`mock`, so the app always stays runnable. See `.env.example` for every supported
+key.
 
+---
 
-## Ingest Recipes
-
-```bash
-python scripts/ingest_recipes.py
-```
-
-## Run API
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-Health check:
-
-```bash
-curl http://localhost:8000/health
-```
-
-## Run Frontend
-
-```bash
-streamlit run frontend/streamlit_app.py
-```
-
-Open `http://localhost:8501`.
-
-## Run Tests
-
-```bash
-pytest
-```
-
-## Example Request
-
-Bash or macOS/Linux shell:
+## Example request
 
 ```bash
 curl -X POST http://localhost:8000/recipes/recommend \
@@ -311,11 +247,7 @@ curl -X POST http://localhost:8000/recipes/recommend \
       "diet_type": null,
       "preferred_cuisines": ["Mediterranean"],
       "macro_targets": {
-        "calories": 600,
-        "protein_g": 45,
-        "carbs_g": 60,
-        "fat_g": 20,
-        "fiber_g": 8
+        "calories": 600, "protein_g": 45, "carbs_g": 60, "fat_g": 20, "fiber_g": 8
       },
       "max_cook_time_min": 35
     },
@@ -324,7 +256,8 @@ curl -X POST http://localhost:8000/recipes/recommend \
   }'
 ```
 
-Windows PowerShell:
+<details>
+<summary>Windows PowerShell version</summary>
 
 ```powershell
 $body = @'
@@ -338,13 +271,7 @@ $body = @'
     "disliked_ingredients": [],
     "diet_type": null,
     "preferred_cuisines": ["Mediterranean"],
-    "macro_targets": {
-      "calories": 600,
-      "protein_g": 45,
-      "carbs_g": 60,
-      "fat_g": 20,
-      "fiber_g": 8
-    },
+    "macro_targets": { "calories": 600, "protein_g": 45, "carbs_g": 60, "fat_g": 20, "fiber_g": 8 },
     "max_cook_time_min": 35
   },
   "cuisine_preference": "Mediterranean",
@@ -352,14 +279,12 @@ $body = @'
 }
 '@
 
-Invoke-RestMethod `
-  -Uri "http://localhost:8000/recipes/recommend" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $body
+Invoke-RestMethod -Uri "http://localhost:8000/recipes/recommend" -Method Post -ContentType "application/json" -Body $body
 ```
 
-## Example Response Shape
+</details>
+
+### Example response shape
 
 ```json
 {
@@ -378,45 +303,55 @@ Invoke-RestMethod `
   ],
   "shopping_list": [{"name": "bell pepper", "reason": "Needed for ..."}],
   "rejected_recipes": [],
-  "debug_trace": [
-    "intake_node: extracted 3 ingredients.",
-    "inventory_confirmation_node: auto-confirmed 3 ingredients."
-  ]
+  "debug_trace": ["intake_node: extracted 3 ingredients.", "..."]
 }
 ```
 
-## Screenshots
+---
 
-> TODO: screenshots coming soon — add the images below to `assets/screenshots/`.
+## Evaluation
 
-- TODO `assets/screenshots/inventory.png` — inventory extraction view
-- TODO `assets/screenshots/recommendations.png` — recommendation cards
-- TODO `assets/screenshots/library.png` — recipe library builder
+Deterministic metrics computed over a demo set:
+
+- Allergy violation rate (must be 0)
+- Pantry utilization rate
+- Macro deviation
+- Missing ingredient count
+- Recommendation validity rate
+
+```bash
+python scripts/evaluate_demo_set.py
+```
+
+## Tests
+
+```bash
+pytest
+```
+
+## Tech stack
+
+- Backend: FastAPI, Pydantic v2, Uvicorn, SQLAlchemy, SQLite
+- Frontend: Streamlit, Requests, Pandas
+- Agent: LangGraph
+- RAG: ChromaDB, sentence-transformers, deterministic embedding fallback
+- Optional AI providers: Gemini, OpenAI, Claude, local Ollama
+- Testing: Pytest — Packaging: Docker, docker-compose
 
 ## Limitations
 
 - Not medical advice.
-- Nutrition estimates depend on recipe metadata.
-- Mock vision is deterministic and not a real image recognizer.
-- Allergy safety depends on accurate recipe metadata and user input.
-- Optional Gemini/OpenAI/Claude/Ollama integrations are isolated and disabled by default.
+- Nutrition estimates currently depend on recipe metadata (grounding in a real
+  nutrition database is a planned roadmap item).
+- The bundled recipe dataset is intentionally small for an MVP.
+- Vision extraction is deterministic mock by default and is not a real image
+  recognizer.
+- Allergy safety depends on accurate recipe metadata and accurate user input.
+- Optional hosted/local model integrations are isolated and disabled by default,
+  and are never treated as allergy or nutrition authorities.
 
-## Future Improvements
+## Roadmap
 
-- Real provider-specific vision extraction with structured output validation
-- Per-serving scaling and household preference profiles
-- More granular ingredient quantities and unit conversion
-- Recipe import pipeline from licensed public datasets
-- Offline packaged embedding model for fully local semantic retrieval
-- Human-in-the-loop confirmation before any high-risk allergy recommendation
-
-## TL;DR
-
-"MacroChef Agent is a multimodal, constraint-aware meal planning system that turns 
-fridge photos or typed pantry lists into safe, macro-aware recipe recommendations. 
-It uses a vision model to extract available ingredients, ChromaDB-based RAG to retrieve 
-relevant recipes, deterministic validation to enforce allergies and dietary rules, and 
-a LangGraph workflow to orchestrate inventory extraction, recipe retrieval, nutrition 
-scoring, shopping-list generation, and user preference memory. Unlike a generic recipe 
-chatbot, MacroChef Agent explains why each meal is feasible, safe, and aligned with 
-the user's goals."
+MacroChef is being upgraded in phases toward a grounded nutrition database,
+quantity/unit-aware inventory, a published safety benchmark, and a weekly meal
+planner. See `docs/ROADMAP.md`.
