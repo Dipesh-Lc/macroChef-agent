@@ -147,6 +147,13 @@ rich recipe document per recipe, stores recipe metadata, and persists the Chroma
 collection in `data/chroma`. Local sentence-transformers embeddings are attempted
 first; a deterministic hashing-embedding fallback keeps offline demos runnable.
 
+Beyond the 25 hand-curated seed recipes, the corpus also includes recipes
+imported via `scripts/import_corpus.py` into `data/processed/imported_recipes.jsonl`
+(kept separate from the seed file, unioned at index time). Recipe data derived
+from a public Kaggle dataset sourced from Food.com
+([irkaal/foodcom-recipes-and-reviews](https://www.kaggle.com/datasets/irkaal/foodcom-recipes-and-reviews),
+CC0).
+
 ---
 
 ## Features

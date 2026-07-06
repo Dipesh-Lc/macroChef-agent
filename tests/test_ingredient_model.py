@@ -73,6 +73,23 @@ def test_candidate_to_recipe_drops_empty_ingredients() -> None:
     assert [item.name for item in recipe.ingredients] == ["chicken breast"]
 
 
+def test_candidate_to_recipe_dedupes_allergens() -> None:
+    from app.schemas.recipe_candidate import RecipeCandidate
+
+    # "egg" and "eggs" both depluralize to the same normalized string --
+    # derive_allergen_labels deliberately returns both as distinct keys
+    # (app/services/constraint_engine.py), so to_recipe must dedupe here.
+    candidate = RecipeCandidate(
+        candidate_id="c",
+        title="Cake",
+        ingredients=["flour", "eggs", "sugar"],
+        allergens=["egg", "eggs"],
+        source_type="mock",
+    )
+    recipe = candidate.to_recipe("u1")
+    assert recipe.allergens == ["egg"]
+
+
 def test_loader_drops_empty_ingredients(tmp_path) -> None:
     import json
 

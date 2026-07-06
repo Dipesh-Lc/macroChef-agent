@@ -1,9 +1,8 @@
 from app.data.recipe_library_repository import RecipeLibraryRepository
-from app.rag.chroma_client import get_chroma_collection
-from app.rag.loaders import load_recipes
+from app.rag.chroma_client import get_chroma_collection, reset_chroma_collection
+from app.rag.loaders import load_corpus
 from app.schemas.recipe import Recipe
-from app.services.constraint_engine import ALLERGEN_ALIASES
-from app.utils.ingredient_normalizer import normalize_ingredient
+from app.services.constraint_engine import derive_allergen_labels
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -92,23 +91,29 @@ class RecipeIndexingService:
             return 0
 
     def rebuild_index(self, include_base: bool = True, include_user: bool = True) -> int:
+        return self.index_recipes(self._collect_recipes(include_base, include_user))
+
+    def rebuild_index_clean(self, include_base: bool = True, include_user: bool = True) -> int:
+        """Drop-and-recreate the Chroma collection, then index from scratch.
+
+        `index_recipes` uses `upsert`, which never prunes ids that are no
+        longer present in the source (e.g. a corpus re-import with a smaller
+        or corrected dataset). This variant guarantees no orphaned embeddings
+        survive a re-run.
+        """
+        recipes = self._collect_recipes(include_base, include_user)
+        reset_chroma_collection()
+        return self.index_recipes(recipes)
+
+    def _collect_recipes(self, include_base: bool, include_user: bool) -> list[Recipe]:
         recipes: list[Recipe] = []
         if include_base:
-            recipes.extend(load_recipes())
+            recipes.extend(load_corpus())
         if include_user:
             recipes.extend(self.repository.list_all_active_user_recipes())
-        return self.index_recipes(recipes)
+        return recipes
 
 
 def _recipe_allergen_terms(recipe: Recipe) -> set[str]:
-    terms = {
-        normalize_ingredient(item).lower()
-        for item in [*(ingredient.name for ingredient in recipe.ingredients), *recipe.allergens]
-        if item
-    }
-    expanded = set(terms)
-    for allergen, aliases in ALLERGEN_ALIASES.items():
-        alias_terms = {normalize_ingredient(item).lower() for item in aliases}
-        if allergen in terms or terms.intersection(alias_terms):
-            expanded.add(allergen)
-    return expanded
+    names = [*(ingredient.name for ingredient in recipe.ingredients), *recipe.allergens]
+    return set(derive_allergen_labels(names))

@@ -1,0 +1,7 @@
+RecipeId,Name,CookTime,RecipeServings,RecipeCategory,RecipeIngredientParts,RecipeIngredientQuantities,RecipeInstructions,Calories,ProteinContent,CarbohydrateContent,FatContent,FiberContent
+1001,Chicken Rice Bowl,PT30M,2,dinner,"c(""chicken breast"", ""rice"", ""salt"")","c(""1"", ""2"", ""1"")","c(""Cook chicken."", ""Cook rice."", ""Combine and serve."")",450,35,40,10,3
+1002,Peanut Noodles,PT20M,2,dinner,"c(""peanut butter"", ""noodles"", ""soy sauce"")","c(""2"", ""8"", ""1"")","c(""Boil noodles."", ""Mix sauce."", ""Combine."")",520,18,60,20,4
+1003,,PT10M,1,snack,"c(""mystery meat"", ""filler"", ""unknown"")","c(""1"", ""1"", ""1"")","c(""Do something."", ""Serve."")",100,5,5,5,1
+1004,Quick Snack,PT5M,1,snack,"c(""banana"", ""peanut butter"", ""honey"")","c(""1"", ""1"", ""1"")","c(""Mix everything."")",250,6,35,10,3
+1005,Chicken Rice Bowl,PT30M,2,dinner,"c(""chicken breast"", ""rice"", ""salt"")","c(""1"", ""2"", ""1"")","c(""Cook chicken."", ""Cook rice."", ""Combine and serve."")",450,35,40,10,3
+1006,Shrimp Salad,PT15M,2,lunch,"c(""shrimp"", """", ""lettuce"", ""lemon"")","c(""1"", ""1"", ""2"", ""1"")","c(""Cook shrimp."", ""Toss salad."")",300,25,10,8,3

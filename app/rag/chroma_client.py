@@ -29,6 +29,30 @@ def get_chroma_collection():
     )
 
 
+def reset_chroma_collection():
+    """Delete and recreate the collection so a rebuild starts from empty.
+
+    `collection.upsert` (used by normal indexing) never prunes ids that are no
+    longer present in the source data, so a corpus re-import with a smaller or
+    corrected dataset would otherwise leave orphaned embeddings behind. Callers
+    that want a true clean rebuild should call this before re-indexing.
+    """
+    settings = get_settings()
+    try:
+        import chromadb
+    except Exception as exc:  # pragma: no cover - only when dependency missing
+        raise ChromaUnavailableError("chromadb is not installed") from exc
+
+    Path(settings.chroma_path).mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=settings.chroma_path)
+    try:
+        client.delete_collection(name=settings.chroma_collection_name)
+    except Exception:
+        # Collection may not exist yet on a fresh store; that's fine.
+        pass
+    return get_chroma_collection()
+
+
 def collection_count() -> int:
     try:
         collection = get_chroma_collection()
