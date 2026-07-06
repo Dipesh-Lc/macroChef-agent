@@ -37,9 +37,31 @@ class RecipeCandidate(BaseModel):
     home_cookable_score: float = Field(default=1.0, ge=0, le=1)
     validation_warnings: list[str] = Field(default_factory=list)
 
-    def to_recipe(self, user_id: str) -> Recipe:
-        stable_id = uuid5(NAMESPACE_URL, f"macrochef:{user_id}:{self.title}:{self.cuisine}")
-        recipe_id = f"user_{stable_id.hex[:16]}"
+    def to_recipe(
+        self,
+        user_id: str,
+        *,
+        recipe_id: str | None = None,
+        is_user_saved: bool = True,
+        owner_user_id: str | None = None,
+    ) -> Recipe:
+        """Build a corpus `Recipe` from this candidate.
+
+        `user_id` is always used to derive the default stable id (so existing
+        callers are unaffected); pass `recipe_id` to override it (e.g. a
+        deterministic import id) and `is_user_saved`/`owner_user_id` to build a
+        non-user-owned corpus recipe (e.g. an imported one) through the same
+        normalization path as user-saved recipes.
+        """
+        if recipe_id is None:
+            stable_id = uuid5(NAMESPACE_URL, f"macrochef:{user_id}:{self.title}:{self.cuisine}")
+            recipe_id = f"user_{stable_id.hex[:16]}"
+        # Preserve prior behavior for existing (user-saved) callers, who never
+        # pass owner_user_id and expect it to default to user_id. Corpus
+        # imports pass is_user_saved=False and rely on owner_user_id staying
+        # None even though it wasn't explicitly set.
+        if owner_user_id is None and is_user_saved:
+            owner_user_id = user_id
         return Recipe(
             recipe_id=recipe_id,
             title=self.title,
@@ -50,7 +72,14 @@ class RecipeCandidate(BaseModel):
             # filtering here.
             ingredients=list(self.ingredients),
             instructions=[item.strip() for item in self.instructions if item.strip()],
-            allergens=[normalize_ingredient(item).lower() for item in self.allergens if item],
+            # dict.fromkeys dedupes while preserving order: normalize_ingredient
+            # can collapse distinct raw labels to the same string (e.g. "egg"
+            # and "eggs" both depluralize to "egg"), which derive_allergen_labels
+            # deliberately doesn't pre-collapse (see its docstring) -- dedupe
+            # here instead, at the display/storage boundary.
+            allergens=list(
+                dict.fromkeys(normalize_ingredient(item).lower() for item in self.allergens if item)
+            ),
             diet_tags=[item.strip().lower() for item in self.diet_tags if item.strip()],
             cook_time_min=self.cook_time_min,
             calories=self.calories,
@@ -67,7 +96,7 @@ class RecipeCandidate(BaseModel):
             source_type=self.source_type,
             source_name=self.source_name,
             source_url=self.source_url,
-            owner_user_id=user_id,
-            is_user_saved=True,
+            owner_user_id=owner_user_id,
+            is_user_saved=is_user_saved,
             is_active=True,
         )

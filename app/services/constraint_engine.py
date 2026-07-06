@@ -174,6 +174,34 @@ def _recipe_safety_terms(recipe: Recipe) -> set[str]:
     return _normalized_terms([*(item.name for item in recipe.ingredients), *recipe.allergens])
 
 
+def derive_allergen_labels(ingredient_names: list[str]) -> list[str]:
+    """Deterministically derive which ALLERGEN_ALIASES keys a set of ingredient
+    names implies, using the same membership table as contains_allergen. This
+    is the reverse direction: given ingredients, produce labels (used for
+    imported/candidate recipes' `allergens` field and for Chroma index
+    metadata) rather than given an allergy, test membership. Never trust a
+    source-provided allergen field for imports — derive it here instead.
+
+    Deliberately returns every matching ALLERGEN_ALIASES key as-is (e.g. both
+    "dairy" and "milk" if either fires — their alias sets are identical, so
+    they always co-match) rather than collapsing synonyms to one canonical
+    label per class. Collapsing would require an opinionated synonym->label
+    mapping (e.g. is a "seafood" match reported as "fish"?) that isn't implied
+    by the existing table and would change which labels appear without any
+    test coverage backing that choice — a needless risk in an allergen-safety
+    path. Callers needing metadata-flag membership (recipe_indexing_service)
+    only ever check the 8 canonical keys directly, so this is a drop-in,
+    behavior-preserving replacement for the equivalent inline logic it lifts.
+    """
+    terms = _normalized_terms(ingredient_names)
+    labels: set[str] = set()
+    for allergen_key, aliases in ALLERGEN_ALIASES.items():
+        alias_terms = _normalized_terms(aliases)
+        if allergen_key in terms or terms & alias_terms:
+            labels.add(allergen_key)
+    return sorted(labels)
+
+
 def contains_allergen(recipe: Recipe, allergies: list[str]) -> bool:
     allergy_terms = _expand_allergen_terms(allergies)
     recipe_terms = _recipe_safety_terms(recipe)
