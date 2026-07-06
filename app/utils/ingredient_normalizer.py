@@ -1,11 +1,33 @@
 import re
 
+from app.utils.quantity_parser import KNOWN_UNITS
+
 try:
     from rapidfuzz import fuzz, process, utils as fuzz_utils
 except ImportError:  # pragma: no cover - optional dependency fallback
     fuzz = None
     process = None
     fuzz_utils = None
+
+# Unit alternation built from the shared vocabulary so name cleanup and quantity
+# parsing recognize exactly the same unit tokens (single source, no drift).
+# Longest-first so multi-char tokens win over their prefixes ("grams" before "g").
+_UNIT_ALTERNATION = "|".join(re.escape(unit) for unit in sorted(KNOWN_UNITS, key=len, reverse=True))
+
+# A leading number: integer/decimal ("150", "1.5"), simple fraction ("1/2"), or a
+# single unicode fraction glyph. Used only to recognize a *quantity* prefix.
+_NUMBER = r"(?:\d+(?:[./]\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])"
+
+# Strip a unit token ONLY when it is directly attached to a number, i.e. a real
+# quantity like "150 g", "2l", "1/2 cup". A bare unit *word* that is part of a
+# food name ("pound cake", "cheese slice") is never adjacent to a number, so it
+# is left untouched. This makes the widened KNOWN_UNITS set safe by construction:
+# it can only ever remove a quantity, never a letter or word inside a name.
+_QUANTITY_WITH_UNIT = re.compile(rf"\b{_NUMBER}\s*(?:{_UNIT_ALTERNATION})\b", flags=re.I)
+
+# A standalone number with no unit (e.g. the "3" in "3 eggs"). Kept as its own
+# pass so bare counts are still cleaned off the name.
+_STANDALONE_NUMBER = re.compile(rf"\b{_NUMBER}\b")
 
 
 SYNONYMS = {
@@ -121,9 +143,10 @@ DESCRIPTORS = {
 def cleanup_ingredient_name(name: str) -> str:
     cleaned = name.strip().replace("_", " ").replace("-", " ")
     cleaned = re.sub(r"\([^)]*\)", " ", cleaned)
-    cleaned = re.sub(r"\b\d+(\.\d+)?\b", " ", cleaned)
-    unit_pattern = r"\b(cups?|tbsp|tsp|grams?|g|kg|oz|ounces?|lbs?|pounds?|cloves?)\b"
-    cleaned = re.sub(unit_pattern, " ", cleaned, flags=re.I)
+    # Order matters: remove number+unit quantities *before* stripping bare numbers,
+    # so the number-adjacency that authorizes unit removal is still present.
+    cleaned = _QUANTITY_WITH_UNIT.sub(" ", cleaned)
+    cleaned = _STANDALONE_NUMBER.sub(" ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 

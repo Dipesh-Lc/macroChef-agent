@@ -101,7 +101,7 @@ class RecipeValidationService:
         if request and contains_allergen(recipe, request.allergies):
             errors.append("Contains requested allergy")
         if request and self._contains_blocked_ingredient(
-            recipe.ingredients,
+            [item.name for item in recipe.ingredients],
             request.excluded_ingredients,
         ):
             errors.append("Contains excluded ingredient")

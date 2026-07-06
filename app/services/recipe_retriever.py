@@ -126,7 +126,7 @@ class RecipeRetriever:
         meal_type: str | None,
     ) -> float:
         score = 0.0
-        ingredient_counter = Counter(normalize_ingredient(item) for item in recipe.ingredients)
+        ingredient_counter = Counter(normalize_ingredient(item.name) for item in recipe.ingredients)
         for ingredient in ingredients:
             if any(
                 ingredient_matches(ingredient, recipe_ingredient)

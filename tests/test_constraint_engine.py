@@ -1,3 +1,4 @@
+from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
 from app.services.constraint_engine import validate_recipe
@@ -78,3 +79,19 @@ def test_allows_safe_recipe() -> None:
     result = validate_recipe(recipe, _profile(allergies=["peanut"], max_cook_time_min=30))
 
     assert result.is_valid
+
+
+def test_allergen_detected_regardless_of_quantity() -> None:
+    # Safety must never depend on amount — an allergen in any quantity is a violation.
+    recipe = _recipe(ingredients=["0.1 g peanut butter", "tofu"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["peanut"]))
+
+    assert not result.is_valid
+
+
+def test_structured_ingredient_allergen_rejected() -> None:
+    # Allergen matching reads the structured ingredient's name.
+    recipe = _recipe(ingredients=[Ingredient(name="peanut butter", amount=15, unit="g")])
+    result = validate_recipe(recipe, _profile(allergies=["peanut"]))
+
+    assert not result.is_valid

@@ -168,7 +168,10 @@ def _expand_allergen_terms(allergies: list[str]) -> set[str]:
 
 
 def _recipe_safety_terms(recipe: Recipe) -> set[str]:
-    return _normalized_terms([*recipe.ingredients, *recipe.allergens])
+    # Safety is name-based and quantity-independent: an allergen present in any
+    # amount is a violation, so only ingredient names (never amount/unit) feed
+    # allergen matching.
+    return _normalized_terms([*(item.name for item in recipe.ingredients), *recipe.allergens])
 
 
 def contains_allergen(recipe: Recipe, allergies: list[str]) -> bool:
@@ -184,7 +187,7 @@ def contains_allergen(recipe: Recipe, allergies: list[str]) -> bool:
 
 def contains_disliked_ingredient(recipe: Recipe, disliked_ingredients: list[str]) -> bool:
     for disliked in disliked_ingredients:
-        if any(ingredient_matches(disliked, ingredient) for ingredient in recipe.ingredients):
+        if any(ingredient_matches(disliked, item.name) for item in recipe.ingredients):
             return True
     return False
 
@@ -204,7 +207,11 @@ def violates_diet_type(recipe: Recipe, diet_type: str | None) -> bool:
         return "dairy" in {item.lower() for item in recipe.allergens}
     if requested in DIET_BLOCKERS:
         blockers = DIET_BLOCKERS[requested]
-        return any(ingredient_matches(blocker, ingredient) for blocker in blockers for ingredient in recipe.ingredients)
+        return any(
+            ingredient_matches(blocker, item.name)
+            for blocker in blockers
+            for item in recipe.ingredients
+        )
 
     return False
 

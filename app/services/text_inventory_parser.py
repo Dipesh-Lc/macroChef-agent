@@ -2,6 +2,7 @@ import re
 
 from app.schemas.inventory import InventoryObservation
 from app.utils.ingredient_normalizer import normalize_ingredient
+from app.utils.quantity_parser import parse_quantity_string
 
 
 def parse_typed_inventory(text: str | None) -> list[InventoryObservation]:
@@ -13,14 +14,22 @@ def parse_typed_inventory(text: str | None) -> list[InventoryObservation]:
     seen: set[str] = set()
 
     for token in tokens:
-        normalized = normalize_ingredient(token)
+        parsed = parse_quantity_string(token)
+        normalized = normalize_ingredient(str(parsed["name"]))
         if not normalized or normalized in seen:
             continue
+        amount = parsed["amount"]
+        unit = parsed["unit"]
+        quantity = None
+        if amount is not None:
+            quantity = f"{amount:g} {unit}".strip() if unit else f"{amount:g}"
         observations.append(
             InventoryObservation(
                 raw_name=token,
                 normalized_name=normalized,
-                quantity=None,
+                quantity=quantity,
+                amount=amount,
+                unit=unit,
                 confidence=1.0,
                 source="text",
                 needs_confirmation=False,

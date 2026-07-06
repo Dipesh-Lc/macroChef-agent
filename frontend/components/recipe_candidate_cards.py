@@ -1,6 +1,21 @@
 import streamlit as st
 
 
+def _format_ingredient(item: object) -> str:
+    """Render a {name, amount, unit} ingredient dict (or legacy string)."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        name = item.get("name") or ""
+        amount = item.get("amount")
+        unit = item.get("unit")
+        if amount is None:
+            return str(name)
+        amount_text = f"{amount:g}"
+        return f"{amount_text} {unit} {name}" if unit else f"{amount_text} {name}"
+    return str(item)
+
+
 def _macro_line(candidate: dict) -> str:
     return (
         f"{candidate.get('calories') or 0:.0f} calories | "
@@ -45,7 +60,7 @@ def render_recipe_candidate_cards(candidates: list[dict]) -> list[dict]:
                 st.write(_macro_line(candidate))
 
             st.markdown("**Ingredients**")
-            st.write(", ".join(candidate.get("ingredients") or []))
+            st.write(", ".join(_format_ingredient(item) for item in candidate.get("ingredients") or []))
             if candidate.get("diet_tags"):
                 st.markdown("**Diet tags:** " + ", ".join(candidate["diet_tags"]))
             if candidate.get("allergens"):

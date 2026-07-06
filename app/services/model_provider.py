@@ -166,7 +166,7 @@ Recipe:
 - cuisine: {recipe.cuisine}
 - meal type: {recipe.meal_type}
 - cook time minutes: {recipe.cook_time_min}
-- ingredients: {recipe.ingredients}
+- ingredients: {', '.join(item.display() for item in recipe.ingredients)}
 - calories: {recipe.calories}
 - protein_g: {recipe.protein_g}
 - carbs_g: {recipe.carbs_g}

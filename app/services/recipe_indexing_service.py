@@ -33,7 +33,7 @@ def build_recipe_search_document(recipe: Recipe) -> str:
             f"Cuisine: {recipe.cuisine or 'unknown'}",
             f"Meal type: {recipe.meal_type or 'any'}",
             f"Description: {recipe.description or ''}",
-            f"Ingredients: {', '.join(recipe.ingredients)}",
+            f"Ingredients: {', '.join(item.name for item in recipe.ingredients)}",
             f"Diet tags: {', '.join(recipe.diet_tags)}",
             f"Cook time: {recipe.cook_time_min or 'unknown'} minutes",
             f"Difficulty: {recipe.difficulty or 'unknown'}",
@@ -103,7 +103,7 @@ class RecipeIndexingService:
 def _recipe_allergen_terms(recipe: Recipe) -> set[str]:
     terms = {
         normalize_ingredient(item).lower()
-        for item in [*recipe.ingredients, *recipe.allergens]
+        for item in [*(ingredient.name for ingredient in recipe.ingredients), *recipe.allergens]
         if item
     }
     expanded = set(terms)

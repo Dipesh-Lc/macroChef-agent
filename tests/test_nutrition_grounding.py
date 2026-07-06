@@ -155,3 +155,28 @@ def test_degradation_never_raises_and_never_substitutes_tag_macros() -> None:
 
     assert result.status == GroundingStatus.UNGROUNDED
     assert result.total == FoodMacros(calories=0, protein_g=0, carbs_g=0, fat_g=0, fiber_g=0)
+
+
+def test_volume_ingredient_grounds_via_density() -> None:
+    # 1 cup milk -> 236.588 ml * 1.03 g/ml density before USDA scaling.
+    ingredient = NutritionIngredient(name="milk", amount=1, unit="cup")
+    milk = _match("milk", calories=61, protein_g=3.2, carbs_g=4.8, fat_g=3.3, fiber_g=0)
+    client = FakeUsdaClient({"milk": milk})
+
+    result = compute_recipe_macros([ingredient], servings=1, client=client)
+
+    assert result.status == GroundingStatus.GROUNDED
+    assert result.contributions[0].grams == pytest.approx(236.588 * 1.03, rel=1e-3)
+
+
+def test_incomparable_unit_ungrounded() -> None:
+    # A volume unit with no known density can't be converted -> ungrounded, no lookup.
+    ingredient = NutritionIngredient(name="mystery sauce", amount=1, unit="cup")
+    sauce = _match("mystery sauce", calories=1, protein_g=0, carbs_g=0, fat_g=0, fiber_g=0)
+    client = FakeUsdaClient({"mystery sauce": sauce})
+
+    result = compute_recipe_macros([ingredient], servings=1, client=client)
+
+    assert result.status == GroundingStatus.UNGROUNDED
+    assert result.ungrounded_ingredients == ["mystery sauce"]
+    assert client.calls == []

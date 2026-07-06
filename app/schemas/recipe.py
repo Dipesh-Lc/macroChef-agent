@@ -1,4 +1,10 @@
-from pydantic import BaseModel, Field
+import logging
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.ingredient import Ingredient
+
+logger = logging.getLogger(__name__)
 
 
 class Recipe(BaseModel):
@@ -6,7 +12,7 @@ class Recipe(BaseModel):
     title: str
     cuisine: str | None = None
     meal_type: str | None = None
-    ingredients: list[str] = Field(default_factory=list)
+    ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     allergens: list[str] = Field(default_factory=list)
     diet_tags: list[str] = Field(default_factory=list)
@@ -28,3 +34,25 @@ class Recipe(BaseModel):
     owner_user_id: str | None = None
     is_user_saved: bool = False
     is_active: bool = True
+
+    @field_validator("ingredients", mode="after")
+    @classmethod
+    def _drop_empty_ingredients(
+        cls, ingredients: list[Ingredient], info
+    ) -> list[Ingredient]:
+        # Tolerant, non-destructive cleanup: a stray "" / "   " ingredient (from a
+        # loader, DB blob, or candidate conversion) is dropped rather than
+        # persisted as name='' or raised over. This is the single chokepoint for
+        # every Recipe assembly path (loaders.load_recipes, RecipeCandidate.
+        # to_recipe, direct construction). The drop is logged so a loader
+        # emitting empties in bulk (e.g. at corpus-scale in item 1.3) is visible.
+        kept = [item for item in ingredients if item.name and item.name.strip()]
+        dropped = len(ingredients) - len(kept)
+        if dropped:
+            identifier = info.data.get("recipe_id") or info.data.get("title") or "<unknown>"
+            logger.debug(
+                "Dropped %d empty-name ingredient(s) while assembling recipe %s",
+                dropped,
+                identifier,
+            )
+        return kept

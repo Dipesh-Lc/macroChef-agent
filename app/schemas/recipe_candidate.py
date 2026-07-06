@@ -3,6 +3,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, Field
 
+from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.utils.ingredient_normalizer import normalize_ingredient
 
@@ -15,7 +16,7 @@ class RecipeCandidate(BaseModel):
     cuisine: str | None = None
     meal_type: str | None = None
     description: str | None = None
-    ingredients: list[str] = Field(default_factory=list)
+    ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     cook_time_min: int | None = Field(default=None, ge=0)
     difficulty: str | None = None
@@ -44,7 +45,10 @@ class RecipeCandidate(BaseModel):
             title=self.title,
             cuisine=self.cuisine,
             meal_type=self.meal_type,
-            ingredients=[item.strip() for item in self.ingredients if item.strip()],
+            # Empties funnel through Recipe's ingredient validator, which drops
+            # and logs them (single observable chokepoint) rather than silently
+            # filtering here.
+            ingredients=list(self.ingredients),
             instructions=[item.strip() for item in self.instructions if item.strip()],
             allergens=[normalize_ingredient(item).lower() for item in self.allergens if item],
             diet_tags=[item.strip().lower() for item in self.diet_tags if item.strip()],
