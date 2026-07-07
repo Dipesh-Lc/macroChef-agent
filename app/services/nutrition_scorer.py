@@ -2,6 +2,7 @@ from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recommendation import RecipeScore
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
+from app.services.nutrition_view import trusted_per_serving
 from app.services.procurement_service import split_used_and_missing
 
 
@@ -16,17 +17,21 @@ def pantry_match_score(recipe: Recipe, inventory: list[ConfirmedIngredient]) -> 
     return len(used) / len(recipe.ingredients), used, missing
 
 
-def _macro_value(recipe: Recipe, name: str) -> float | None:
-    return getattr(recipe, name)
-
-
 def macro_fit_score(recipe: Recipe, targets: MacroTargets) -> float:
+    # Only a fully GROUNDED recipe's computed macros are trusted here (see
+    # app.services.nutrition_view) -- PARTIAL undercounts, and UNGROUNDED has
+    # nothing to score, so both fall back to the neutral 0.5 rather than
+    # scoring against the recipe's self-reported tag macros.
+    macros = trusted_per_serving(recipe)
+    if macros is None:
+        return 0.5
+
     fields = ["calories", "protein_g", "carbs_g", "fat_g", "fiber_g"]
     errors: list[float] = []
     for field in fields:
         target = getattr(targets, field)
-        actual = _macro_value(recipe, field)
-        if target is None or target <= 0 or actual is None:
+        actual = getattr(macros, field)
+        if target is None or target <= 0:
             continue
         errors.append(abs(actual - target) / target)
 

@@ -6,7 +6,7 @@ import requests
 
 from app.config import Settings
 from app.services.nutrition_cache import FdcCache
-from app.services.usda_client import UsdaClient
+from app.services.usda_client import UsdaClient, _classify_preparation, _is_relevant_match
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -25,6 +25,13 @@ def _settings(*, fdc_api_key: str | None = None) -> Settings:
         FDC_BASE_URL="https://api.nal.usda.gov/fdc/v1",
         MODEL_TIMEOUT_SECONDS=5.0,
     )
+
+
+def _client(*, session, cache, fdc_api_key: str | None = "test-key") -> UsdaClient:
+    """UsdaClient with retry backoff sleep stubbed out -- these tests exercise
+    retry behavior deliberately and must not incur real wall-clock delay."""
+
+    return UsdaClient(settings=_settings(fdc_api_key=fdc_api_key), session=session, cache=cache, sleep=lambda _: None)
 
 
 class FakeResponse:
@@ -138,21 +145,19 @@ def test_no_api_key_returns_none_without_request(tmp_path) -> None:
 
 def test_network_error_returns_none_without_raising(tmp_path) -> None:
     session = FakeSession(exc=requests.ConnectionError("no route to host"))
-    client = UsdaClient(
-        settings=_settings(fdc_api_key="test-key"),
-        session=session,
-        cache=FdcCache(tmp_path / "cache.json"),
-    )
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
 
     match = client.search_food("chicken breast")
 
     assert match is None
+    assert session.calls == 16  # exhausted retries on both the generic and Branded tiers
 
 
 def test_non_200_response_returns_none_without_raising(tmp_path) -> None:
     session = FakeSession(payload={}, status_code=503)
     client = UsdaClient(
         settings=_settings(fdc_api_key="test-key"),
+        sleep=lambda _: None,
         session=session,
         cache=FdcCache(tmp_path / "cache.json"),
     )
@@ -160,6 +165,78 @@ def test_non_200_response_returns_none_without_raising(tmp_path) -> None:
     match = client.search_food("chicken breast")
 
     assert match is None
+    assert session.calls == 16  # exhausted retries on both the generic and Branded tiers
+
+
+class FlakySession:
+    """Fails `fail_times` calls (raising the given exception), then serves
+    `payload` -- simulates the observed live behavior where an identical FDC
+    request intermittently 400s before succeeding on retry."""
+
+    def __init__(self, payload: dict, fail_times: int, exc: Exception | None = None):
+        self.payload = payload
+        self.fail_times = fail_times
+        self.exc = exc or requests.HTTPError("400 Client Error: Bad Request")
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise self.exc
+        return FakeResponse(self.payload)
+
+
+def test_transient_failure_recovers_on_retry(tmp_path) -> None:
+    session = FlakySession(payload=_load_fixture("fdc_chicken_breast_search.json"), fail_times=2)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("chicken breast")
+
+    assert match is not None
+    assert match.macros.calories == 165
+    assert session.calls == 3
+
+
+def test_retry_exhausted_failure_is_not_cached_so_next_run_retries(tmp_path) -> None:
+    cache = FdcCache(tmp_path / "cache.json")
+    always_fails = FlakySession(payload=_load_fixture("fdc_chicken_breast_search.json"), fail_times=99)
+    first_client = _client(session=always_fails, cache=cache)
+
+    first_match = first_client.search_food("chicken breast")
+    assert first_match is None
+    assert always_fails.calls == 16  # exhausted retries on both the generic and Branded tiers
+
+    # A later run (e.g. after the outage clears) must get a fresh attempt --
+    # a persistent failure must never poison the cache as a confirmed no-match.
+    recovers_now = FlakySession(payload=_load_fixture("fdc_chicken_breast_search.json"), fail_times=0)
+    second_client = _client(session=recovers_now, cache=cache)
+
+    second_match = second_client.search_food("chicken breast")
+
+    assert second_match is not None
+    assert second_match.macros.calories == 165
+
+
+def test_confirmed_no_match_is_cached_and_skips_future_network_calls(tmp_path) -> None:
+    cache = FdcCache(tmp_path / "cache.json")
+    session = FakeSession(payload=_load_fixture("fdc_empty_search.json"))
+    first_client = _client(session=session, cache=cache)
+
+    first_match = first_client.search_food("nonexistent ingredient xyz")
+    assert first_match is None
+    assert session.calls == 2  # both tiers queried (generic, then Branded fallback), both empty
+    assert cache.is_confirmed_no_match("nonexistent ingredient xyz")
+
+    # A confirmed no-match is a stable fact (the fixture's content is
+    # unchanging) -- re-querying must be served from that confirmation, not
+    # the network, unlike a retry-exhausted transient failure above.
+    unreachable = FakeSession(exc=AssertionError("should not be called"))
+    second_client = _client(session=unreachable, cache=cache)
+
+    second_match = second_client.search_food("nonexistent ingredient xyz")
+
+    assert second_match is None
+    assert unreachable.calls == 0
 
 
 def test_empty_results_return_none(tmp_path) -> None:
@@ -187,6 +264,114 @@ def test_cache_hit_skips_second_request(tmp_path) -> None:
     assert first == second
 
 
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        ("Rice, brown, long-grain, cooked", "cooked"),
+        ("Rice, brown, long-grain, raw", "raw"),
+        ("Beans, black, mature seeds, canned, solids and liquids", "canned"),
+        ("Lentils, raw", "raw"),
+        ("Lentils, mature seeds, dry", "raw"),
+        ("Quinoa, uncooked", "raw"),
+        ("Chicken, broilers or fryers, breast, meat only, boiled", "cooked"),
+        ("CHICKEN BREAST NUGGETS, CHICKEN BREAST", None),
+        ("Rice, brown, long-grain, COOKED", "cooked"),
+        ("Potato, baked, flesh and skin, without salt", None),
+        ("Broccoli, frozen, chopped, unprepared", None),
+    ],
+)
+def test_classify_preparation(description, expected) -> None:
+    assert _classify_preparation(description) == expected
+
+
+def test_preparation_gate_selects_cooked_over_higher_ranked_raw_record(tmp_path) -> None:
+    # Foundation (raw) outranks SR Legacy (cooked) under _DATA_TYPE_PRIORITY,
+    # so an ungated search would return the raw record -- the exact failure
+    # mode a declared-cooked ingredient must never fall into.
+    session = FakeSession(payload=_load_fixture("fdc_rice_raw_and_cooked_search.json"))
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        session=session,
+        cache=FdcCache(tmp_path / "cache.json"),
+    )
+
+    ungated = client.search_food("brown rice")
+    assert ungated is not None
+    assert ungated.description.endswith("raw")
+
+    cooked = client.search_food("brown rice", preparation="cooked")
+    assert cooked is not None
+    assert cooked.description.endswith("cooked")
+    assert cooked.macros.calories == 112
+
+    raw = client.search_food("brown rice", preparation="raw")
+    assert raw is not None
+    assert raw.description.endswith("raw")
+    assert raw.macros.calories == 370
+
+
+def test_preparation_gate_returns_none_when_no_candidate_matches_declared_state(tmp_path) -> None:
+    # The rice fixture only has a cooked record -- a raw-declared ingredient
+    # must ground to nothing rather than silently accept the cooked one.
+    session = FakeSession(payload=_load_fixture("fdc_rice_search.json"))
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        session=session,
+        cache=FdcCache(tmp_path / "cache.json"),
+    )
+
+    match = client.search_food("rice", preparation="raw")
+
+    assert match is None
+
+
+def test_preparation_gate_accepts_matching_canned_record(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_black_beans_canned_search.json"))
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        session=session,
+        cache=FdcCache(tmp_path / "cache.json"),
+    )
+
+    match = client.search_food("black beans", preparation="canned")
+
+    assert match is not None
+    assert match.macros.calories == 132
+
+
+def test_preparation_gate_rejects_unclassifiable_branded_record(tmp_path) -> None:
+    # Neither candidate in the chicken-breast fixture classifies as "cooked"
+    # (one is raw, one has no state keyword at all) -- both must be excluded.
+    session = FakeSession(payload=_load_fixture("fdc_chicken_breast_search.json"))
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        session=session,
+        cache=FdcCache(tmp_path / "cache.json"),
+    )
+
+    match = client.search_food("chicken breast", preparation="cooked")
+
+    assert match is None
+
+
+def test_cache_key_distinguishes_by_preparation(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_rice_raw_and_cooked_search.json"))
+    cache = FdcCache(tmp_path / "cache.json")
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=cache)
+
+    raw_match = client.search_food("rice", preparation="raw")
+    cooked_match = client.search_food("rice", preparation="cooked")
+    assert session.calls == 2
+    assert raw_match.description.endswith("raw")
+    assert cooked_match.description.endswith("cooked")
+
+    # Repeating both calls must be served entirely from cache -- a shared
+    # cache key would have let the second call's result leak into the first.
+    client.search_food("rice", preparation="raw")
+    client.search_food("rice", preparation="cooked")
+    assert session.calls == 2
+
+
 def test_disk_cache_round_trips_across_client_instances(tmp_path) -> None:
     cache_path = tmp_path / "cache.json"
     session = FakeSession(payload=_load_fixture("fdc_chicken_breast_search.json"))
@@ -208,4 +393,234 @@ def test_disk_cache_round_trips_across_client_instances(tmp_path) -> None:
 
     assert match is not None
     assert match.macros.calories == 165
-    assert unreachable_session.calls == 0
+
+
+# --- Relevance check: regression catalogue from the real live grounding run ---
+#
+# Before this check existed, `_best_match` picked candidates purely by
+# `_DATA_TYPE_PRIORITY`, with no verification that the description was even
+# the same food as the query. Running the real corpus through live FDC
+# surfaced these exact wrong matches (see the 1.4 Step B checkpoint) --
+# each fixture below reproduces the live response shape that caused it.
+
+
+@pytest.mark.parametrize(
+    ("query", "description", "preparation", "expected"),
+    [
+        ("bell pepper", "Peppers, bell, green, raw", None, True),
+        ("bell pepper", "TACO BELL, Nachos", None, False),
+        ("avocado", "Avocado, Hass, peeled, raw", None, True),
+        ("avocado", "Oil, avocado", None, False),
+        ("zucchini", "Bread, zucchini", None, False),
+        ("oats", "Oats, whole grain, steel cut", None, True),
+        ("oats", "Oat milk, unsweetened, plain, refrigerated", None, False),
+        ("carrot", "Carrots, raw", None, True),
+        ("black beans", "Beans, black turtle, mature seeds, canned", "canned", True),
+        ("black beans", "Soup, black bean, canned, condensed", "canned", False),
+        ("brown rice", "Rice, brown, cooked, as ingredient", "cooked", True),
+        ("jasmine rice", "JASMINE COOKED RICE, JASMINE", "cooked", True),
+        ("quinoa", "Quinoa, uncooked", "raw", True),
+        # The one known, accepted exception: FDC files zucchini's Foundation
+        # record under "Squash" (its botanical name), not "Zucchini" -- the
+        # head-noun check can't know these are the same food without a
+        # synonym table, so this correctly-real record is rejected too. Per
+        # the project's fail-closed philosophy, an honest UNGROUNDED here is
+        # the safe outcome, not a bug to work around with a synonym list.
+        ("zucchini", "Squash, summer, green, zucchini, includes skin, raw", None, False),
+    ],
+)
+def test_is_relevant_match(query, description, preparation, expected) -> None:
+    assert _is_relevant_match(query, description, preparation) is expected
+
+
+def test_relevance_check_rejects_wrong_food_end_to_end(tmp_path) -> None:
+    # bell pepper -> TACO BELL Nachos, confirmed live before this fix.
+    session = FakeSession(payload=_load_fixture("fdc_bell_pepper_relevance_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("bell pepper")
+
+    assert match is not None
+    assert match.description == "Peppers, bell, green, raw"
+    assert match.macros.calories == 22.9
+
+
+def test_relevance_check_rejects_avocado_oil_end_to_end(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_avocado_relevance_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("avocado")
+
+    assert match is not None
+    assert match.description == "Avocado, Hass, peeled, raw"
+    assert match.macros.calories == 167
+
+
+def test_relevance_check_rejects_zucchini_bread_end_to_end(tmp_path) -> None:
+    # Both candidates ultimately fail (the correct one for the disclosed
+    # squash/zucchini naming-divergence reason) -- ungrounded, not a
+    # silent wrong-food match. See the parametrized case above.
+    session = FakeSession(payload=_load_fixture("fdc_zucchini_relevance_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("zucchini")
+
+    assert match is None
+
+
+def test_relevance_check_accepts_real_oats_rejects_oat_milk_end_to_end(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_oats_relevance_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("oats")
+
+    assert match is not None
+    assert match.description == "Oats, whole grain, steel cut"
+
+
+def test_relevance_check_accepts_real_carrot_over_dehydrated_when_data_type_ties(tmp_path) -> None:
+    # Both pass relevance (both are genuinely carrot); the dehydrated-vs-raw
+    # state distinction for un-prepped ingredients is a separate, disclosed
+    # gap (no `preparation` gate applies here) -- this test only proves
+    # relevance doesn't reject the correct one.
+    session = FakeSession(payload=_load_fixture("fdc_carrot_relevance_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("carrot")
+
+    assert match is not None
+    assert match.description in ("Carrots, raw", "Carrot, dehydrated")
+
+
+def test_relevance_check_rejects_black_bean_soup_end_to_end(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_black_beans_soup_and_beans_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("black beans", preparation="canned")
+
+    assert match is not None
+    assert match.description == "Beans, black turtle, mature seeds, canned"
+
+
+def test_preparation_word_is_appended_to_the_search_query_sent_to_fdc(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_rice_raw_and_cooked_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    client.search_food("brown rice", preparation="cooked")
+
+    assert session.last_params["query"] == "brown rice cooked"
+
+
+def test_no_preparation_leaves_search_query_unaugmented(tmp_path) -> None:
+    session = FakeSession(payload=_load_fixture("fdc_chicken_breast_search.json"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    client.search_food("chicken breast")
+
+    assert session.last_params["query"] == "chicken breast"
+
+
+def test_known_unreliable_query_returns_none_without_any_network_call(tmp_path) -> None:
+    # "shrimp"/"tomato sauce" (wrong-form, no preparation gate applies) and
+    # "chili powder"/"ginger" (0 kcal Branded data defects) are deliberately
+    # excluded (see _KNOWN_UNRELIABLE_QUERIES). Must fail closed before ever
+    # touching the network or cache.
+    session = FakeSession(exc=AssertionError("must not be called"))
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    assert client.search_food("shrimp") is None
+    assert client.search_food("tomato sauce") is None
+    assert client.search_food("chili powder") is None
+    assert client.search_food("ginger") is None
+    assert session.calls == 0
+
+
+# --- Two-tier fetch: generic dataTypes first, Branded only as a fallback ---
+#
+# Confirmed live: a single combined `dataType=[...all 4...]` query at
+# pageSize=5 lets Branded's catalog volume crowd a real Foundation/SR Legacy
+# record out of the fetched window entirely (e.g. "greek yogurt" returns 5/5
+# Branded despite a real Foundation "Yogurt, Greek, plain, nonfat" record
+# existing). `TieredFakeSession` actually filters by the `dataType` request
+# param (unlike `FakeSession`, which ignores it) so these tests can prove the
+# client queries generic types in their own request first.
+
+
+class TieredFakeSession:
+    """Routes to a different fixed payload per requested `dataType` list,
+    tracking how many distinct (query, dataType) calls were made -- this is
+    what a real FDC response would do (filter by dataType), which the
+    single-payload FakeSession above deliberately does not simulate."""
+
+    def __init__(self, by_data_types: dict[tuple[str, ...], dict]):
+        self._by_data_types = by_data_types
+        self.calls: list[tuple[str, ...]] = []
+
+    def get(self, url, params=None, timeout=None):
+        data_types = tuple(params["dataType"])
+        self.calls.append(data_types)
+        payload = self._by_data_types.get(data_types, {"foods": []})
+        return FakeResponse(payload)
+
+
+def test_generic_tier_is_queried_first_and_branded_never_called_when_it_succeeds(tmp_path) -> None:
+    session = TieredFakeSession(
+        {
+            ("Foundation", "SR Legacy", "Survey (FNDDS)"): _load_fixture("fdc_greek_yogurt_foundation_search.json"),
+            ("Branded",): _load_fixture("fdc_greek_yogurt_branded_only_search.json"),
+        }
+    )
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("greek yogurt")
+
+    assert match is not None
+    assert match.description == "Yogurt, Greek, plain, nonfat"
+    assert match.macros.calories == 61
+    assert session.calls == [("Foundation", "SR Legacy", "Survey (FNDDS)")]  # Branded tier never called
+
+
+def test_branded_fallback_fires_when_generic_tier_has_nothing_relevant(tmp_path) -> None:
+    # Simulates an ingredient that genuinely only exists as Branded data --
+    # the generic tier returns real candidates but none relevant/usable, so
+    # the Branded fallback must still resolve it rather than leaving it
+    # ungrounded just because a generic tier exists in principle.
+    session = TieredFakeSession(
+        {
+            ("Foundation", "SR Legacy", "Survey (FNDDS)"): {"foods": []},
+            ("Branded",): _load_fixture("fdc_greek_yogurt_branded_only_search.json"),
+        }
+    )
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("greek yogurt")
+
+    assert match is not None
+    assert match.data_type == "Branded"
+    assert session.calls == [("Foundation", "SR Legacy", "Survey (FNDDS)"), ("Branded",)]
+
+
+def test_two_tier_fetch_is_deterministic_across_repeated_calls(tmp_path) -> None:
+    # Same inputs, same tier order, same result every time -- no order-
+    # dependence reintroduced by having two request tiers instead of one.
+    session = TieredFakeSession(
+        {
+            ("Foundation", "SR Legacy", "Survey (FNDDS)"): _load_fixture("fdc_greek_yogurt_foundation_search.json"),
+            ("Branded",): _load_fixture("fdc_greek_yogurt_branded_only_search.json"),
+        }
+    )
+    cache = FdcCache(tmp_path / "cache.json")
+    first = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=cache).search_food("greek yogurt")
+
+    session2 = TieredFakeSession(
+        {
+            ("Foundation", "SR Legacy", "Survey (FNDDS)"): _load_fixture("fdc_greek_yogurt_foundation_search.json"),
+            ("Branded",): _load_fixture("fdc_greek_yogurt_branded_only_search.json"),
+        }
+    )
+    second = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"), session=session2, cache=FdcCache(tmp_path / "cache2.json")
+    ).search_food("greek yogurt")
+
+    assert first.description == second.description == "Yogurt, Greek, plain, nonfat"
+    assert first.macros.calories == second.macros.calories == 61

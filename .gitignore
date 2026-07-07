@@ -22,6 +22,8 @@ data/raw/uploads/*
 !data/raw/uploads/.gitkeep
 data/library/*.jsonl
 !data/library/.gitkeep
+data/cache/*
+!data/cache/.gitkeep
 frontend/.streamlit/
 dist/
 build/

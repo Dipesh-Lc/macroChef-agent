@@ -3,6 +3,7 @@ import logging
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.ingredient import Ingredient
+from app.schemas.nutrition import RecipeNutrition
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +18,21 @@ class Recipe(BaseModel):
     allergens: list[str] = Field(default_factory=list)
     diet_tags: list[str] = Field(default_factory=list)
     cook_time_min: int | None = Field(default=None, ge=0)
+    # Self-reported tag macros (recipe-tag metadata or, for imported recipes,
+    # the source dataset's own values). Never overwritten by grounding --
+    # `nutrition` below is the computed value; these stay intact so the two
+    # can be compared. Nothing should trust these directly for scoring or
+    # display once `nutrition` exists; see app.services.nutrition_view.
     calories: float | None = Field(default=None, ge=0)
     protein_g: float | None = Field(default=None, ge=0)
     carbs_g: float | None = Field(default=None, ge=0)
     fat_g: float | None = Field(default=None, ge=0)
     fiber_g: float | None = Field(default=None, ge=0)
+    # USDA-computed macros, attached at load time from the grounding sidecar
+    # (app.rag.loaders.attach_grounding) -- None until the grounding job has
+    # run for this recipe. This is the one field the scorer/frontend should
+    # read through app.services.nutrition_view, never the tag fields above.
+    nutrition: RecipeNutrition | None = None
     description: str | None = None
     difficulty: str | None = None
     servings: int | None = Field(default=1, ge=1)

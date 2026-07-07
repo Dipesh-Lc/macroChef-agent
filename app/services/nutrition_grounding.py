@@ -26,12 +26,14 @@ def compute_recipe_macros(
 
     Each ingredient is converted to grams (mass directly, volume via density,
     counts via per-piece weight — see `unit_converter`) and looked up in USDA
-    FDC via `client`. Ingredients that can't be converted
-    or matched are recorded in `ungrounded_ingredients` and excluded from the
-    totals — they are never silently treated as contributing zero, and the
-    returned `status` makes the coverage gap explicit to callers. See
-    `RecipeNutrition` for how to interpret `GROUNDED` / `PARTIAL` /
-    `UNGROUNDED`.
+    FDC via `client`, gated to `ingredient.preparation` when set (see
+    `UsdaClient.search_food`) so a declared-cooked grain/legume can't silently
+    resolve to a raw record. Ingredients that can't be converted or matched
+    (including a preparation-gate miss) are recorded in `ungrounded_ingredients`
+    and excluded from the totals — they are never silently treated as
+    contributing zero, and the returned `status` makes the coverage gap
+    explicit to callers. See `RecipeNutrition` for how to interpret
+    `GROUNDED` / `PARTIAL` / `UNGROUNDED`.
     """
 
     contributions: list[IngredientContribution] = []
@@ -46,7 +48,7 @@ def compute_recipe_macros(
         grounded = False
 
         if grams is not None:
-            match = client.search_food(ingredient.name)
+            match = client.search_food(ingredient.name, preparation=ingredient.preparation)
             if match is not None:
                 macros = _scale_macros(match.macros, grams)
                 for field in _MACRO_FIELDS:
