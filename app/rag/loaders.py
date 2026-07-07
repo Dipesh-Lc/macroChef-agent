@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.config import get_settings
+from app.schemas.nutrition import RecipeNutrition
 from app.schemas.recipe import Recipe
 
 
@@ -19,8 +20,42 @@ def load_recipes(path: str | Path | None = None) -> list[Recipe]:
     return recipes
 
 
+def load_grounding(path: str | Path | None = None) -> dict[str, RecipeNutrition]:
+    """Load the grounding sidecar (app.services.grounding_job) keyed by recipe_id.
+
+    Returns {} if the job has never run -- callers then leave every recipe's
+    `nutrition` at its default None, which reads as "unknown" everywhere
+    (see app.services.nutrition_view) rather than erroring.
+    """
+    settings = get_settings()
+    grounding_path = Path(path) if path else Path(settings.recipe_path).parent / "grounding.jsonl"
+    if not grounding_path.exists():
+        return {}
+
+    grounding: dict[str, RecipeNutrition] = {}
+    with grounding_path.open("r", encoding="utf-8") as file:
+        for line in file:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            grounding[row["recipe_id"]] = RecipeNutrition.model_validate(row["nutrition"])
+    return grounding
+
+
+def attach_grounding(
+    recipes: list[Recipe], grounding: dict[str, RecipeNutrition] | None = None
+) -> list[Recipe]:
+    """Attach computed nutrition to each recipe by id (in place) and return the
+    same list. A recipe absent from `grounding` (job hasn't run, or hasn't
+    covered this recipe yet) keeps `.nutrition = None` -- never a fake 0."""
+    grounding = grounding if grounding is not None else load_grounding()
+    for recipe in recipes:
+        recipe.nutrition = grounding.get(recipe.recipe_id)
+    return recipes
+
+
 def recipes_by_id(path: str | Path | None = None) -> dict[str, Recipe]:
-    return {recipe.recipe_id: recipe for recipe in load_recipes(path)}
+    return {recipe.recipe_id: recipe for recipe in attach_grounding(load_recipes(path))}
 
 
 def load_corpus(
@@ -45,4 +80,4 @@ def load_corpus(
         by_id[recipe.recipe_id] = recipe
     for recipe in seeds:
         by_id[recipe.recipe_id] = recipe
-    return list(by_id.values())
+    return attach_grounding(list(by_id.values()))

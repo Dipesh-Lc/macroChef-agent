@@ -27,7 +27,7 @@ class FakeUsdaClient:
         self._matches = matches
         self.calls: list[str] = []
 
-    def search_food(self, name: str) -> FoodMatch | None:
+    def search_food(self, name: str, *, preparation: str | None = None) -> FoodMatch | None:
         self.calls.append(name)
         return self._matches.get(name)
 

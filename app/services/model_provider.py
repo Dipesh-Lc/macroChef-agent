@@ -11,6 +11,7 @@ from app.config import Settings, get_settings
 from app.schemas.inventory import InventoryObservation
 from app.schemas.recipe import Recipe
 from app.schemas.recommendation import RecipeScore
+from app.services.nutrition_view import macro_display_state, trusted_per_serving
 from app.utils.ingredient_normalizer import normalize_ingredient
 from app.utils.logging import get_logger
 
@@ -138,14 +139,30 @@ def extract_inventory_with_provider_chain(
     return mock_extractor(image_path)
 
 
+def _macro_summary(recipe: Recipe) -> str:
+    """One line describing what's known about a recipe's macros, gated by the
+    same `macro_display_state` the scorer and frontend card use (see
+    app.services.nutrition_view) -- never the recipe's self-reported tag
+    fields, which may be wrong and are never verified until GROUNDED."""
+    state = macro_display_state(recipe)
+    if state == "unknown":
+        return "Macros have not been verified for this recipe yet."
+
+    macros = trusted_per_serving(recipe) or recipe.nutrition.per_serving
+    base = (
+        f"{macros.calories:.0f} calories, {macros.protein_g:.0f}g protein, "
+        f"{macros.carbs_g:.0f}g carbs, and {macros.fat_g:.0f}g fat"
+    )
+    if state == "partial":
+        pct = round(recipe.nutrition.coverage * 100)
+        return f"Based on {pct}% of ingredients ({base}, likely an undercount)."
+    return f"{base.capitalize()}."
+
+
 def template_explanation(recipe: Recipe, score: RecipeScore, allergy_safe: bool = True) -> str:
     used = ", ".join(score.used_ingredients) or "your available pantry items"
     missing = ", ".join(score.missing_ingredients) or "nothing essential"
-    macro_note = (
-        f"Macro fit is {score.macro_fit_score:.0%}, with "
-        f"{recipe.calories:.0f} calories, {recipe.protein_g:.0f}g protein, "
-        f"{recipe.carbs_g:.0f}g carbs, and {recipe.fat_g:.0f}g fat."
-    )
+    macro_note = f"Macro fit is {score.macro_fit_score:.0%}. {_macro_summary(recipe)}"
     safety_note = "It passed the deterministic allergy and diet validation." if allergy_safe else ""
     return (
         f"{recipe.title} fits because it uses {used} and keeps the shopping gap to "
@@ -159,7 +176,9 @@ You are MacroChef Agent's chef explanation layer.
 Write one friendly, concise paragraph for a recipe recommendation.
 
 Use only the structured data below. Do not calculate nutrition. Do not decide allergy safety.
-Allergy safety has already been validated by deterministic Python logic.
+Allergy safety has already been validated by deterministic Python logic. The nutrition summary
+below is the verified truth -- if it says macros are unverified or partial, say so plainly rather
+than inventing or estimating a number.
 
 Recipe:
 - title: {recipe.title}
@@ -167,11 +186,7 @@ Recipe:
 - meal type: {recipe.meal_type}
 - cook time minutes: {recipe.cook_time_min}
 - ingredients: {', '.join(item.display() for item in recipe.ingredients)}
-- calories: {recipe.calories}
-- protein_g: {recipe.protein_g}
-- carbs_g: {recipe.carbs_g}
-- fat_g: {recipe.fat_g}
-- fiber_g: {recipe.fiber_g}
+- nutrition summary: {_macro_summary(recipe)}
 
 Scores:
 - final score: {score.final_score:.0%}

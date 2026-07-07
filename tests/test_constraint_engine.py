@@ -95,3 +95,25 @@ def test_structured_ingredient_allergen_rejected() -> None:
     result = validate_recipe(recipe, _profile(allergies=["peanut"]))
 
     assert not result.is_valid
+
+
+def test_whole_egg_still_triggers_egg_allergen() -> None:
+    # "eggs"/"egg" were renamed to "whole egg" (nutrition grounding item 1.4)
+    # to disambiguate against USDA's "egg white" record. ALLERGEN_ALIASES["egg"]
+    # is the literal set {"egg", "egg whites", "eggs", "mayonnaise"} and does
+    # NOT contain "whole egg" -- this must still be caught via ingredient_matches'
+    # substring fallback ("egg" in "whole egg"), not exact set membership.
+    recipe = _recipe(ingredients=[Ingredient(name="whole egg", amount=1, unit=None)], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["egg"]))
+
+    assert not result.is_valid
+
+
+def test_whole_egg_still_blocks_vegan_diet() -> None:
+    # Same rename, same non-membership risk, but for DIET_BLOCKERS["vegan"]
+    # via violates_diet_type's ingredient_matches loop instead of contains_allergen.
+    recipe = _recipe(ingredients=[Ingredient(name="whole egg", amount=1, unit=None)], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegan"))
+
+    assert not result.is_valid
+    assert "vegan" in result.rejection_reason.lower()

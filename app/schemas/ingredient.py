@@ -8,6 +8,8 @@ the `quantity_parser` util) so both `recipe.py` and `nutrition.py` can depend on
 it without import cycles.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 from app.utils.quantity_parser import parse_quantity_string
@@ -17,6 +19,13 @@ class Ingredient(BaseModel):
     name: str
     amount: float | None = Field(default=None, ge=0)
     unit: str | None = None
+    # Declared measurement state for ingredients whose raw and cooked/canned
+    # forms differ sharply in calorie density (grains, legumes) -- e.g. "150 g
+    # cooked rice" vs "150 g raw rice" differ ~3x in calories. None means no
+    # state was declared (most ingredients don't need one). Nutrition
+    # grounding (app/services/usda_client.py) uses this to gate USDA matches
+    # to the same state rather than accepting whichever record ranks first.
+    preparation: Literal["raw", "cooked", "canned"] | None = Field(default=None)
 
     @model_validator(mode="before")
     @classmethod

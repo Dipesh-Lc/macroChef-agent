@@ -4,7 +4,7 @@ from typing import Any
 from app.config import get_settings
 from app.data.recipe_library_repository import RecipeLibraryRepository
 from app.rag.chroma_client import collection_count, query_collection
-from app.rag.loaders import load_recipes, recipes_by_id
+from app.rag.loaders import attach_grounding, load_recipes, recipes_by_id
 from app.schemas.recipe import Recipe
 from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
 from app.utils.logging import get_logger
@@ -20,7 +20,7 @@ class RecipeRetriever:
     ):
         self.settings = get_settings()
         self.recipe_path = recipe_path or str(self.settings.recipe_path)
-        self._base_recipes = load_recipes(self.recipe_path)
+        self._base_recipes = attach_grounding(load_recipes(self.recipe_path))
         self.library_repository = library_repository or RecipeLibraryRepository()
 
     def retrieve(

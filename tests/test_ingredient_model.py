@@ -33,6 +33,15 @@ def test_nutrition_ingredient_is_ingredient_alias() -> None:
     assert NutritionIngredient is Ingredient
 
 
+def test_ingredient_preparation_defaults_to_none() -> None:
+    assert Ingredient(name="spinach").preparation is None
+
+
+def test_ingredient_accepts_declared_preparation() -> None:
+    ingredient = Ingredient(name="rice", amount=150, unit="g", preparation="cooked")
+    assert ingredient.preparation == "cooked"
+
+
 def test_empty_and_whitespace_ingredients_are_dropped() -> None:
     recipe = Recipe(
         recipe_id="r", title="t", ingredients=["chicken breast", "", "   ", "spinach"]

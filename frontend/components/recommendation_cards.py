@@ -4,6 +4,26 @@ from urllib.parse import quote_plus
 import requests
 import streamlit as st
 
+from app.schemas.recipe import Recipe
+from app.services.nutrition_view import macro_display_state
+
+
+def _macro_badge(recipe: dict) -> str:
+    # Reads the same `macro_display_state` the scorer uses (app.services.
+    # nutrition_view) so the badge can never show a number the scorer didn't
+    # also trust, and never falls back to a bare 0 for an ungrounded recipe.
+    parsed = Recipe.model_validate(recipe)
+    state = macro_display_state(parsed)
+    if state == "unknown":
+        return "Macros unknown"
+
+    macros = parsed.nutrition.per_serving
+    base = f"{macros.calories:.0f} kcal | {macros.protein_g:.0f}P / {macros.carbs_g:.0f}C / {macros.fat_g:.0f}F"
+    if state == "partial":
+        pct = round(parsed.nutrition.coverage * 100)
+        return f"~{base} (partial, {pct}% grounded, likely undercounts)"
+    return base
+
 
 def _score_tile(label: str, value: float) -> str:
     return f"""
@@ -61,7 +81,7 @@ def render_recommendations(api_url: str, recommendations: list[dict]) -> None:
                         {escape(recipe.get('cuisine') or 'Any cuisine')} | {escape(recipe.get('meal_type') or 'meal')} | {recipe.get('cook_time_min') or '?'} min
                       </div>
                     </div>
-                    <div class="macro-badge">{recipe.get('calories', 0):.0f} kcal | {recipe.get('protein_g', 0):.0f}P / {recipe.get('carbs_g', 0):.0f}C / {recipe.get('fat_g', 0):.0f}F</div>
+                    <div class="macro-badge">{escape(_macro_badge(recipe))}</div>
                   </div>
                   <div class="score-grid">
                     {_score_tile('Final', score['final_score'])}
