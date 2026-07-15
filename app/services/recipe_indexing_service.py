@@ -3,6 +3,7 @@ from app.rag.chroma_client import get_chroma_collection, reset_chroma_collection
 from app.rag.loaders import load_corpus
 from app.schemas.recipe import Recipe
 from app.services.constraint_engine import derive_allergen_labels
+from app.services.nutrition_view import macro_display_state, trusted_per_serving
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -20,11 +21,30 @@ INDEX_ALLERGENS = [
 ]
 
 
-def build_recipe_search_document(recipe: Recipe) -> str:
-    macros = (
-        f"calories {recipe.calories}, protein {recipe.protein_g}g, carbs {recipe.carbs_g}g, "
-        f"fat {recipe.fat_g}g, fiber {recipe.fiber_g}g"
+def _macro_index_text(recipe: Recipe) -> str:
+    """Macro text for the search document, gated by the same
+    `macro_display_state` the scorer/frontend/explanation layer use (see
+    app.services.nutrition_view) -- never the recipe's self-reported tag
+    fields (recipe.calories/protein_g/...), which are unverified until
+    GROUNDED. Where macros are unknown or only partially grounded, the
+    document says so in plain text rather than embedding a fabricated or
+    undercounted number as if it were reliable."""
+    state = macro_display_state(recipe)
+    if state == "unknown":
+        return "Macros have not been verified for this recipe yet."
+
+    macros = trusted_per_serving(recipe) or recipe.nutrition.per_serving
+    text = (
+        f"calories {macros.calories:.0f}, protein {macros.protein_g:.0f}g, "
+        f"carbs {macros.carbs_g:.0f}g, fat {macros.fat_g:.0f}g, fiber {macros.fiber_g:.0f}g"
     )
+    if state == "partial":
+        coverage_pct = round(recipe.nutrition.coverage * 100)
+        return f"{text} (partial -- based on {coverage_pct}% of ingredients, likely an undercount)"
+    return text
+
+
+def build_recipe_search_document(recipe: Recipe) -> str:
     notes = "User-saved home-cookable recipe." if recipe.is_user_saved else "Base sample recipe."
     return "\n".join(
         [
@@ -36,24 +56,28 @@ def build_recipe_search_document(recipe: Recipe) -> str:
             f"Diet tags: {', '.join(recipe.diet_tags)}",
             f"Cook time: {recipe.cook_time_min or 'unknown'} minutes",
             f"Difficulty: {recipe.difficulty or 'unknown'}",
-            f"Macros: {macros}.",
+            f"Macros: {_macro_index_text(recipe)}.",
             f"Home-cookable notes: {notes}",
         ]
     )
 
 
 def recipe_index_metadata(recipe: Recipe) -> dict[str, str | int | float | bool | None]:
+    # Only fully GROUNDED per-serving macros are indexed as numeric metadata --
+    # PARTIAL systematically undercounts (see app.services.nutrition_view), so
+    # it's excluded here the same way the scorer excludes it from macro_fit_score.
+    macros = trusted_per_serving(recipe)
     metadata: dict[str, str | int | float | bool | None] = {
         "recipe_id": recipe.recipe_id,
         "title": recipe.title,
         "cuisine": recipe.cuisine,
         "meal_type": recipe.meal_type,
         "cook_time_min": recipe.cook_time_min,
-        "calories": recipe.calories,
-        "protein_g": recipe.protein_g,
-        "carbs_g": recipe.carbs_g,
-        "fat_g": recipe.fat_g,
-        "fiber_g": recipe.fiber_g,
+        "calories": macros.calories if macros else None,
+        "protein_g": macros.protein_g if macros else None,
+        "carbs_g": macros.carbs_g if macros else None,
+        "fat_g": macros.fat_g if macros else None,
+        "fiber_g": macros.fiber_g if macros else None,
         "owner_user_id": recipe.owner_user_id,
         "is_user_saved": recipe.is_user_saved,
         "is_active": recipe.is_active,
