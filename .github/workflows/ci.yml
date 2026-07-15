@@ -27,3 +27,6 @@ jobs:
         env:
           EMBEDDING_PROVIDER: hash
         run: pytest -v --tb=short
+
+      - name: Diet-leak safety gate
+        run: python scripts/audit_diet_leaks.py

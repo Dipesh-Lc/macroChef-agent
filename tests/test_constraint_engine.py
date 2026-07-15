@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
@@ -110,10 +113,133 @@ def test_whole_egg_still_triggers_egg_allergen() -> None:
 
 
 def test_whole_egg_still_blocks_vegan_diet() -> None:
-    # Same rename, same non-membership risk, but for DIET_BLOCKERS["vegan"]
-    # via violates_diet_type's ingredient_matches loop instead of contains_allergen.
+    # Same rename, same non-membership risk, but reached via
+    # violates_diet_type's DIET_TYPE_EXCLUDED_TERMS["vegan"] path instead of
+    # contains_allergen directly.
     recipe = _recipe(ingredients=[Ingredient(name="whole egg", amount=1, unit=None)], diet_tags=[])
     result = validate_recipe(recipe, _profile(diet_type="vegan"))
 
     assert not result.is_valid
     assert "vegan" in result.rejection_reason.lower()
+
+
+# --- 2026-07 corpus diet-leak audit regressions -----------------------------
+#
+# Root cause 2 (matching bug): gluten-free/dairy-free used to check
+# recipe.allergens (populated by derive_allergen_labels' exact-set matching,
+# which misses compound ingredient names) instead of contains_allergen's
+# substring matching. Both recipes below are real corpus entries
+# (imp_00d7e68543255f34, imp_022adbbb8dbb56c9) with allergens=[] in the
+# imported data precisely because derive_allergen_labels missed them.
+
+
+def test_gluten_free_catches_compound_flour_and_buttermilk() -> None:
+    recipe = _recipe(
+        title="Dill Buttermilk Bread",
+        ingredients=["all-purpose flour", "baking soda", "buttermilk"],
+        allergens=[],
+        diet_tags=[],
+    )
+    result = validate_recipe(recipe, _profile(diet_type="gluten-free"))
+
+    assert not result.is_valid
+
+
+def test_dairy_free_catches_buttermilk_and_cream_cheese() -> None:
+    bread = _recipe(
+        title="Dill Buttermilk Bread",
+        ingredients=["all-purpose flour", "baking soda", "buttermilk"],
+        allergens=[],
+        diet_tags=[],
+    )
+    crab_dip = _recipe(
+        title="Crab Dip",
+        ingredients=["cream cheese", "green onions", "sherry wine", "salt"],
+        allergens=[],
+        diet_tags=[],
+    )
+
+    assert not validate_recipe(bread, _profile(diet_type="dairy-free")).is_valid
+    assert not validate_recipe(crab_dip, _profile(diet_type="dairy-free")).is_valid
+
+
+# Root cause 1 (stale list): vegan/vegetarian's blocker vocabulary lagged the
+# corpus. These terms come from the same audit; butter/parmesan/sour cream/
+# mayonnaise/heavy cream aren't listed explicitly because they're now caught
+# via the shared ALLERGEN_ALIASES dairy/egg sets (see MEAT_ALIASES comment).
+@pytest.mark.parametrize(
+    "diet_type,ingredient",
+    [
+        ("vegetarian", "bacon"),
+        ("vegetarian", "ham"),
+        ("vegetarian", "chicken broth"),
+        ("vegetarian", "worcestershire sauce"),
+        ("vegetarian", "gelatin"),
+        ("vegetarian", "pancetta"),
+        ("vegetarian", "rump steak"),
+        ("vegetarian", "halibut steaks"),
+        ("vegan", "bacon"),
+        ("vegan", "butter"),
+        ("vegan", "parmesan"),
+        ("vegan", "sour cream"),
+        ("vegan", "mayonnaise"),
+        ("vegan", "heavy cream"),
+        ("vegan", "half-and-half"),
+        ("vegan", "ricotta"),
+    ],
+)
+def test_diet_blockers_cover_audit_surfaced_corpus_vocabulary(diet_type: str, ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
+
+    assert not result.is_valid
+
+
+# Root cause 2b (found while re-running the audit after the first fix):
+# ingredient_matches() re-normalizes its `candidate` argument internally,
+# re-applying SYNONYMS["chicken"] = "chicken breast" on top of the
+# normalization _normalized_terms already did. That collapsed the broad
+# blocker term "chicken" into a specific cut, so it silently stopped
+# matching every OTHER cut -- 51/629 vegan-safe and 108/2616 vegetarian-safe
+# corpus recipes leaked chicken (drumsticks, thighs, livers, wings, broth,
+# bouillon) before _recipe_contains_any_term stopped routing through
+# ingredient_matches for this check.
+@pytest.mark.parametrize(
+    "ingredient",
+    [
+        "chicken drumsticks",
+        "chicken thighs",
+        "chicken livers",
+        "chicken bouillon cubes",
+        "frying chickens",
+        "boneless skinless chicken thighs",
+    ],
+)
+def test_chicken_cut_names_still_block_vegetarian_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["halibut steaks", "sole fillets", "red snapper fillets", "flounder fillets"])
+def test_additional_fish_species_block_vegan_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegan"))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["graham cracker crumbs", "phyllo pastry", "spaghetti", "crouton"])
+def test_additional_gluten_vocabulary_blocks_gluten_free_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="gluten-free"))
+
+    assert not result.is_valid
+
+
+def test_unsupported_diet_type_rejected_at_profile_intake() -> None:
+    # A freeform diet_type MacroChef doesn't enforce (halal/keto/paleo) must
+    # fail loudly at intake rather than silently pass every recipe as safe.
+    with pytest.raises(ValidationError):
+        _profile(diet_type="halal")
