@@ -496,6 +496,30 @@ def test_rejection_counts_flow_from_client_diagnostics_into_the_report(tmp_path)
     assert "| 3 |" in markdown
 
 
+def test_branded_dispersion_events_flow_from_client_diagnostics_into_the_report(tmp_path) -> None:
+    class _ClientWithDispersion(FakeUsdaClient):
+        def __init__(self, matches):
+            super().__init__(matches)
+            self.branded_dispersion_events = [("mystery seasoning", 50.0, 400.0, 4)]
+
+    recipe = _recipe(
+        "r_29", "Whatever", [Ingredient(name="chicken breast", amount=200, unit="g")], calories=330
+    )
+    client = _ClientWithDispersion({"chicken breast": _match("chicken breast", calories=165, protein_g=31)})
+
+    report = run_grounding(client=client, sidecar_path=tmp_path / "grounding.jsonl", corpus=[recipe], seeds=[recipe])
+
+    assert len(report.branded_dispersion_events) == 1
+    event = report.branded_dispersion_events[0]
+    assert event.query == "mystery seasoning"
+    assert event.min_kcal == 50.0
+    assert event.max_kcal == 400.0
+    assert event.candidate_count == 4
+
+    markdown = render_report(report)
+    assert "mystery seasoning" in markdown
+
+
 def test_build_report_works_from_precomputed_results_without_any_client(tmp_path) -> None:
     # This is the baseline-capture use case: build the extended report
     # straight from an already-loaded sidecar, with zero network calls and

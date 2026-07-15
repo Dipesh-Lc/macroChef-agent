@@ -213,6 +213,20 @@ class RatioOutlier:
 
 
 @dataclass
+class BrandedDispersionEvent:
+    """One Branded-tier query (item 4/P5, `usda_client._select_branded_match`)
+    where 3+ otherwise-eligible candidates disagreed by more than a 3x
+    calorie ratio, so the query was left ungrounded rather than picking one
+    candidate arbitrarily -- report-only, see UsdaClient.branded_dispersion_
+    events."""
+
+    query: str
+    min_kcal: float
+    max_kcal: float
+    candidate_count: int
+
+
+@dataclass
 class GroundingReport:
     total_recipes: int = 0
     status_counts: dict[str, int] = field(default_factory=dict)
@@ -226,6 +240,7 @@ class GroundingReport:
     ratio_outliers: list[RatioOutlier] = field(default_factory=list)
     implausible_band_corpus_count: int = 0
     rejection_counts: dict[str, int] = field(default_factory=dict)
+    branded_dispersion_events: list[BrandedDispersionEvent] = field(default_factory=list)
 
     def implausible_band_flags(self) -> list[SeedRow]:
         return [row for row in self.seed_rows if row.implausible_band]
@@ -308,11 +323,23 @@ def run_grounding(
 
     _write_sidecar(Path(sidecar_path), results)
 
-    # `rejection_counts` is a diagnostic-only attribute on `UsdaClient` (see
-    # its docstring) -- read defensively via getattr so a caller-supplied
-    # test double without it still works, reporting simply nothing rejected.
+    # `rejection_counts`/`branded_dispersion_events` are diagnostic-only
+    # attributes on `UsdaClient` (see their docstrings) -- read defensively
+    # via getattr so a caller-supplied test double without them still
+    # works, reporting simply nothing rejected/dispersed.
     rejection_counts = dict(getattr(client, "rejection_counts", {}) or {})
-    report = build_report(corpus=corpus, seeds=seeds, results=results, rejection_counts=rejection_counts)
+    branded_dispersion_raw = getattr(client, "branded_dispersion_events", []) or []
+    branded_dispersion_events = [
+        BrandedDispersionEvent(query=query, min_kcal=min_kcal, max_kcal=max_kcal, candidate_count=count)
+        for query, min_kcal, max_kcal, count in branded_dispersion_raw
+    ]
+    report = build_report(
+        corpus=corpus,
+        seeds=seeds,
+        results=results,
+        rejection_counts=rejection_counts,
+        branded_dispersion_events=branded_dispersion_events,
+    )
 
     if report.implausible_band_flags():
         logger.warning(
@@ -335,6 +362,7 @@ def build_report(
     seeds: list[Recipe],
     results: dict[str, RecipeNutrition],
     rejection_counts: dict[str, int] | None = None,
+    branded_dispersion_events: list[BrandedDispersionEvent] | None = None,
 ) -> GroundingReport:
     """Build a `GroundingReport` purely from already-computed data -- no
     `UsdaClient`, no network, no re-fetching. This is what lets a report be
@@ -443,6 +471,7 @@ def build_report(
             )
     report.implausible_band_corpus_count = implausible_band_corpus_count
     report.rejection_counts = dict(rejection_counts or {})
+    report.branded_dispersion_events = list(branded_dispersion_events or [])
 
     return report
 
@@ -517,6 +546,19 @@ def render_report(report: GroundingReport) -> str:
         lines.append("|---|---|")
         for reason, count in sorted(report.rejection_counts.items(), key=lambda kv: -kv[1]):
             lines.append(f"| {reason} | {count} |")
+    lines.append("")
+
+    lines.append(
+        "## Branded-tier high-dispersion queries, corpus-wide (3+ candidates, >3.0x calorie spread -- left ungrounded)"
+    )
+    lines.append("")
+    lines.append(f"- count: {len(report.branded_dispersion_events)}")
+    if report.branded_dispersion_events:
+        lines.append("")
+        lines.append("| query | min kcal | max kcal | candidates |")
+        lines.append("|---|---|---|---|")
+        for event in report.branded_dispersion_events:
+            lines.append(f"| {event.query} | {event.min_kcal:.0f} | {event.max_kcal:.0f} | {event.candidate_count} |")
     lines.append("")
 
     lines.append(f"## Seed tag-vs-computed comparison ({len(report.seed_rows)} recipes)")

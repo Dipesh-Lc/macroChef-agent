@@ -173,12 +173,13 @@ def _extract_macros(food: dict[str, Any]) -> FoodMacros | None:
 
 # Page sizes for each fetch tier. Generic stays at 5 (unchanged from item
 # 1.4 -- generic dataTypes are a small, curated catalog where the top few
-# relevance-ranked hits are enough). Branded's default tier-1 page size also
-# stays 5 for now; item 4/P5 widens the Branded fetch specifically (a much
-# larger, noisier catalog where a single record's calorie value is not
-# reliable enough to trust without corroboration -- see `_select_branded_match`).
+# relevance-ranked hits are enough). Branded is widened to 25 (item 4/P5): a
+# much larger, noisier catalog where a single record's calorie value is not
+# reliable enough to trust on rank alone -- `_select_branded_match` collects
+# every eligible candidate across this wider page and picks by median
+# calories (or declines entirely on high dispersion) instead.
 _GENERIC_PAGE_SIZE = 5
-_BRANDED_PAGE_SIZE = 5
+_BRANDED_PAGE_SIZE = 25
 
 # Retries for transient FDC failures: confirmed live that identical,
 # well-formed requests intermittently 400 (a bare nginx error page, not an
@@ -210,10 +211,17 @@ class MatchOutcome:
     5-25 item page are simply unrelated foods). Purely diagnostic: consumed
     by `UsdaClient` to build corpus-wide report counts, never used to change
     matching behavior itself.
+
+    `dispersion` is set only by `_select_branded_match` (never `_best_match`)
+    when 3+ otherwise-eligible Branded candidates disagree by more than a
+    3x calorie ratio -- `(min_kcal, max_kcal, candidate_count)`, `match` is
+    `None` in that case. Also purely diagnostic (see `UsdaClient.
+    branded_dispersion_events`).
     """
 
     match: FoodMatch | None
     rejections: list[str] = field(default_factory=list)
+    dispersion: tuple[float, float, int] | None = None
 
 
 # Absolute-plausibility gate applied to EVERY candidate's per-100g macros,
@@ -407,6 +415,98 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
     )
 
 
+# Branded-tier selection thresholds (item 4/P5). Branded's catalog is orders
+# of magnitude larger and less curated than the generic dataTypes -- rank
+# alone (as `_best_match` uses for the small, curated generic tier) isn't a
+# reliable signal of accuracy here, so every eligible candidate across the
+# widened page (`_BRANDED_PAGE_SIZE`) is collected and judged as a group.
+_BRANDED_DISPERSION_MIN_CANDIDATES = 3
+_BRANDED_DISPERSION_MAX_RATIO = 3.0
+
+
+def _select_branded_match(payload: dict[str, Any], query: str, preparation: str | None = None) -> MatchOutcome:
+    """Branded-tier candidate selection: collects every candidate passing
+    the same relevance/preparation-or-modifier-blocklist/plausibility gates
+    `_best_match` uses (see its docstring), then picks by GROUP agreement
+    rather than rank, since Branded's sheer catalog volume and per-
+    manufacturer variance make a single top-ranked record's calorie value
+    untrustworthy on its own.
+
+    - 0 eligible candidates -> ungrounded (`match=None`), same as `_best_match`.
+    - >=3 eligible candidates whose calories span more than a 3x ratio
+      (max/min) -> the disagreement itself is evidence no single candidate
+      should be trusted; returns ungrounded with the range recorded in
+      `MatchOutcome.dispersion` for the corpus-wide report, rather than
+      picking one arbitrarily.
+    - Otherwise: selects the actual candidate RECORD whose calories is the
+      median (for an even candidate count, the lower of the two middle
+      values -- ties broken by ascending `fdcId` for full determinism).
+      Never synthesizes an average value -- the selected macros and fdc_id
+      both come from one real FDC record, preserving provenance.
+
+    No further dataType-based deprioritization is applied here (unlike
+    `_best_match`'s `_DATA_TYPE_PRIORITY` sort) -- every candidate reaching
+    this function is already Branded; Branded itself is already the
+    strict, last-resort fallback tier (see `UsdaClient.search_food`).
+    """
+    foods = payload.get("foods") or []
+    rejections: list[str] = []
+    eligible: list[tuple[float, int, dict[str, Any], str, FoodMacros]] = []
+
+    for food in foods:
+        description = food.get("description", "")
+        if not _is_relevant_match(query, description, preparation):
+            continue
+
+        if preparation is not None:
+            if _classify_preparation(description) != preparation:
+                continue
+        else:
+            modifier = _processed_state_modifier(description)
+            if modifier is not None:
+                rejections.append(f"processed_state_modifier:{modifier}")
+                continue
+
+        macros = _extract_macros(food)
+        if macros is None:
+            continue
+
+        reject_reason = _plausibility_reject_reason(macros)
+        if reject_reason is not None:
+            rejections.append(reject_reason)
+            continue
+
+        eligible.append((macros.calories, food["fdcId"], food, description, macros))
+
+    if not eligible:
+        return MatchOutcome(match=None, rejections=rejections)
+
+    if len(eligible) >= _BRANDED_DISPERSION_MIN_CANDIDATES:
+        calorie_values = [item[0] for item in eligible]
+        min_kcal, max_kcal = min(calorie_values), max(calorie_values)
+        if min_kcal > 0 and (max_kcal / min_kcal) > _BRANDED_DISPERSION_MAX_RATIO:
+            rejections.append("branded_high_dispersion")
+            return MatchOutcome(
+                match=None,
+                rejections=rejections,
+                dispersion=(min_kcal, max_kcal, len(eligible)),
+            )
+
+    eligible.sort(key=lambda item: (item[0], item[1]))  # calories asc, fdc_id asc tie-break
+    median_index = (len(eligible) - 1) // 2  # true median (odd) / lower-of-two-middle (even)
+    _, _, food, description, macros = eligible[median_index]
+    return MatchOutcome(
+        match=FoodMatch(
+            fdc_id=food["fdcId"],
+            description=description,
+            data_type=food.get("dataType", ""),
+            macros=macros,
+            query=query,
+        ),
+        rejections=rejections,
+    )
+
+
 # Queries where the general mechanism (relevance check + preparation gate +
 # plausibility gate) reliably lands on a wrong-form record with plausible-
 # looking macros, confirmed by manual review against real-world reference
@@ -561,6 +661,12 @@ class UsdaClient:
         # after a full corpus pass to report "N candidates rejected for
         # reason X" corpus-wide. Never consulted by matching logic itself.
         self.rejection_counts: Counter[str] = Counter()
+        # Cumulative, diagnostic-only log of Branded-tier high-dispersion
+        # events (see `_select_branded_match`/`MatchOutcome.dispersion`) --
+        # (query, min_kcal, max_kcal, candidate_count) per occurrence. Read
+        # by `grounding_job.run_grounding` for the report; never consulted
+        # by matching logic itself.
+        self.branded_dispersion_events: list[tuple[str, float, float, int]] = []
 
     def search_food(self, name: str, *, preparation: str | None = None) -> FoodMatch | None:
         """Look up macros for `name`, optionally gated to a declared `preparation`
@@ -609,8 +715,11 @@ class UsdaClient:
 
         branded_payload = self._get_payload(search_query, _BRANDED_DATA_TYPES, _BRANDED_PAGE_SIZE)
         if branded_payload is not None:
-            branded_outcome = _best_match(branded_payload, query, preparation)
+            branded_outcome = _select_branded_match(branded_payload, query, preparation)
             self.rejection_counts.update(branded_outcome.rejections)
+            if branded_outcome.dispersion is not None:
+                min_kcal, max_kcal, count = branded_outcome.dispersion
+                self.branded_dispersion_events.append((query, min_kcal, max_kcal, count))
             if branded_outcome.match is not None:
                 return branded_outcome.match
 

@@ -17,6 +17,7 @@ from app.services.usda_client import (
     _classify_preparation,
     _is_relevant_match,
     _plausibility_reject_reason,
+    _select_branded_match,
     _tokenize,
 )
 
@@ -1011,3 +1012,116 @@ def test_known_unreliable_query_still_excluded_even_though_not_aliased(tmp_path)
     assert "chili powder" not in _FDC_QUERY_ALIASES
     assert "shrimp" not in _FDC_QUERY_ALIASES
     assert "tomato sauce" not in _FDC_QUERY_ALIASES
+
+
+# --- Branded-tier selection: median-calorie agreement, not first-ranked ---
+
+
+def _branded_food(fdc_id: int, calories: float, *, description: str = "Widget") -> dict:
+    # Pure-fat macros (protein/carbs=0) so calories = 9*fat_g exactly --
+    # trivially clears the plausibility gate's Atwater check for any
+    # `calories` value used across these tests, regardless of magnitude.
+    return _macro_food(fdc_id, description, "Branded", calories=calories, protein_g=0, fat_g=calories / 9, carbs_g=0)
+
+
+def test_select_branded_match_returns_none_when_no_candidate_is_eligible() -> None:
+    payload = {"foods": [{"fdcId": 1, "description": "Unrelated Thing", "dataType": "Branded", "foodNutrients": []}]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is None
+    assert outcome.dispersion is None
+
+
+def test_select_branded_match_picks_true_median_for_odd_candidate_count() -> None:
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 300), _branded_food(3, 200)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 3  # 200 is the true median of [100, 200, 300]
+    assert outcome.match.macros.calories == 200
+    assert outcome.dispersion is None
+
+
+def test_select_branded_match_picks_lower_of_two_middle_for_even_candidate_count() -> None:
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 200), _branded_food(3, 250), _branded_food(4, 300)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    # sorted calories: [100, 200, 250, 300] -- two middles are 200 and 250;
+    # the LOWER of the two (200, fdc_id=2) is selected, not an average.
+    assert outcome.match.fdc_id == 2
+    assert outcome.match.macros.calories == 200
+
+
+def test_select_branded_match_ties_broken_by_ascending_fdc_id() -> None:
+    # Two candidates share the same (median) calorie value -- deterministic
+    # tie-break picks the lower fdc_id, not payload order.
+    payload = {
+        "foods": [_branded_food(30, 200), _branded_food(10, 200), _branded_food(20, 100), _branded_food(40, 300)]
+    }
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 10  # lower of the two fdc_ids tied at the median calorie value
+
+
+def test_select_branded_match_rejects_high_dispersion_with_three_plus_candidates() -> None:
+    # max/min = 500/100 = 5.0x > 3.0x -- disagreement is too large to trust
+    # any single candidate; ungrounded with the range recorded for the report.
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 200), _branded_food(3, 500)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is None
+    assert outcome.dispersion == (100, 500, 3)
+    assert "branded_high_dispersion" in outcome.rejections
+
+
+def test_select_branded_match_allows_high_dispersion_with_fewer_than_three_candidates() -> None:
+    # Same 5x ratio, but only 2 candidates -- the >=3 threshold means this
+    # isn't treated as a corroborated disagreement, just picks the median
+    # (lower of the two, per the even-count rule).
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 500)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 1
+    assert outcome.dispersion is None
+
+
+def test_select_branded_match_allows_within_bound_dispersion() -> None:
+    # max/min = 250/100 = 2.5x <= 3.0x -- within bound, proceeds to median
+    # selection instead of rejecting.
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 150), _branded_food(3, 250)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 2
+    assert outcome.dispersion is None
+
+
+def test_branded_tier_fetch_uses_page_size_25(tmp_path) -> None:
+    session = FakeSession(payload={"foods": []})
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    client.search_food("nonexistent widget xyz")
+
+    # Two calls: generic tier, then Branded fallback -- the Branded one must
+    # request pageSize=25.
+    assert session.calls == 2
+    assert session.last_params["pageSize"] == 25
+    assert session.last_params["dataType"] == ["Branded"]
+
+
+def test_branded_dispersion_event_recorded_on_client_end_to_end(tmp_path) -> None:
+    # TieredFakeSession (not plain FakeSession) so the generic tier
+    # genuinely returns nothing, forcing the Branded fallback -- a plain
+    # FakeSession would serve the same dispersed payload to BOTH tiers and
+    # let the generic-tier `_best_match` (which doesn't restrict by
+    # dataType) resolve it first-ranked before ever reaching the Branded
+    # selection logic under test.
+    branded_payload = {"foods": [_branded_food(1, 100), _branded_food(2, 200), _branded_food(3, 500)]}
+    session = TieredFakeSession(
+        {
+            ("Foundation", "SR Legacy", "Survey (FNDDS)"): {"foods": []},
+            ("Branded",): branded_payload,
+        }
+    )
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+    assert client.branded_dispersion_events == [("widget", 100, 500, 3)]
