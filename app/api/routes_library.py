@@ -28,6 +28,18 @@ def save_recipe_candidates(request: SaveRecipeCandidatesRequest) -> SaveRecipeCa
 
 @router.post("/reindex", response_model=ReindexLibraryResponse)
 def reindex_recipe_library() -> ReindexLibraryResponse:
+    # Intentionally `rebuild_index` (upsert), not `rebuild_index_clean`: this
+    # is a synchronous request-latency-sensitive endpoint, and
+    # `rebuild_index_clean` drops and re-embeds the ENTIRE collection
+    # (base corpus + all user recipes -- thousands of documents) on every
+    # call, which would make a single reindex request far too slow. Upsert
+    # never prunes stale/orphaned ids left behind by a smaller or corrected
+    # corpus re-import (see app/services/recipe_indexing_service.py), so
+    # periodic clean rebuilds still belong in the offline
+    # scripts/backfill_recipe_library.py / scripts/ingest_recipes.py path,
+    # not this endpoint. This same staleness is the source of the `user_*`
+    # ids the retrieval eval had to filter out of raw Chroma results -- see
+    # app.evaluation.eval_retrieval.semantic_search_ids.
     indexed_count = RecipeIndexingService().rebuild_index(include_base=True, include_user=True)
     return ReindexLibraryResponse(indexed_count=indexed_count, status="ok")
 

@@ -10,12 +10,37 @@ or re-grounded. Re-run this script deliberately (and re-review the diff)
 if the query set itself needs to change; a corpus change alone should NOT
 regenerate the file on every eval run.
 
-Each query's ground truth is defined independently of the retrieval methods
-being scored (title-substring match / structured ingredient-membership match
-/ cuisine or meal_type or diet_tag field match), the same "independent
-ground truth" principle scripts/audit_diet_leaks.py uses -- otherwise a
-"relevant" set built from the retriever under test would make the eval
-circular.
+Each query's ground truth is defined independently of the SEMANTIC retrieval
+method under test (title-substring match / structured ingredient-membership
+match / cuisine or meal_type or diet_tag field match) -- the same
+"independent ground truth" principle scripts/audit_diet_leaks.py uses,
+otherwise a "relevant" set built from the retriever under test would make
+that arm of the eval circular.
+
+CORRECTION: this independence does NOT hold for the KEYWORD baseline.
+`RecipeRetriever.keyword_search` (app/services/recipe_retriever.py) scores
+recipes by literally the same predicates used here to build ground truth for
+the `ingredient`, `cuisine`, and `meal_type` categories (ingredient-membership
+via `ingredient_matches`, exact cuisine match, exact meal_type match). So
+keyword's near-1.0 score on those three categories is an ORACLE UPPER BOUND
+-- it is measuring "does the label-generating predicate match itself",
+not evidence the keyword path handles real user queries well. The `dish`,
+`dietary`, and `paraphrase` categories (title-substring match, diet-tag
+match, and a canonical-ingredient predicate paired with colloquial/synonym
+query text respectively) are genuinely method-independent for BOTH keyword
+and semantic, and are the meaningful comparison categories --
+see scripts/evaluate_retrieval.py's methodology note and gate definition.
+
+BACKLOG (not implemented here): corpus metadata enrichment. `cuisine`,
+`meal_type`, and `diet_tags` are populated for the 25 hand-curated seed
+recipes but almost entirely absent on the ~4,238 imported Food.com recipes,
+which is why the `cuisine` and `dietary` categories' ground truth is
+seed-only. An ML auto-tagger (classifier over title/ingredients) is a
+candidate to backfill this metadata at scale, but per CLAUDE.md any such
+model is advisory-only: it may suggest/rank tags, and MUST NEVER feed the
+deterministic allergy/diet safety filter (app.services.constraint_engine)
+-- that filter's tag/ingredient inputs must remain from grounded,
+non-learned sources.
 
 Usage: python scripts/gen_retrieval_eval_queries.py
 """
@@ -168,6 +193,106 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
             query_id, "dietary", f"I need {desc}.",
             ingredients=ings,
             predicate=lambda r, tag=diet_tag, ings=ings: _has_diet_tag(r, tag) and _has_all_ingredients(r, ings),
+        )
+
+    # --- paraphrase queries: the method-independent vocabulary-bridging test.
+    # Ground truth uses the SAME `_has_all_ingredients` predicate over
+    # CANONICAL corpus ingredient names as the `ingredient` category above,
+    # but the free-text `description` AND the structured `ingredients` field
+    # use colloquial/synonym surface forms a real user might type instead of
+    # the canonical name. This isolates whether a retrieval method can
+    # bridge vocabulary a literal `ingredient_matches` lookup cannot --
+    # independent of which method is under test, since the ground truth
+    # never touches either method's matching logic.
+    #
+    # Some surface forms below (e.g. "prawns"->shrimp, "capsicum"->bell
+    # pepper) ARE already resolved by
+    # app.utils.ingredient_normalizer.SYNONYMS, so keyword_search's own
+    # normalization will also succeed on those -- that is a legitimate
+    # finding (the synonym table already covers that gap), not a broken
+    # query. Others ("bean curd", "leftover roast chicken", "minced beef")
+    # are genuine gaps the normalizer does not cover, which is where a
+    # semantic-vs-keyword gap would be expected to show up if embeddings are
+    # doing real vocabulary generalization.
+    #
+    # NOTE on combo sizes: several canonical terms ("green onion", "bell
+    # pepper", "eggplant") are prone to spurious `ingredient_matches` hits
+    # via short-substring overlap (e.g. "onion" matches "green onion",
+    # "egg" matches "eggplant" -- see NOTICED-NOT-FIXED in the Phase 1.5
+    # closeout report). Pairing those terms with a second/third co-occurring
+    # canonical ingredient (mirroring how the `ingredient` category above
+    # mostly uses 2-3 term AND-predicates) keeps ground truth reasonably
+    # precise without touching `ingredient_matches` itself, which is a
+    # pre-existing, separately-scoped issue.
+    paraphrase_queries = [
+        (
+            "garbanzo beans and cumin",
+            ["chickpea", "cumin"],
+            "a stew with garbanzo beans and cumin",
+            ["garbanzo beans", "cumin"],
+        ),
+        ("prawns and garlic", ["shrimp", "garlic"], "a dish with prawns and garlic", ["prawns", "garlic"]),
+        (
+            "scallions, tamari, and ginger",
+            ["green onion", "soy sauce", "ginger"],
+            "a stir fry with scallions, tamari, and fresh ginger",
+            ["scallions", "tamari", "ginger"],
+        ),
+        (
+            "leftover roast chicken with ginger",
+            ["chicken breast", "ginger"],
+            "a way to use up leftover roast chicken with some fresh ginger",
+            ["leftover roast chicken", "ginger"],
+        ),
+        (
+            "aubergine, garlic, and tomato",
+            ["eggplant", "garlic", "tomato"],
+            "a recipe with aubergine, garlic, and tomato",
+            ["aubergine", "garlic", "tomato"],
+        ),
+        (
+            "fresh cilantro and cumin",
+            ["coriander", "cumin"],
+            "a dish with fresh cilantro and cumin",
+            ["fresh cilantro", "cumin"],
+        ),
+        ("bean curd", ["tofu"], "a recipe using bean curd", ["bean curd"]),
+        (
+            "courgette and parmesan",
+            ["zucchini", "parmesan"],
+            "a dish with courgette and parmesan",
+            ["courgette", "parmesan"],
+        ),
+        (
+            "garbanzos and spinach",
+            ["chickpea", "spinach"],
+            "garbanzos and spinach for dinner",
+            ["garbanzos", "spinach"],
+        ),
+        (
+            "minced beef and carrot",
+            ["beef", "carrot"],
+            "a dish with minced beef and carrot",
+            ["minced beef", "carrot"],
+        ),
+        (
+            "capsicum and cumin",
+            ["bell pepper", "cumin"],
+            "a recipe with capsicum and cumin",
+            ["capsicum", "cumin"],
+        ),
+        (
+            "capsicum, corn, and black beans",
+            ["bell pepper", "corn", "black bean"],
+            "a dish with capsicum, corn, and black beans",
+            ["capsicum", "corn", "black beans"],
+        ),
+    ]
+    for i, (_label, canonical, desc, colloquial_ings) in enumerate(paraphrase_queries, start=1):
+        add(
+            f"para_{i:02d}", "paraphrase", desc,
+            ingredients=colloquial_ings,
+            predicate=lambda r, names=canonical: _has_all_ingredients(r, names),
         )
 
     return queries
