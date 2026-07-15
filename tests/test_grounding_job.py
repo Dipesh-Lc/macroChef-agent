@@ -8,6 +8,7 @@ from app.schemas.ingredient import Ingredient
 from app.schemas.nutrition import FoodMacros, FoodMatch, GroundingStatus, RecipeNutrition
 from app.schemas.recipe import Recipe
 from app.services.grounding_job import (
+    DEMOTING_FLAG_IMPLAUSIBLE_KCAL,
     IMPLAUSIBLE_MAX_KCAL_PER_SERVING,
     RATIO_OUTLIER_MAX,
     RAW_COOKED_BLOWUP_RATIO,
@@ -426,6 +427,31 @@ def test_corpus_wide_ratio_distribution_and_outliers(tmp_path) -> None:
     assert any(o.recipe_id == "r_23" for o in report.ratio_outliers)
     assert all(o.ratio > RATIO_OUTLIER_MAX for o in report.ratio_outliers if o.recipe_id == "r_23")
     assert not any(o.recipe_id == "r_22" for o in report.ratio_outliers)
+
+
+def test_implausible_kcal_is_written_to_the_sidecar_as_a_demoting_flag(tmp_path) -> None:
+    # Not just a seed: the flag must land on the sidecar's RecipeNutrition
+    # itself, corpus-wide, so nutrition_view's chokepoint (which only ever
+    # reads recipe.nutrition, never the report) sees it too.
+    recipe = _recipe("r_30", "Absurd", [Ingredient(name="oil", amount=1000, unit="g")], calories=500)
+    client = FakeUsdaClient({"oil": _match("oil", calories=884)})  # 8840 kcal/serving
+
+    sidecar_path = tmp_path / "grounding.jsonl"
+    run_grounding(client=client, sidecar_path=sidecar_path, corpus=[recipe], seeds=[recipe])
+
+    rows = [json.loads(line) for line in sidecar_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["nutrition"]["flags"] == [DEMOTING_FLAG_IMPLAUSIBLE_KCAL]
+
+
+def test_plausible_recipe_has_no_flags_in_the_sidecar(tmp_path) -> None:
+    recipe = _recipe("r_31", "Chicken Bowl", [Ingredient(name="chicken breast", amount=200, unit="g")], calories=330)
+    client = FakeUsdaClient({"chicken breast": _match("chicken breast", calories=165, protein_g=31)})
+
+    sidecar_path = tmp_path / "grounding.jsonl"
+    run_grounding(client=client, sidecar_path=sidecar_path, corpus=[recipe], seeds=[recipe])
+
+    rows = [json.loads(line) for line in sidecar_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["nutrition"]["flags"] == []
 
 
 def test_corpus_wide_implausible_band_count_independent_of_seed_set(tmp_path) -> None:

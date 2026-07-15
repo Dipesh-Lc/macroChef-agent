@@ -48,9 +48,21 @@ RATIO_OUTLIER_MAX = 2.5
 _RATIO_OUTLIER_TABLE_LIMIT = 100
 
 # A GROUNDED/PARTIAL recipe's per-serving kcal outside this band is flagged
-# for manual review -- not auto-corrected, just surfaced (see GroundingReport).
+# for manual review -- not auto-corrected. Originally (item 1.4) checked only
+# for the 25 seeds and report-only; phase 1.5 item 4/P3 extends this
+# corpus-wide AND writes it into the sidecar as a trust-DEMOTING flag (see
+# DEMOTING_FLAG_IMPLAUSIBLE_KCAL / `_apply_trust_flags`) -- an implausible
+# computed value must not be silently trusted just because every ingredient
+# happened to ground. See app.services.nutrition_view for the chokepoint
+# that enforces the demotion.
 IMPLAUSIBLE_MIN_KCAL_PER_SERVING = 20.0
 IMPLAUSIBLE_MAX_KCAL_PER_SERVING = 2000.0
+
+# Trust-demoting flag reason code written to `RecipeNutrition.flags` (see
+# `_apply_trust_flags`) when per-serving kcal falls outside the band above.
+# Computed purely from this recipe's own computed values -- never from its
+# self-reported tag macros, and never from an LLM.
+DEMOTING_FLAG_IMPLAUSIBLE_KCAL = "implausible_kcal_per_serving"
 
 # Empirically, a raw/cooked or raw/canned mismatch inflates computed calories
 # by roughly 2-3x (see the Step A analysis); 1.6x is a conservative trigger
@@ -202,6 +214,30 @@ def _ingredient_detail(ingredient: Ingredient, contribution: IngredientContribut
     )
 
 
+def _is_implausible_kcal(nutrition: RecipeNutrition) -> bool:
+    """True if `nutrition`'s own computed per-serving kcal falls outside
+    [IMPLAUSIBLE_MIN_KCAL_PER_SERVING, IMPLAUSIBLE_MAX_KCAL_PER_SERVING] --
+    only meaningful for a GROUNDED/PARTIAL recipe (UNGROUNDED has no
+    computed total to judge, and is never flagged this way)."""
+    if nutrition.status == GroundingStatus.UNGROUNDED:
+        return False
+    kcal = nutrition.per_serving.calories
+    return not (IMPLAUSIBLE_MIN_KCAL_PER_SERVING <= kcal <= IMPLAUSIBLE_MAX_KCAL_PER_SERVING)
+
+
+def _apply_trust_flags(nutrition: RecipeNutrition) -> RecipeNutrition:
+    """Sets trust-DEMOTING flags on `nutrition` (mutates `nutrition.flags`
+    and returns the same object) based purely on its own already-computed
+    values -- never the recipe's self-reported tag macros, never an LLM.
+    Currently the only flag is the implausible per-serving-kcal band; see
+    `DEMOTING_FLAG_IMPLAUSIBLE_KCAL`. Called by `run_grounding` for every
+    corpus recipe before the sidecar is written, so the flag is a durable
+    part of the sidecar itself -- not recomputed ad hoc by report code."""
+    if _is_implausible_kcal(nutrition) and DEMOTING_FLAG_IMPLAUSIBLE_KCAL not in nutrition.flags:
+        nutrition.flags.append(DEMOTING_FLAG_IMPLAUSIBLE_KCAL)
+    return nutrition
+
+
 def _write_sidecar(path: Path, results: dict[str, RecipeNutrition]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -232,9 +268,8 @@ def run_grounding(
 
     results: dict[str, RecipeNutrition] = {}
     for recipe in sorted(corpus, key=lambda r: r.recipe_id):
-        results[recipe.recipe_id] = compute_recipe_macros(
-            recipe.ingredients, servings=recipe.servings or 1, client=client
-        )
+        nutrition = compute_recipe_macros(recipe.ingredients, servings=recipe.servings or 1, client=client)
+        results[recipe.recipe_id] = _apply_trust_flags(nutrition)
 
     _write_sidecar(Path(sidecar_path), results)
 
@@ -300,9 +335,14 @@ def build_report(
         has_prep = any(ingredient.preparation is not None for ingredient in seed.ingredients)
         is_grounded_ish = nutrition.status != GroundingStatus.UNGROUNDED
 
-        implausible = is_grounded_ish and not (
-            IMPLAUSIBLE_MIN_KCAL_PER_SERVING <= computed_kcal <= IMPLAUSIBLE_MAX_KCAL_PER_SERVING
-        )
+        # Same underlying band check `_apply_trust_flags` used to set
+        # `nutrition.flags` -- kept as a direct check here (not a
+        # `DEMOTING_FLAG_IMPLAUSIBLE_KCAL in nutrition.flags` lookup) so this
+        # report field works identically whether or not the `results` this
+        # function was handed already went through `_apply_trust_flags`
+        # (e.g. `build_report` invoked directly on a hand-built RecipeNutrition
+        # in a test, or on an older sidecar).
+        implausible = _is_implausible_kcal(nutrition)
         blowup = has_prep and is_grounded_ish and ratio is not None and ratio > RAW_COOKED_BLOWUP_RATIO
 
         ingredients_detail = [
@@ -349,7 +389,7 @@ def build_report(
             continue
 
         computed_kcal = nutrition.per_serving.calories
-        if not (IMPLAUSIBLE_MIN_KCAL_PER_SERVING <= computed_kcal <= IMPLAUSIBLE_MAX_KCAL_PER_SERVING):
+        if _is_implausible_kcal(nutrition):
             implausible_band_corpus_count += 1
 
         if not recipe.calories:

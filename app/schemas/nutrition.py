@@ -62,6 +62,15 @@ class RecipeNutrition(BaseModel):
     `status` is `PARTIAL`, they undercount the true recipe macros by
     whatever `ungrounded_ingredients` is missing — callers must check
     `status` (and/or `coverage`) before presenting these as authoritative.
+
+    `flags` holds trust-DEMOTING reason codes computed from this object's
+    OWN computed values (e.g. an implausible per-serving kcal figure) --
+    never from the recipe's self-reported tag macros, and never set by an
+    LLM. A non-empty `flags` overrides `status` for trust purposes: see
+    `app.services.nutrition_view.trusted_per_serving`/`macro_display_state`,
+    the single chokepoint that enforces this, even for an otherwise
+    `GROUNDED` recipe. Populated by `app.services.grounding_job.run_grounding`
+    at grounding time, not by this schema itself.
     """
 
     status: GroundingStatus
@@ -71,3 +80,4 @@ class RecipeNutrition(BaseModel):
     contributions: list[IngredientContribution] = Field(default_factory=list)
     ungrounded_ingredients: list[str] = Field(default_factory=list)
     coverage: float = Field(ge=0, le=1)
+    flags: list[str] = Field(default_factory=list)
