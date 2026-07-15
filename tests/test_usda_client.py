@@ -5,17 +5,19 @@ import pytest
 import requests
 
 from app.config import Settings
-from app.services.nutrition_cache import FdcCache
 from app.schemas.nutrition import FoodMacros
+from app.services.nutrition_cache import FdcCache
 from app.services.usda_client import (
     _BRANDED_DATA_TYPES,
     _BRANDED_PAGE_SIZE,
+    _FDC_QUERY_ALIASES,
     _GENERIC_DATA_TYPES,
     _GENERIC_PAGE_SIZE,
     UsdaClient,
     _classify_preparation,
     _is_relevant_match,
     _plausibility_reject_reason,
+    _tokenize,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -467,16 +469,22 @@ def test_relevance_check_rejects_avocado_oil_end_to_end(tmp_path) -> None:
     assert match.macros.calories == 167
 
 
-def test_relevance_check_rejects_zucchini_bread_end_to_end(tmp_path) -> None:
-    # Both candidates ultimately fail (the correct one for the disclosed
-    # squash/zucchini naming-divergence reason) -- ungrounded, not a
-    # silent wrong-food match. See the parametrized case above.
+def test_relevance_check_rejects_zucchini_bread_but_alias_resolves_the_real_record_end_to_end(tmp_path) -> None:
+    # "Bread, zucchini" (a derivative product) is still correctly rejected
+    # by the bare relevance check -- but the phase 1.5/P4
+    # `_FDC_QUERY_ALIASES` entry for "zucchini" now lets the genuinely
+    # correct "Squash, summer, green, zucchini, includes skin, raw" record
+    # resolve, instead of leaving this UNGROUNDED as before P4 (see the
+    # parametrized `_is_relevant_match` case above, which is still true for
+    # the UN-aliased bare query -- that check itself didn't change).
     session = FakeSession(payload=_load_fixture("fdc_zucchini_relevance_search.json"))
     client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
 
     match = client.search_food("zucchini")
 
-    assert match is None
+    assert match is not None
+    assert match.description == "Squash, summer, green, zucchini, includes skin, raw"
+    assert match.macros.calories == 17
 
 
 def test_relevance_check_accepts_real_oats_rejects_oat_milk_end_to_end(tmp_path) -> None:
@@ -914,3 +922,92 @@ def test_payload_cache_key_distinguishes_page_size(tmp_path) -> None:
     assert cache.get_payload("widget", ["Branded"], 5) == {"foods": ["five"]}
     assert cache.get_payload("widget", ["Branded"], 25) == {"foods": ["twenty-five"]}
     assert cache.get_payload("widget", ["Branded"], 10) is None
+
+
+# --- _FDC_QUERY_ALIASES: FDC-vocabulary aliases for a normalized query ---
+
+
+@pytest.mark.parametrize("original,alias", sorted(_FDC_QUERY_ALIASES.items()))
+def test_alias_invariant_original_tokens_are_a_subset_of_alias_tokens(original, alias) -> None:
+    # The structural safety property: the queried food's own identity
+    # token(s) must literally appear in the alias, so an alias can only
+    # supply vocabulary FDC files the SAME food under -- never bridge to a
+    # different food (see _FDC_QUERY_ALIASES's module comment).
+    assert _tokenize(original) <= _tokenize(alias)
+
+
+def test_alias_search_query_is_sent_to_fdc_and_used_for_relevance(tmp_path) -> None:
+    # "cumin" alone would never match "Spices, cumin seed" (head is
+    # "Spices", not a cumin token) -- this only passes if the alias is used
+    # for BOTH the string sent to FDC and the relevance/head-noun check.
+    payload = {"foods": [_macro_food(170923, "Spices, cumin seed", "SR Legacy", calories=375, protein_g=18, fat_g=22, carbs_g=44)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("cumin")
+
+    assert session.last_params["query"] == "spices cumin seed"
+    assert match is not None
+    assert match.fdc_id == 170923
+    assert match.query == "spices cumin seed"
+
+
+def test_alias_is_keyed_by_the_normalized_query_not_free_form_text(tmp_path) -> None:
+    # normalize_ingredient runs before the alias lookup -- a free-form
+    # variant of an aliased ingredient still resolves through it.
+    payload = {"foods": [_macro_food(170926, "Spices, ginger, ground", "SR Legacy", calories=335, protein_g=9, fat_g=5, carbs_g=71)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("Fresh Ginger")
+
+    assert match is not None
+    assert match.fdc_id == 170926
+
+
+# Pinned fixture tests (payload -> expected fdc_id) for the top 10
+# `_FDC_QUERY_ALIASES` entries, live-verified against real FDC records
+# during the phase 1.5/P4 curation pass (fdc_id/description/approximate
+# calories are the real live values; protein/fat/carbs are plausible
+# stand-ins sized to clear the plausibility gate, not necessarily FDC's
+# exact reported values).
+@pytest.mark.parametrize(
+    ("original", "alias", "fdc_id", "description", "calories"),
+    [
+        ("coriander", "spices coriander seed", 170922, "Spices, coriander seed", 298),
+        ("cumin", "spices cumin seed", 170923, "Spices, cumin seed", 375),
+        ("oregano", "spices oregano dried", 171328, "Spices, oregano, dried", 265),
+        ("nutmeg", "spices nutmeg ground", 171326, "Spices, nutmeg, ground", 525),
+        ("paprika", "spices paprika", 171329, "Spices, paprika", 282),
+        ("black pepper", "spices pepper black", 170931, "Spices, pepper, black", 251),
+        ("ginger", "spices ginger ground", 170926, "Spices, ginger, ground", 335),
+        ("garlic powder", "spices garlic powder", 171325, "Spices, garlic powder", 331),
+        ("turmeric", "spices turmeric ground", 172231, "Spices, turmeric, ground", 312),
+        ("cardamom", "spices cardamom", 170919, "Spices, cardamom", 311),
+    ],
+)
+def test_pinned_alias_fixtures_resolve_to_the_real_fdc_record(
+    tmp_path, original, alias, fdc_id, description, calories
+) -> None:
+    assert _FDC_QUERY_ALIASES[original] == alias
+
+    payload = {"foods": [_macro_food(fdc_id, description, "SR Legacy", calories=calories, protein_g=10, fat_g=10, carbs_g=50)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food(original)
+
+    assert match is not None
+    assert match.fdc_id == fdc_id
+    assert match.description == description
+    assert match.macros.calories == calories
+
+
+def test_known_unreliable_query_still_excluded_even_though_not_aliased(tmp_path) -> None:
+    # "chili powder" has no verified alias (see grounding_job._KNOWN_RESIDUALS)
+    # and stays on _KNOWN_UNRELIABLE_QUERIES -- confirm it's not accidentally
+    # present in _FDC_QUERY_ALIASES (which would be dead code, since the
+    # exclusion check runs first and returns before the alias lookup).
+    assert "chili powder" not in _FDC_QUERY_ALIASES
+    assert "shrimp" not in _FDC_QUERY_ALIASES
+    assert "tomato sauce" not in _FDC_QUERY_ALIASES

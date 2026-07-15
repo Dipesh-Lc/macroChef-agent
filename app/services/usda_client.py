@@ -435,6 +435,104 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
 _KNOWN_UNRELIABLE_QUERIES = {"shrimp", "tomato sauce"}
 
 
+# --- Normalized-query -> FDC-vocabulary query aliases ---
+#
+# `_is_relevant_match`'s head-noun rule (see its docstring) is intentionally
+# strict: a candidate's head segment must consist only of query tokens, so a
+# bare "zucchini" query correctly refuses to match FDC's real "Squash,
+# summer, green, zucchini, ..." record (filed under its botanical name, not
+# "Zucchini") or "Cheese, parmesan, grated" (filed under "Cheese", not
+# "Parmesan") -- both are the right food, just not reachable by the bare
+# query's own vocabulary. Most spices/seasonings hit the same wall: FDC's
+# generic dataTypes (Foundation/SR Legacy/Survey) file virtually every one
+# under a "Spices, X, ..." head, not the bare spice name.
+#
+# This table maps a normalized query (see `normalize_ingredient`, run
+# BEFORE this lookup) to the FDC-vocabulary phrase that reaches the real
+# record -- applied in `UsdaClient.search_food` for BOTH the string actually
+# sent to FDC's search endpoint (materially improves FDC's own relevance
+# ranking, e.g. surfacing "Nuts, almonds, whole, raw" over "Almond butter"/
+# "Almond oil" for a bare "almond" query) AND the token-matching query
+# passed into `_is_relevant_match`/`_best_match` (so the relevance and head-
+# noun checks run against the SAME vocabulary that was actually searched).
+#
+# INVARIANT, enforced by a parametrized test in test_usda_client.py:
+# `_tokenize(original) <= _tokenize(alias)` for every entry -- the queried
+# food's own identity token(s) must literally appear in the alias. This is
+# what structurally prevents an alias from "bridging" to a different food
+# (e.g. an alias could never turn "salt" into "butter") -- it can only
+# supply the vocabulary FDC files the SAME food under.
+#
+# Curated by hand from the phase 1.5 baseline's top-50 corpus-wide
+# ungrounded-ingredient frequency table (data/processed/
+# grounding_report_baseline.md) plus the two design-example/known-residual
+# entries (zucchini, per grounding_job._KNOWN_RESIDUALS; almond). Every
+# entry below was individually verified against a live FDC lookup (pinned
+# as a fixture-backed regression test for the first ten) before being added
+# -- this is deliberately NOT a large or automatically-derived table (see
+# the phase 1.5 design's "De-scoped" list: "auto synonym derivation" was
+# explicitly ruled out). Most of the baseline's top-50 ungrounded entries
+# (salt, butter, sugar, water, flour, milk, ...) are NOT here: live
+# verification showed the large majority fail for a DIFFERENT reason this
+# table can't fix -- `app.utils.unit_converter.to_grams` has no density
+# entry for the volume unit they're most commonly given in (e.g. "1 tsp
+# salt"), so `search_food` is never even reached for most occurrences (see
+# `nutrition_grounding.compute_recipe_macros`). A few genuinely reach FDC
+# and are STILL correctly ungrounded even after an alias would be found:
+# salt/baking soda/baking powder's only relevant FDC records report a true,
+# near-zero per-100g kcal that the plausibility gate's absolute floor
+# (`_PLAUSIBLE_MIN_KCAL = 5`) was written to exclude as a data-defect signal
+# -- an honest tension between "exclude 0-kcal defects" and "some real
+# foods are genuinely ~calorie-free" that an alias cannot resolve (adding a
+# per-food plausibility exception is a rule change outside this item's
+# scope; flagged for a follow-up consult rather than special-cased here).
+# Different table from `app.utils.ingredient_normalizer.SYNONYMS` --
+# deliberately NOT merged: that table maps free-form recipe text to a
+# canonical pantry name for matching/scoring; this one maps a canonical
+# name to FDC's own filing vocabulary. Conflating them would make either
+# table's purpose unclear from its own contents.
+_FDC_QUERY_ALIASES: dict[str, str] = {
+    # Spices/seasonings: FDC's generic dataTypes file these under "Spices, X".
+    "coriander": "spices coriander seed",
+    "cumin": "spices cumin seed",
+    "oregano": "spices oregano dried",
+    "nutmeg": "spices nutmeg ground",
+    "paprika": "spices paprika",
+    "black pepper": "spices pepper black",
+    "ginger": "spices ginger ground",
+    "garlic powder": "spices garlic powder",
+    "turmeric": "spices turmeric ground",
+    "cardamom": "spices cardamom",
+    "clove": "spices cloves ground",
+    "allspice": "spices allspice ground",
+    "tarragon": "spices tarragon dried",
+    "curry powder": "spices curry powder",
+    "bay leaf": "spices bay leaf",
+    "cayenne pepper": "spices pepper red or cayenne",
+    "cayenne": "spices pepper red or cayenne",
+    "sage": "spices sage ground",
+    "celery seed": "spices celery seed",
+    "white pepper": "spices pepper white",
+    "marjoram": "spices marjoram dried",
+    "fennel seed": "spices fennel seed",
+    # Herbs/other foods FDC files under a different head noun than the bare
+    # ingredient name.
+    "dill": "dill weed fresh",
+    "parmesan": "cheese parmesan grated",
+    "vanilla": "vanilla extract",
+    # zucchini: the documented residual (see grounding_job._KNOWN_RESIDUALS)
+    # -- FDC's real Foundation record is "Squash, summer, green, zucchini,
+    # includes skin, raw", filed under "Squash" (its botanical genus), not
+    # "Zucchini".
+    "zucchini": "squash zucchini",
+    # almond: the bare query's own top-5 FDC relevance ranking is dominated
+    # by derivatives (almond butter/oil/paste/"flavored") that all outrank
+    # the plain "Nuts, almonds, whole, raw" record; searching the alias
+    # phrase directly reorders FDC's own ranking to surface it.
+    "almond": "nuts almonds",
+}
+
+
 class UsdaClient:
     """Client for USDA FoodData Central's `/foods/search` endpoint.
 
@@ -476,6 +574,15 @@ class UsdaClient:
             return None
         if query in _KNOWN_UNRELIABLE_QUERIES:
             return None
+
+        # Alias to FDC's own filing vocabulary (see `_FDC_QUERY_ALIASES`)
+        # BEFORE building the search string, so every use of `query` below --
+        # the string actually sent to FDC, the relevance/head-noun check, and
+        # the returned `FoodMatch.query` -- consistently reflects the SAME
+        # vocabulary that was searched. `_KNOWN_UNRELIABLE_QUERIES` is
+        # checked first (above) against the un-aliased identity so an
+        # exclusion always wins regardless of whether an alias exists.
+        query = _FDC_QUERY_ALIASES.get(query, query)
 
         # Appending the declared preparation word to the search string (not
         # the relevance/gating query, which stays the bare ingredient name)

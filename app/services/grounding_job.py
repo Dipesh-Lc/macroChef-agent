@@ -88,24 +88,59 @@ _KNOWN_RESIDUALS = [
         "Not preparation-fixable.",
     ),
     (
-        "zucchini",
-        "FDC's canonical zucchini record is filed under 'Squash' (e.g. "
-        "'Squash, summer, green, zucchini, includes skin, raw'), not "
-        "'Zucchini' -- the relevance check's head-noun rule correctly "
-        "refuses to treat that as the same food as a bare 'zucchini' query "
-        "without a synonym table it doesn't have. Resolves to a Branded "
-        "'Zucchini, pickled' (~35 kcal/100g) instead of raw (~21 kcal/100g). "
-        "Not preparation-fixable.",
+        "zucchini (RESOLVED by phase 1.5/P4)",
+        "Previously stuck on a Branded 'Zucchini, pickled' match: FDC's "
+        "canonical zucchini record is filed under 'Squash' (e.g. 'Squash, "
+        "summer, green, zucchini, includes skin, raw'), not 'Zucchini', so "
+        "the relevance check's head-noun rule correctly refused to treat "
+        "that as the same food as a bare 'zucchini' query without an "
+        "explicit vocabulary mapping. Resolved by adding "
+        "usda_client._FDC_QUERY_ALIASES['zucchini'] = 'squash zucchini' -- "
+        "now resolves to the real raw Foundation record (~17-21 kcal/100g).",
     ),
     (
-        "shrimp / tomato sauce / chili powder / ginger",
+        "ginger (RESOLVED by phase 1.5/P4)",
+        "Previously the only reachable Branded record reported 0 kcal/100g "
+        "(a data defect the P1 plausibility gate correctly rejects as "
+        "'kcal_too_low'), leaving it UNGROUNDED. Resolved by adding "
+        "usda_client._FDC_QUERY_ALIASES['ginger'] = 'spices ginger ground', "
+        "which reaches the real SR Legacy 'Spices, ginger, ground' record "
+        "(~335 kcal/100g) at the generic tier, never reaching the defective "
+        "Branded record at all.",
+    ),
+    (
+        "shrimp / tomato sauce",
         "Explicitly excluded via usda_client._KNOWN_UNRELIABLE_QUERIES -- "
-        "shrimp and tomato sauce reliably resolve to a wrong-form match with "
-        "no preparation declaration able to gate it (a sauce/seafood has no "
-        "honest raw/cooked/canned state); chili powder and ginger's only "
-        "reachable Branded record reports 0 kcal/100g, a data defect rather "
-        "than a matching problem. All four render UNGROUNDED rather than a "
-        "confidently wrong number.",
+        "both reliably resolve to a wrong-form match with no preparation "
+        "declaration able to gate it (a sauce/seafood has no honest "
+        "raw/cooked/canned state), and both wrong-form matches' macros are "
+        "plausible-looking enough to clear the P1 plausibility gate too. "
+        "Render UNGROUNDED rather than a confidently wrong number.",
+    ),
+    (
+        "chili powder",
+        "The only reachable Branded record reports 0 kcal/100g -- a data "
+        "defect the P1 plausibility gate correctly rejects as "
+        "'kcal_too_low', and no generic-tier 'Spices, chili powder' record "
+        "was found to alias to (unlike the other spices resolved in "
+        "phase 1.5/P4) -- stays on usda_client._KNOWN_UNRELIABLE_QUERIES "
+        "as a disclosed, deliberate exclusion pending that verification.",
+    ),
+    (
+        "salt / baking soda / baking powder (fundamental plausibility-gate tension, NOT alias-fixable)",
+        "Live-verified (phase 1.5/P4 investigation): the real, relevant FDC "
+        "records for these (e.g. 'Salt, table') report a true, physically "
+        "correct near-zero kcal/100g -- not a data defect. The P1 "
+        "plausibility gate's absolute floor (_PLAUSIBLE_MIN_KCAL = 5, "
+        "written to catch a 0-kcal Branded data-entry defect) rejects them "
+        "for the same reason it correctly rejects a genuine defect: it "
+        "cannot distinguish 'this food really is ~calorie-free' from 'this "
+        "record is wrong.' No alias changes a real food's own true kcal "
+        "value, so this is a gap in the plausibility gate's design, not a "
+        "matching problem -- flagged for a follow-up ADVISE consult "
+        "(a per-food or near-zero-macro-consistent exception) rather than "
+        "special-cased here. In practice these ingredients' calorie "
+        "contribution to a recipe is genuinely negligible regardless.",
     ),
     (
         "olive oil",
