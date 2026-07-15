@@ -58,7 +58,8 @@ pip install -r requirements.txt
 # 3. Configure (mock mode — no API keys needed)
 cp .env.example .env
 
-# 4. Build the recipe index (bundled 25-recipe corpus)
+# 4. Build the recipe index (full grounded corpus: 25 curated seeds +
+#    imported Food.com recipes, ~4,200+ recipes)
 python scripts/ingest_recipes.py
 
 # 5. Run the API and the UI (two terminals)
@@ -142,10 +143,12 @@ LangGraph workflow
 
 ### RAG design
 
-`scripts/ingest_recipes.py` loads `data/processed/sample_recipes.jsonl`, builds a
-rich recipe document per recipe, stores recipe metadata, and persists the Chroma
-collection in `data/chroma`. Local sentence-transformers embeddings are attempted
-first; a deterministic hashing-embedding fallback keeps offline demos runnable.
+`scripts/ingest_recipes.py` does a clean rebuild of the full recipe corpus
+(`data/processed/sample_recipes.jsonl` + `data/processed/imported_recipes.jsonl`,
+grounded against USDA FoodData Central), builds a rich recipe document per
+recipe, stores recipe metadata, and persists the Chroma collection in
+`data/chroma`. Local sentence-transformers embeddings are attempted first; a
+deterministic hashing-embedding fallback keeps offline demos runnable.
 
 Beyond the 25 hand-curated seed recipes, the corpus also includes recipes
 imported via `scripts/import_corpus.py` into `data/processed/imported_recipes.jsonl`

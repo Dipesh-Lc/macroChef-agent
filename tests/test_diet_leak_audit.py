@@ -20,6 +20,15 @@ _CORPUS = _load_corpus(DEFAULT_CORPUS_PATH) if DEFAULT_CORPUS_PATH.exists() else
 def test_no_diet_leaks_across_full_corpus(diet_type: str) -> None:
     result = audit(_CORPUS, diet_type)
 
+    # Non-vacuous gate: a future change that over-rejects everything (0 recipes
+    # pass the filter) would trivially show 0 leaks without actually proving
+    # anything. Require the filter to actually admit recipes for this diet.
+    assert result["passed_filter"] > 0, (
+        f"{diet_type}: 0/{result['corpus_size']} recipes passed the filter -- "
+        f"the leak assertion below would be vacuously true, which is not a "
+        f"meaningful safety gate."
+    )
+
     assert result["leaking"] == 0, (
         f"{diet_type}: {result['leaking']}/{result['passed_filter']} recipes marked "
         f"safe still contain an excluded ingredient, e.g. {result['sample_leaks']}"

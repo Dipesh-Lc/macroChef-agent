@@ -9,7 +9,11 @@ from app.services.recipe_indexing_service import RecipeIndexingService  # noqa: 
 
 
 def main() -> None:
-    count = RecipeIndexingService().rebuild_index(include_base=True, include_user=True)
+    # rebuild_index_clean (not rebuild_index): rebuild_index upserts, which
+    # never prunes stale ids/metadata left behind by a smaller or corrected
+    # corpus re-import -- rebuild_index_clean drops and recreates the Chroma
+    # collection first so no orphaned embeddings survive a re-run.
+    count = RecipeIndexingService().rebuild_index_clean(include_base=True, include_user=True)
     print(f"Indexed {count} base and user-saved recipes.")
 
 
