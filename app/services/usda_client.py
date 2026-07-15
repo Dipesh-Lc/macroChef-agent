@@ -276,10 +276,65 @@ def _plausibility_reject_reason(macros: FoodMacros) -> str | None:
     return None
 
 
+# --- Undeclared-preparation handling ---
+#
+# `preparation` gating (above) only covers ingredients that declare a state.
+# For everything else (the vast majority of the imported corpus, which has
+# no per-ingredient `preparation` field authored at all), a candidate can
+# still silently be a processed/derived form of the right food purely
+# because of dataType-tier order -- e.g. "zucchini" landing on a Branded
+# "Zucchini, pickled" record. Two independent, narrower mechanisms address
+# this without needing every ingredient in the corpus to declare a state:
+#
+# 1. A processed-state modifier BLOCKLIST (a gate, applied only when
+#    `preparation is None`): reject a candidate whose description's
+#    NON-head segments (everything after the first comma -- the head itself
+#    is already constrained by `_is_relevant_match`) mention a processing
+#    method that changes the food's macro profile in a way no honest
+#    raw/cooked/canned declaration would predict -- pickling, breading,
+#    sweetening, smoking, juicing, turning it into a sauce/soup, etc.
+#    Deliberately excludes "dried"/"dry": those are FDC's own raw-state
+#    vocabulary for grains/legumes/produce (see `_RAW_WORDS`), not a
+#    processing method in this sense -- blocking them would wrongly reject
+#    the correct raw record for e.g. lentils or oats.
+# 2. A within-tier state PREFERENCE (a tie-break, never a gate, and only
+#    consulted when `preparation is None`): among candidates that already
+#    survive every gate above, prefer raw < unclassified(None) < cooked <
+#    canned, i.e. a bare raw record wins over an equally-relevant cooked or
+#    canned one at the same dataType-priority tier. Raw is the safer
+#    deterministic prior for an undeclared ingredient -- cooked/canned
+#    records systematically read as lower-calorie-per-100g than their raw
+#    form (water/fat loss or addition during processing), so preferring raw
+#    is the conservative choice that avoids silently picking a processed
+#    record's altered macros for what the recipe almost certainly means as
+#    a plain ingredient.
+_PROCESSED_STATE_MODIFIERS = {
+    "pickled", "fried", "breaded", "battered", "candied", "sweetened", "syrup",
+    "brined", "cured", "smoked", "glazed", "creamed", "marinated", "dehydrated",
+    "powdered", "juice", "sauce", "soup",
+}
+_PROCESSED_STATE_PATTERN = re.compile(r"\b(" + "|".join(_PROCESSED_STATE_MODIFIERS) + r")\b", re.IGNORECASE)
+
+# Preference order for the within-tier tie-break: lower sorts first (wins).
+_STATE_PREFERENCE_ORDER = {"raw": 0, None: 1, "cooked": 2, "canned": 3}
+
+
+def _processed_state_modifier(description: str) -> str | None:
+    """Returns the matched blocklist token if any NON-head segment (i.e. any
+    comma-delimited segment after the first) of `description` names a
+    processed-state modifier, else `None`. Only consulted when `preparation`
+    is undeclared -- see the module comment above."""
+    non_head = ",".join(description.split(",")[1:])
+    match = _PROCESSED_STATE_PATTERN.search(non_head)
+    return match.group(1).lower() if match else None
+
+
 def _best_match(payload: dict[str, Any], query: str, preparation: str | None = None) -> MatchOutcome:
-    """Pick the best-ranked food with usable, plausible macros, gated by
-    relevance, by `preparation` when given, and by absolute plausibility
-    (see `_plausibility_reject_reason`).
+    """Pick the best-ranked, best-stated food with usable, plausible macros,
+    gated by relevance, by `preparation` when given, by absolute
+    plausibility (see `_plausibility_reject_reason`), and -- when
+    `preparation` is undeclared -- by the processed-state modifier blocklist
+    (see `_processed_state_modifier`).
 
     Every candidate must pass `_is_relevant_match` against `query` -- a
     candidate that is a different or derived food (see its docstring) is
@@ -288,40 +343,68 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
     state (see `_classify_preparation`) -- an unclassifiable or
     differently-stated candidate is skipped even if it would otherwise rank
     first, so a declared-cooked ingredient can never resolve to a raw record
-    (or vice versa). A candidate whose extracted macros fail the
-    plausibility gate is also skipped, with its rejection reason recorded in
-    `MatchOutcome.rejections` for the corpus-wide report -- a confidently
-    wrong number is worse than an honest unknown. If nothing in the ranked
-    list matches, `match` is `None` (ungrounded) rather than falling back to
-    the best unrelated or implausible candidate.
+    (or vice versa). When `preparation` is `None`, a candidate naming a
+    processed-state modifier outside its head segment is skipped instead.
+    A candidate whose extracted macros fail the plausibility gate is also
+    skipped, with its rejection reason recorded in `MatchOutcome.rejections`
+    for the corpus-wide report -- a confidently wrong number is worse than
+    an honest unknown.
+
+    Among every candidate surviving all of the above, the pick is ordered by
+    (dataType priority, state preference, original payload order) -- state
+    preference (see `_STATE_PREFERENCE_ORDER`) only matters as a tie-break
+    within the same dataType tier, and only meaningfully varies results when
+    `preparation is None` (a declared preparation already constrains every
+    survivor to the exact same state). If nothing survives, `match` is
+    `None` (ungrounded) rather than falling back to the best unrelated,
+    wrong-state, or implausible candidate.
     """
     foods = payload.get("foods") or []
     rejections: list[str] = []
-    ranked = sorted(foods, key=lambda food: _DATA_TYPE_PRIORITY.get(food.get("dataType"), 99))
-    for food in ranked:
+    eligible: list[tuple[int, int, int, dict[str, Any], str, FoodMacros]] = []
+
+    for index, food in enumerate(foods):
         description = food.get("description", "")
         if not _is_relevant_match(query, description, preparation):
             continue
-        if preparation is not None and _classify_preparation(description) != preparation:
-            continue
+
+        if preparation is not None:
+            if _classify_preparation(description) != preparation:
+                continue
+        else:
+            modifier = _processed_state_modifier(description)
+            if modifier is not None:
+                rejections.append(f"processed_state_modifier:{modifier}")
+                continue
+
         macros = _extract_macros(food)
         if macros is None:
             continue
+
         reject_reason = _plausibility_reject_reason(macros)
         if reject_reason is not None:
             rejections.append(reject_reason)
             continue
-        return MatchOutcome(
-            match=FoodMatch(
-                fdc_id=food["fdcId"],
-                description=description,
-                data_type=food.get("dataType", ""),
-                macros=macros,
-                query=query,
-            ),
-            rejections=rejections,
-        )
-    return MatchOutcome(match=None, rejections=rejections)
+
+        data_type_priority = _DATA_TYPE_PRIORITY.get(food.get("dataType"), 99)
+        state_priority = _STATE_PREFERENCE_ORDER.get(_classify_preparation(description), 1)
+        eligible.append((data_type_priority, state_priority, index, food, description, macros))
+
+    if not eligible:
+        return MatchOutcome(match=None, rejections=rejections)
+
+    eligible.sort(key=lambda item: item[:3])
+    _, _, _, food, description, macros = eligible[0]
+    return MatchOutcome(
+        match=FoodMatch(
+            fdc_id=food["fdcId"],
+            description=description,
+            data_type=food.get("dataType", ""),
+            macros=macros,
+            query=query,
+        ),
+        rejections=rejections,
+    )
 
 
 # Queries where the general mechanism (relevance check + preparation gate +

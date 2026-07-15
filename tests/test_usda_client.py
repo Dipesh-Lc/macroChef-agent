@@ -831,6 +831,81 @@ def test_plausibility_gate_falls_through_to_next_ranked_candidate(tmp_path) -> N
     assert match.macros.calories == 50
 
 
+# --- Undeclared-preparation handling: processed-state modifier blocklist
+# (a gate, preparation=None only) and within-tier state preference
+# (a tie-break, preparation=None only) ---
+
+
+def test_undeclared_preparation_rejects_pickled_record(tmp_path) -> None:
+    # The exact failure mode disclosed in _KNOWN_RESIDUALS for zucchini --
+    # a bare "zucchini" query landing on a Branded "Zucchini, pickled"
+    # record. Reproduced here with a synthetic payload so the fix is
+    # provable independent of FDC's real zucchini/squash naming quirk.
+    payload = {"foods": [_macro_food(1, "Zucchini, pickled", "Branded", calories=35, protein_g=1, fat_g=0, carbs_g=6)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("zucchini")
+
+    assert match is None
+
+
+def test_undeclared_preparation_prefers_raw_over_cooked_at_same_tier(tmp_path) -> None:
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, cooked", "SR Legacy", calories=50, protein_g=2, fat_g=1, carbs_g=8),
+            _macro_food(2, "Widget, raw", "SR Legacy", calories=100, protein_g=4, fat_g=2, carbs_g=15),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is not None
+    assert match.fdc_id == 2
+    assert match.description == "Widget, raw"
+
+
+def test_undeclared_preparation_still_respects_data_type_priority_over_state(tmp_path) -> None:
+    # State preference is a same-tier tie-break, never a rank override --
+    # a higher-priority dataType (Foundation) wins over a lower-priority one
+    # even if the lower-priority candidate is raw and the higher-priority
+    # one is cooked.
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, cooked", "Foundation", calories=50, protein_g=2, fat_g=1, carbs_g=8),
+            _macro_food(2, "Widget, raw", "SR Legacy", calories=100, protein_g=4, fat_g=2, carbs_g=15),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is not None
+    assert match.fdc_id == 1
+    assert match.description == "Widget, cooked"
+
+
+def test_declared_preparation_disables_the_modifier_blocklist(tmp_path) -> None:
+    # The processed-state modifier blocklist only applies when `preparation`
+    # is undeclared -- a declared-canned search must still be free to match
+    # a record whose non-head segment includes wording like "drained" that
+    # the blocklist gate doesn't even consult here, because it's off
+    # entirely once a preparation is declared.
+    payload = {
+        "foods": [_macro_food(1, "Beans, black, canned, drained", "SR Legacy", calories=90, protein_g=6, fat_g=0.5, carbs_g=16)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("black beans", preparation="canned")
+
+    assert match is not None
+    assert match.description == "Beans, black, canned, drained"
+
+
 def test_payload_cache_key_distinguishes_page_size(tmp_path) -> None:
     cache = FdcCache(tmp_path / "cache.json")
     cache.set_payload("widget", ["Branded"], 5, {"foods": ["five"]})
