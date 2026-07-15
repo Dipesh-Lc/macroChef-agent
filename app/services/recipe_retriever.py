@@ -12,6 +12,31 @@ from app.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def build_metadata_filter(
+    cuisine_preference: str | None, meal_type: str | None
+) -> dict[str, Any] | None:
+    """Chroma `where` clause for exact cuisine/meal_type metadata filtering.
+
+    Module-level (not just RecipeRetriever._build_metadata_filter) so
+    callers that query Chroma directly -- e.g. the retrieval eval in
+    app.evaluation.eval_retrieval, which measures the semantic path in
+    isolation from the keyword-fallback mixing in .retrieve() -- can still
+    apply the same metadata pre-filter production actually uses, rather than
+    an unfiltered pure-embedding search that understates real semantic
+    quality on cuisine/meal_type queries.
+    """
+    clauses: list[dict[str, str]] = []
+    if cuisine_preference:
+        clauses.append({"cuisine": cuisine_preference})
+    if meal_type:
+        clauses.append({"meal_type": meal_type})
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
+
+
 class RecipeRetriever:
     def __init__(
         self,
@@ -166,16 +191,7 @@ class RecipeRetriever:
     def _build_metadata_filter(
         self, cuisine_preference: str | None, meal_type: str | None
     ) -> dict[str, Any] | None:
-        clauses: list[dict[str, str]] = []
-        if cuisine_preference:
-            clauses.append({"cuisine": cuisine_preference})
-        if meal_type:
-            clauses.append({"meal_type": meal_type})
-        if not clauses:
-            return None
-        if len(clauses) == 1:
-            return clauses[0]
-        return {"$and": clauses}
+        return build_metadata_filter(cuisine_preference, meal_type)
 
 
 def get_recipe_by_id(recipe_id: str) -> Recipe | None:
