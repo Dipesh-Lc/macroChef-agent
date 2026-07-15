@@ -94,6 +94,36 @@ def test_extracts_known_macros_from_chicken_breast_fixture(tmp_path) -> None:
     assert match.macros.fiber_g == 0
 
 
+def test_extract_macros_skips_candidate_with_a_negative_nutrient_value(tmp_path) -> None:
+    # Confirmed live: a real FDC record's "Carbohydrate, by difference"
+    # value can come out marginally negative (e.g. -0.428) from that
+    # nutrient's own subtraction-based calculation upstream at USDA. Since
+    # FoodMacros enforces ge=0 on every field, silently passing this through
+    # would crash the whole grounding run on Pydantic validation instead of
+    # degrading to "skip this candidate" -- this must never reach that point.
+    payload = {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": "Widget, raw",
+                "dataType": "Foundation",
+                "foodNutrients": [
+                    {"nutrientNumber": "208", "value": 50},
+                    {"nutrientNumber": "203", "value": 2},
+                    {"nutrientNumber": "204", "value": 1},
+                    {"nutrientNumber": "205", "value": -0.428},
+                ],
+            }
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")  # must not raise
+
+    assert match is None
+
+
 def test_extracts_known_macros_from_rice_fixture(tmp_path) -> None:
     session = FakeSession(payload=_load_fixture("fdc_rice_search.json"))
     client = UsdaClient(

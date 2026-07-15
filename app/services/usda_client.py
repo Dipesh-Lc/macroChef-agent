@@ -144,6 +144,16 @@ def _extract_macros(food: dict[str, Any]) -> FoodMacros | None:
     Returns `None` if any of calories/protein/fat/carbs is missing (fiber
     defaults to 0.0 since many foods legitimately omit it) — that food is
     then skipped as a candidate match rather than producing bad numbers.
+
+    Also returns `None` if any of the five is negative -- confirmed live
+    against real FDC data (a "Carbohydrate, by difference" value can come
+    out marginally negative, e.g. -0.428, from that nutrient's own
+    subtraction-based calculation methodology upstream at USDA, not a bug
+    in this reader). `FoodMacros` enforces `ge=0` on every field precisely
+    because a negative macro is never physically meaningful, so silently
+    passing one through would crash the whole grounding run on Pydantic
+    validation instead of degrading to "skip this candidate" like every
+    other unusable-data case here.
     """
 
     by_number: dict[str, float] = {}
@@ -162,6 +172,9 @@ def _extract_macros(food: dict[str, Any]) -> FoodMacros | None:
         return None
 
     fiber = by_number.get(_NUTRIENT_FIBER, 0.0)
+    if any(value < 0 for value in (calories, protein, fat, carbs, fiber)):
+        return None
+
     return FoodMacros(
         calories=calories,
         protein_g=protein,
