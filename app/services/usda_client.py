@@ -1,5 +1,7 @@
 import re
 import time
+from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import requests
@@ -169,6 +171,15 @@ def _extract_macros(food: dict[str, Any]) -> FoodMacros | None:
     )
 
 
+# Page sizes for each fetch tier. Generic stays at 5 (unchanged from item
+# 1.4 -- generic dataTypes are a small, curated catalog where the top few
+# relevance-ranked hits are enough). Branded's default tier-1 page size also
+# stays 5 for now; item 4/P5 widens the Branded fetch specifically (a much
+# larger, noisier catalog where a single record's calorie value is not
+# reliable enough to trust without corroboration -- see `_select_branded_match`).
+_GENERIC_PAGE_SIZE = 5
+_BRANDED_PAGE_SIZE = 5
+
 # Retries for transient FDC failures: confirmed live that identical,
 # well-formed requests intermittently 400 (a bare nginx error page, not an
 # FDC-generated error body, with ample rate-limit quota remaining) --
@@ -188,9 +199,26 @@ _MAX_ATTEMPTS = 8
 _RETRY_BACKOFF_SECONDS = (0.5, 1.0, 1.5, 2.0, 2.0, 2.5, 2.5)
 
 
-def _best_match(payload: dict[str, Any], query: str, preparation: str | None = None) -> FoodMatch | None:
-    """Pick the top-ranked food with usable macros, gated by relevance and by
-    `preparation` when given.
+@dataclass
+class MatchOutcome:
+    """Result of scanning one FDC payload for a match.
+
+    `rejections` is a list of reason codes for every candidate that was
+    excluded *after* the relevance/preparation gate (i.e. by the
+    plausibility gate or the undeclared-preparation modifier blocklist) --
+    not every relevance failure, which would be noise (most candidates in a
+    5-25 item page are simply unrelated foods). Purely diagnostic: consumed
+    by `UsdaClient` to build corpus-wide report counts, never used to change
+    matching behavior itself.
+    """
+
+    match: FoodMatch | None
+    rejections: list[str] = field(default_factory=list)
+
+
+def _best_match(payload: dict[str, Any], query: str, preparation: str | None = None) -> MatchOutcome:
+    """Pick the best-ranked food with usable macros, gated by relevance and
+    by `preparation` when given.
 
     Every candidate must pass `_is_relevant_match` against `query` -- a
     candidate that is a different or derived food (see its docstring) is
@@ -199,8 +227,9 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
     state (see `_classify_preparation`) -- an unclassifiable or
     differently-stated candidate is skipped even if it would otherwise rank
     first, so a declared-cooked ingredient can never resolve to a raw record
-    (or vice versa). If nothing in the ranked list matches, this returns None
-    (ungrounded) rather than falling back to the best unrelated candidate.
+    (or vice versa). If nothing in the ranked list matches, `match` is
+    `None` (ungrounded) rather than falling back to the best unrelated
+    candidate.
     """
     foods = payload.get("foods") or []
     ranked = sorted(foods, key=lambda food: _DATA_TYPE_PRIORITY.get(food.get("dataType"), 99))
@@ -213,14 +242,16 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
         macros = _extract_macros(food)
         if macros is None:
             continue
-        return FoodMatch(
-            fdc_id=food["fdcId"],
-            description=description,
-            data_type=food.get("dataType", ""),
-            macros=macros,
-            query=query,
+        return MatchOutcome(
+            match=FoodMatch(
+                fdc_id=food["fdcId"],
+                description=description,
+                data_type=food.get("dataType", ""),
+                macros=macros,
+                query=query,
+            )
         )
-    return None
+    return MatchOutcome(match=None)
 
 
 # Queries where the general mechanism (relevance check + preparation gate)
@@ -269,6 +300,12 @@ class UsdaClient:
         self._session = session or requests.Session()
         self._cache = cache if cache is not None else FdcCache(self._settings.fdc_cache_path)
         self._sleep = sleep
+        # Cumulative, diagnostic-only tally of candidate-rejection reasons
+        # (see `MatchOutcome.rejections`) across every `search_food` call made
+        # through this client instance -- read by `grounding_job.run_grounding`
+        # after a full corpus pass to report "N candidates rejected for
+        # reason X" corpus-wide. Never consulted by matching logic itself.
+        self.rejection_counts: Counter[str] = Counter()
 
     def search_food(self, name: str, *, preparation: str | None = None) -> FoodMatch | None:
         """Look up macros for `name`, optionally gated to a declared `preparation`
@@ -283,17 +320,6 @@ class UsdaClient:
         if query in _KNOWN_UNRELIABLE_QUERIES:
             return None
 
-        cache_key = query if preparation is None else f"{query}::{preparation}"
-
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            return cached
-        if self._cache.is_confirmed_no_match(cache_key):
-            return None
-
-        if not self._settings.fdc_api_key:
-            return None
-
         # Appending the declared preparation word to the search string (not
         # the relevance/gating query, which stays the bare ingredient name)
         # measurably improves recall: confirmed live that FDC's own search
@@ -303,32 +329,56 @@ class UsdaClient:
         # ingredient" within the same page size. `_is_relevant_match` (via
         # `_best_match`) is what keeps this safe -- it still rejects a
         # same-state wrong food (e.g. "black beans canned" surfacing a black
-        # bean soup) rather than accepting anything state-tagged.
+        # bean soup) rather than accepting anything state-tagged. The
+        # `preparation` word is also folded into the payload-cache key this
+        # way (via `search_query`), so a raw-gated and cooked-gated lookup of
+        # the same ingredient are never conflated -- no separate cache-key
+        # component is needed for it.
         search_query = f"{query} {preparation}" if preparation else query
 
-        generic_payload = self._fetch_with_retry(search_query, _GENERIC_DATA_TYPES)
-        match = _best_match(generic_payload, query, preparation) if generic_payload is not None else None
+        generic_payload = self._get_payload(search_query, _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE)
+        if generic_payload is not None:
+            outcome = _best_match(generic_payload, query, preparation)
+            self.rejection_counts.update(outcome.rejections)
+            if outcome.match is not None:
+                return outcome.match
 
-        branded_payload = None
-        if match is None:
-            branded_payload = self._fetch_with_retry(search_query, _BRANDED_DATA_TYPES)
-            match = _best_match(branded_payload, query, preparation) if branded_payload is not None else None
+        branded_payload = self._get_payload(search_query, _BRANDED_DATA_TYPES, _BRANDED_PAGE_SIZE)
+        if branded_payload is not None:
+            branded_outcome = _best_match(branded_payload, query, preparation)
+            self.rejection_counts.update(branded_outcome.rejections)
+            if branded_outcome.match is not None:
+                return branded_outcome.match
 
-        if match is not None:
-            self._cache.set(cache_key, match)
-            return match
-
-        # A confirmed negative requires BOTH tiers to have actually completed
-        # (not a retry-exhausted transient failure) and found nothing --
-        # otherwise a momentary outage on either tier would get permanently
-        # cached as "no match" for an ingredient that was never really looked
-        # at. If either tier's fetch failed outright, this stays uncached so
-        # a future run gets a fresh attempt.
-        if generic_payload is not None and branded_payload is not None:
-            self._cache.set_no_match(cache_key)
         return None
 
-    def _fetch_with_retry(self, query: str, data_types: list[str]) -> dict[str, Any] | None:
+    def _get_payload(
+        self, search_query: str, data_types: list[str], page_size: int
+    ) -> dict[str, Any] | None:
+        """Payload cache in front of `_fetch_with_retry` -- see `FdcCache`.
+        Caches the raw response for this exact request; never caches a
+        `None` (fetch failure), so a transient outage gets a fresh attempt
+        on the next run rather than being permanently remembered as empty.
+
+        A cache hit is served without ever checking for an API key, so a
+        fully-cached run (e.g. across process restarts, or in an environment
+        with no live key configured at all) keeps working offline -- the key
+        is only required to make an actual network request on a cache miss.
+        """
+        cached = self._cache.get_payload(search_query, data_types, page_size)
+        if cached is not None:
+            return cached
+        if not self._settings.fdc_api_key:
+            return None
+
+        payload = self._fetch_with_retry(search_query, data_types, page_size)
+        if payload is not None:
+            self._cache.set_payload(search_query, data_types, page_size, payload)
+        return payload
+
+    def _fetch_with_retry(
+        self, query: str, data_types: list[str], page_size: int = _GENERIC_PAGE_SIZE
+    ) -> dict[str, Any] | None:
         last_error: str | None = None
         for attempt in range(_MAX_ATTEMPTS):
             try:
@@ -338,7 +388,7 @@ class UsdaClient:
                         "api_key": self._settings.fdc_api_key,
                         "query": query,
                         "dataType": data_types,
-                        "pageSize": 5,
+                        "pageSize": page_size,
                     },
                     timeout=self._settings.model_timeout_seconds,
                 )

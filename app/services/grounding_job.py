@@ -18,6 +18,8 @@ around `run_grounding` + `render_report`, mirroring
 from __future__ import annotations
 
 import json
+import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,9 +29,23 @@ from app.schemas.nutrition import GroundingStatus, IngredientContribution, Recip
 from app.schemas.recipe import Recipe
 from app.services.nutrition_grounding import compute_recipe_macros
 from app.services.usda_client import UsdaClient
+from app.utils.ingredient_normalizer import normalize_ingredient
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Corpus-wide tag-vs-computed ratio bounds outside of which a recipe is
+# surfaced as an outlier in the report -- report-only, never demoting (see
+# the phase 1.5 design's "Trust tiers" note: only the ~4200 tag-carrying
+# imports have a self-reported number to compare against at all, and that
+# self-report is itself unverified, so a wide ratio band here is a "worth a
+# human look" signal, not a correctness gate).
+RATIO_OUTLIER_MIN = 0.4
+RATIO_OUTLIER_MAX = 2.5
+
+# Cap on how many ratio-outlier rows the rendered report prints in full --
+# the corpus-wide count is always reported even when the list is truncated.
+_RATIO_OUTLIER_TABLE_LIMIT = 100
 
 # A GROUNDED/PARTIAL recipe's per-serving kcal outside this band is flagged
 # for manual review -- not auto-corrected, just surfaced (see GroundingReport).
@@ -126,10 +142,43 @@ class SeedRow:
 
 
 @dataclass
+class UngroundedFrequency:
+    """One row of the corpus-wide "what's not grounding" table -- how many
+    distinct recipes have this normalized ingredient name in their
+    `ungrounded_ingredients` (deduped per recipe, so an ingredient appearing
+    twice in one recipe counts once)."""
+
+    name: str
+    recipe_count: int
+
+
+@dataclass
+class RatioOutlier:
+    """A corpus (non-seed) recipe whose computed-vs-tag calorie ratio falls
+    outside [RATIO_OUTLIER_MIN, RATIO_OUTLIER_MAX] -- report-only, see the
+    module docstring on RATIO_OUTLIER_MIN/MAX."""
+
+    recipe_id: str
+    title: str
+    tag_kcal: float
+    computed_kcal: float
+    ratio: float
+
+
+@dataclass
 class GroundingReport:
     total_recipes: int = 0
     status_counts: dict[str, int] = field(default_factory=dict)
     seed_rows: list[SeedRow] = field(default_factory=list)
+    # Corpus-wide diagnostics (all of `corpus`, not just the 25 seeds) --
+    # every field below is report-only: none of it changes what gets
+    # written to the sidecar or trusted downstream. See nutrition_view.py
+    # for the actual trust chokepoint.
+    ungrounded_frequency: list[UngroundedFrequency] = field(default_factory=list)
+    ratio_distribution: list[float] = field(default_factory=list)
+    ratio_outliers: list[RatioOutlier] = field(default_factory=list)
+    implausible_band_corpus_count: int = 0
+    rejection_counts: dict[str, int] = field(default_factory=dict)
 
     def implausible_band_flags(self) -> list[SeedRow]:
         return [row for row in self.seed_rows if row.implausible_band]
@@ -172,14 +221,14 @@ def run_grounding(
     seeds: list[Recipe] | None = None,
 ) -> GroundingReport:
     """Ground `corpus` (default: seeds ∪ imported via load_corpus()), write the
-    sidecar, and build the tag-vs-computed report for `seeds` (default: the 25
-    hand-authored recipes via load_recipes()) -- the only recipes with
-    authored quantities to meaningfully compare against a self-reported tag.
+    sidecar, and build the full report (corpus-wide diagnostics plus the
+    seed tag-vs-computed comparison for `seeds`, default: the 25
+    hand-authored recipes via load_recipes() -- the only recipes with
+    authored quantities to meaningfully compare against a self-reported tag).
     """
     client = client or UsdaClient()
     corpus = corpus if corpus is not None else load_corpus()
     seeds = seeds if seeds is not None else load_recipes()
-    seeds_by_id = {recipe.recipe_id: recipe for recipe in seeds}
 
     results: dict[str, RecipeNutrition] = {}
     for recipe in sorted(corpus, key=lambda r: r.recipe_id):
@@ -188,6 +237,46 @@ def run_grounding(
         )
 
     _write_sidecar(Path(sidecar_path), results)
+
+    # `rejection_counts` is a diagnostic-only attribute on `UsdaClient` (see
+    # its docstring) -- read defensively via getattr so a caller-supplied
+    # test double without it still works, reporting simply nothing rejected.
+    rejection_counts = dict(getattr(client, "rejection_counts", {}) or {})
+    report = build_report(corpus=corpus, seeds=seeds, results=results, rejection_counts=rejection_counts)
+
+    if report.implausible_band_flags():
+        logger.warning(
+            "%d seed recipe(s) outside the plausible kcal/serving band",
+            len(report.implausible_band_flags()),
+        )
+    if report.raw_cooked_blowup_flags():
+        logger.warning(
+            "%d seed recipe(s) show a >%.1fx raw/cooked-scale blowup",
+            len(report.raw_cooked_blowup_flags()),
+            RAW_COOKED_BLOWUP_RATIO,
+        )
+
+    return report
+
+
+def build_report(
+    *,
+    corpus: list[Recipe],
+    seeds: list[Recipe],
+    results: dict[str, RecipeNutrition],
+    rejection_counts: dict[str, int] | None = None,
+) -> GroundingReport:
+    """Build a `GroundingReport` purely from already-computed data -- no
+    `UsdaClient`, no network, no re-fetching. This is what lets a report be
+    regenerated instantly from an existing sidecar (e.g. `data/processed/
+    grounding.jsonl` loaded via `app.rag.loaders.load_corpus`/
+    `load_grounding`) to capture a point-in-time baseline before a
+    matching-rule change, without spending a single live FDC call.
+
+    `results` must be keyed by `recipe_id`; a `corpus` recipe absent from it
+    is simply skipped in every corpus-wide diagnostic (never fabricated).
+    """
+    seeds_by_id = {recipe.recipe_id: recipe for recipe in seeds}
 
     report = GroundingReport(total_recipes=len(results))
     for nutrition in results.values():
@@ -237,17 +326,48 @@ def run_grounding(
             )
         )
 
-    if report.implausible_band_flags():
-        logger.warning(
-            "%d seed recipe(s) outside the plausible kcal/serving band",
-            len(report.implausible_band_flags()),
-        )
-    if report.raw_cooked_blowup_flags():
-        logger.warning(
-            "%d seed recipe(s) show a >%.1fx raw/cooked-scale blowup",
-            len(report.raw_cooked_blowup_flags()),
-            RAW_COOKED_BLOWUP_RATIO,
-        )
+    # --- Corpus-wide diagnostics (all of `corpus`, report-only) ---
+
+    ingredient_counter: Counter[str] = Counter()
+    for recipe in corpus:
+        nutrition = results.get(recipe.recipe_id)
+        if nutrition is None or not nutrition.ungrounded_ingredients:
+            continue
+        # Dedupe within a recipe first -- an ingredient appearing twice in
+        # one recipe's ungrounded list should count that recipe once, not
+        # twice, in "how many recipes does this affect."
+        names_this_recipe = {normalize_ingredient(name) or name for name in nutrition.ungrounded_ingredients}
+        ingredient_counter.update(names_this_recipe)
+    report.ungrounded_frequency = [
+        UngroundedFrequency(name=name, recipe_count=count) for name, count in ingredient_counter.most_common(50)
+    ]
+
+    implausible_band_corpus_count = 0
+    for recipe in corpus:
+        nutrition = results.get(recipe.recipe_id)
+        if nutrition is None or nutrition.status == GroundingStatus.UNGROUNDED:
+            continue
+
+        computed_kcal = nutrition.per_serving.calories
+        if not (IMPLAUSIBLE_MIN_KCAL_PER_SERVING <= computed_kcal <= IMPLAUSIBLE_MAX_KCAL_PER_SERVING):
+            implausible_band_corpus_count += 1
+
+        if not recipe.calories:
+            continue
+        ratio = computed_kcal / recipe.calories
+        report.ratio_distribution.append(ratio)
+        if ratio < RATIO_OUTLIER_MIN or ratio > RATIO_OUTLIER_MAX:
+            report.ratio_outliers.append(
+                RatioOutlier(
+                    recipe_id=recipe.recipe_id,
+                    title=recipe.title,
+                    tag_kcal=recipe.calories,
+                    computed_kcal=computed_kcal,
+                    ratio=ratio,
+                )
+            )
+    report.implausible_band_corpus_count = implausible_band_corpus_count
+    report.rejection_counts = dict(rejection_counts or {})
 
     return report
 
@@ -261,6 +381,67 @@ def render_report(report: GroundingReport) -> str:
         count = report.status_counts.get(status, 0)
         pct = (count / report.total_recipes * 100) if report.total_recipes else 0.0
         lines.append(f"- {status}: {count} ({pct:.1f}%)")
+    lines.append("")
+
+    lines.append(f"## Top ungrounded ingredients, corpus-wide (top {len(report.ungrounded_frequency)} of up to 50)")
+    lines.append("")
+    if not report.ungrounded_frequency:
+        lines.append("None.")
+    else:
+        lines.append("| ingredient (normalized) | recipes affected |")
+        lines.append("|---|---|")
+        for row in report.ungrounded_frequency:
+            lines.append(f"| {row.name} | {row.recipe_count} |")
+    lines.append("")
+
+    lines.append(
+        "## Tag-vs-computed ratio distribution, corpus-wide "
+        "(GROUNDED/PARTIAL recipes with a self-reported tag calorie value)"
+    )
+    lines.append("")
+    dist = report.ratio_distribution
+    if not dist:
+        lines.append("No corpus recipes have both a computed ratio and a self-reported tag calorie value.")
+    else:
+        lines.append(f"- n: {len(dist)}")
+        lines.append(f"- mean: {statistics.mean(dist):.2f}x")
+        lines.append(f"- median: {statistics.median(dist):.2f}x")
+        if len(dist) > 1:
+            lines.append(f"- stdev: {statistics.stdev(dist):.2f}")
+        lines.append(f"- min: {min(dist):.2f}x")
+        lines.append(f"- max: {max(dist):.2f}x")
+    lines.append("")
+    lines.append(
+        f"### Ratio outliers (outside [{RATIO_OUTLIER_MIN:.1f}x, {RATIO_OUTLIER_MAX:.1f}x]) -- report-only, no demotion"
+    )
+    lines.append(f"- count: {len(report.ratio_outliers)}")
+    if report.ratio_outliers:
+        lines.append("")
+        lines.append("| recipe_id | title | tag kcal | computed kcal | ratio |")
+        lines.append("|---|---|---|---|---|")
+        shown = report.ratio_outliers[:_RATIO_OUTLIER_TABLE_LIMIT]
+        for row in shown:
+            lines.append(f"| {row.recipe_id} | {row.title} | {row.tag_kcal:.0f} | {row.computed_kcal:.0f} | {row.ratio:.2f}x |")
+        if len(report.ratio_outliers) > len(shown):
+            lines.append(f"| ... | ({len(report.ratio_outliers) - len(shown)} more, see full count above) | | | |")
+    lines.append("")
+
+    lines.append(
+        f"## Corpus-wide implausible kcal/serving band "
+        f"(<{IMPLAUSIBLE_MIN_KCAL_PER_SERVING:.0f} or >{IMPLAUSIBLE_MAX_KCAL_PER_SERVING:.0f}), GROUNDED/PARTIAL only"
+    )
+    lines.append(f"- count: {report.implausible_band_corpus_count}")
+    lines.append("")
+
+    lines.append("## Plausibility rejection counts by reason, corpus-wide (candidates rejected while matching)")
+    lines.append("")
+    if not report.rejection_counts:
+        lines.append("None recorded (either no candidates were rejected, or the report was built without a live client's diagnostics -- see `build_report`'s `rejection_counts` parameter).")
+    else:
+        lines.append("| reason | count |")
+        lines.append("|---|---|")
+        for reason, count in sorted(report.rejection_counts.items(), key=lambda kv: -kv[1]):
+            lines.append(f"| {reason} | {count} |")
     lines.append("")
 
     lines.append(f"## Seed tag-vs-computed comparison ({len(report.seed_rows)} recipes)")

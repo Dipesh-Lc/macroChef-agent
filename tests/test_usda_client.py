@@ -6,7 +6,15 @@ import requests
 
 from app.config import Settings
 from app.services.nutrition_cache import FdcCache
-from app.services.usda_client import UsdaClient, _classify_preparation, _is_relevant_match
+from app.services.usda_client import (
+    _BRANDED_DATA_TYPES,
+    _BRANDED_PAGE_SIZE,
+    _GENERIC_DATA_TYPES,
+    _GENERIC_PAGE_SIZE,
+    UsdaClient,
+    _classify_preparation,
+    _is_relevant_match,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -217,7 +225,7 @@ def test_retry_exhausted_failure_is_not_cached_so_next_run_retries(tmp_path) -> 
     assert second_match.macros.calories == 165
 
 
-def test_confirmed_no_match_is_cached_and_skips_future_network_calls(tmp_path) -> None:
+def test_confirmed_empty_payload_is_cached_and_skips_future_network_calls(tmp_path) -> None:
     cache = FdcCache(tmp_path / "cache.json")
     session = FakeSession(payload=_load_fixture("fdc_empty_search.json"))
     first_client = _client(session=session, cache=cache)
@@ -225,11 +233,12 @@ def test_confirmed_no_match_is_cached_and_skips_future_network_calls(tmp_path) -
     first_match = first_client.search_food("nonexistent ingredient xyz")
     assert first_match is None
     assert session.calls == 2  # both tiers queried (generic, then Branded fallback), both empty
-    assert cache.is_confirmed_no_match("nonexistent ingredient xyz")
+    assert cache.get_payload("nonexistent ingredient xyz", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is not None
+    assert cache.get_payload("nonexistent ingredient xyz", _BRANDED_DATA_TYPES, _BRANDED_PAGE_SIZE) is not None
 
-    # A confirmed no-match is a stable fact (the fixture's content is
-    # unchanging) -- re-querying must be served from that confirmation, not
-    # the network, unlike a retry-exhausted transient failure above.
+    # A cached empty-`foods` payload is a stable fact (the fixture's content
+    # is unchanging) -- re-querying must be served from that cached payload,
+    # not the network, unlike a retry-exhausted transient failure above.
     unreachable = FakeSession(exc=AssertionError("should not be called"))
     second_client = _client(session=unreachable, cache=cache)
 
@@ -624,3 +633,96 @@ def test_two_tier_fetch_is_deterministic_across_repeated_calls(tmp_path) -> None
 
     assert first.description == second.description == "Yogurt, Greek, plain, nonfat"
     assert first.macros.calories == second.macros.calories == 61
+
+
+# --- Payload cache: caches FDC facts, never a decided match ---
+#
+# The cache generation before this refactor stored the *decided* FoodMatch
+# (or a "no match" sentinel) per ingredient query -- so a rule change in
+# `_best_match` had no effect on an already-cached ingredient until its
+# cache entry was manually busted. These tests prove the replacement: the
+# cache stores the raw FDC payload, and `_best_match` is re-run against it
+# on every call, so a rule change takes effect on the very next call with no
+# cache invalidation and no new network request.
+
+
+def _macro_food(fdc_id: int, description: str, data_type: str, *, calories, protein_g, fat_g, carbs_g) -> dict:
+    return {
+        "fdcId": fdc_id,
+        "description": description,
+        "dataType": data_type,
+        "foodNutrients": [
+            {"nutrientNumber": "208", "value": calories},
+            {"nutrientNumber": "203", "value": protein_g},
+            {"nutrientNumber": "204", "value": fat_g},
+            {"nutrientNumber": "205", "value": carbs_g},
+        ],
+    }
+
+
+def test_payload_cache_reflects_current_matching_rules_not_a_frozen_decision(tmp_path, monkeypatch) -> None:
+    from app.services import usda_client as usda_client_module
+
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, canned", "Branded", calories=200, protein_g=20, fat_g=5, carbs_g=10),
+            _macro_food(2, "Widget, raw", "Foundation", calories=100, protein_g=10, fat_g=2, carbs_g=5),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    cache = FdcCache(tmp_path / "cache.json")
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=cache)
+
+    first = client.search_food("widget")
+    assert first is not None
+    assert first.fdc_id == 2  # Foundation (priority 0) outranks Branded (priority 3) today
+    assert session.calls == 1  # only the generic tier -- it already found a match
+
+    # Simulate a matching-rule change: Branded now outranks Foundation.
+    monkeypatch.setitem(usda_client_module._DATA_TYPE_PRIORITY, "Branded", -1)
+
+    unreachable = FakeSession(exc=AssertionError("must be served from the cached payload, no new request"))
+    second_client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=unreachable, cache=cache)
+    second = second_client.search_food("widget")
+
+    assert unreachable.calls == 0  # served entirely from the cached payload
+    assert second is not None
+    assert second.fdc_id == 1  # new rule takes effect immediately against the same cached payload
+
+
+def test_old_decision_cache_format_is_discarded_not_misinterpreted(tmp_path) -> None:
+    # Simulates a cache file written by the pre-refactor decision-cache
+    # generation (bare "query" -> FoodMatch dict, no schema marker).
+    cache_path = tmp_path / "cache.json"
+    old_format_decision_cache = {
+        "chicken breast": {
+            "fdc_id": 1,
+            "description": "Chicken breast",
+            "data_type": "SR Legacy",
+            "macros": {"calories": 165, "protein_g": 31, "carbs_g": 0, "fat_g": 3.57, "fiber_g": 0},
+            "query": "chicken breast",
+        }
+    }
+    cache_path.write_text(json.dumps(old_format_decision_cache), encoding="utf-8")
+
+    session = FakeSession(payload=_load_fixture("fdc_chicken_breast_search.json"))
+    client = _client(session=session, cache=FdcCache(cache_path))
+
+    match = client.search_food("chicken breast")
+
+    # The old-format entries are a different, incompatible shape -- discarded
+    # wholesale rather than misread as a payload, so this falls through to a
+    # normal fresh fetch.
+    assert match is not None
+    assert match.data_type == "SR Legacy"
+    assert session.calls == 1
+
+
+def test_payload_cache_key_distinguishes_page_size(tmp_path) -> None:
+    cache = FdcCache(tmp_path / "cache.json")
+    cache.set_payload("widget", ["Branded"], 5, {"foods": ["five"]})
+    cache.set_payload("widget", ["Branded"], 25, {"foods": ["twenty-five"]})
+
+    assert cache.get_payload("widget", ["Branded"], 5) == {"foods": ["five"]}
+    assert cache.get_payload("widget", ["Branded"], 25) == {"foods": ["twenty-five"]}
+    assert cache.get_payload("widget", ["Branded"], 10) is None

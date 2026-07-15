@@ -5,11 +5,13 @@ import requests
 
 from app.config import Settings
 from app.schemas.ingredient import Ingredient
-from app.schemas.nutrition import FoodMacros, FoodMatch
+from app.schemas.nutrition import FoodMacros, FoodMatch, GroundingStatus, RecipeNutrition
 from app.schemas.recipe import Recipe
 from app.services.grounding_job import (
     IMPLAUSIBLE_MAX_KCAL_PER_SERVING,
+    RATIO_OUTLIER_MAX,
     RAW_COOKED_BLOWUP_RATIO,
+    build_report,
     render_report,
     run_grounding,
 )
@@ -362,6 +364,134 @@ def test_grounding_never_mutates_the_source_recipe_file(tmp_path) -> None:
     run_grounding(client=client, sidecar_path=tmp_path / "grounding.jsonl", corpus=seeds, seeds=seeds)
 
     assert seed_path.read_bytes() == before
+
+
+def test_corpus_wide_ungrounded_frequency_dedupes_within_a_recipe(tmp_path) -> None:
+    # "mystery sauce" appears twice in r_20 -- must count that recipe once,
+    # not twice, and "mystery sauce" itself should be normalized the same
+    # way whether it's the ingredient's raw name or not.
+    recipe = _recipe(
+        "r_20", "Double Trouble",
+        [
+            Ingredient(name="mystery sauce", amount=50, unit="g"),
+            Ingredient(name="mystery sauce", amount=20, unit="g"),
+            Ingredient(name="chicken breast", amount=100, unit="g"),
+        ],
+        calories=300,
+    )
+    other = _recipe(
+        "r_21", "Solo Mystery",
+        [Ingredient(name="mystery sauce", amount=30, unit="g")],
+        calories=100,
+    )
+    client = FakeUsdaClient(
+        {"mystery sauce": None, "chicken breast": _match("chicken breast", calories=165, protein_g=31)}
+    )
+
+    report = run_grounding(
+        client=client, sidecar_path=tmp_path / "grounding.jsonl", corpus=[recipe, other], seeds=[recipe, other]
+    )
+
+    entry = next(row for row in report.ungrounded_frequency if row.name == "mystery sauce")
+    assert entry.recipe_count == 2
+
+
+def test_corpus_wide_ratio_distribution_and_outliers(tmp_path) -> None:
+    normal = _recipe(
+        "r_22", "Normal Ratio",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=330,
+    )
+    outlier = _recipe(
+        "r_23", "Wild Outlier",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=50,  # computed will be 330 -> ratio 6.6x, above RATIO_OUTLIER_MAX
+    )
+    no_tag = _recipe(
+        "r_24", "No Tag",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=None,
+    )
+    client = FakeUsdaClient({"chicken breast": _match("chicken breast", calories=165, protein_g=31)})
+
+    report = run_grounding(
+        client=client,
+        sidecar_path=tmp_path / "grounding.jsonl",
+        corpus=[normal, outlier, no_tag],
+        seeds=[normal, outlier, no_tag],
+    )
+
+    # Only the two tag-carrying recipes contribute to the distribution.
+    assert len(report.ratio_distribution) == 2
+    assert any(o.recipe_id == "r_23" for o in report.ratio_outliers)
+    assert all(o.ratio > RATIO_OUTLIER_MAX for o in report.ratio_outliers if o.recipe_id == "r_23")
+    assert not any(o.recipe_id == "r_22" for o in report.ratio_outliers)
+
+
+def test_corpus_wide_implausible_band_count_independent_of_seed_set(tmp_path) -> None:
+    plausible = _recipe(
+        "r_25", "Fine", [Ingredient(name="chicken breast", amount=200, unit="g")], calories=330
+    )
+    implausible = _recipe(
+        "r_26", "Absurd", [Ingredient(name="oil", amount=1000, unit="g")], calories=500
+    )
+    client = FakeUsdaClient(
+        {"chicken breast": _match("chicken breast", calories=165, protein_g=31), "oil": _match("oil", calories=884)}
+    )
+
+    # Seeds list only includes the plausible recipe -- the corpus-wide count
+    # must still catch the implausible one via `corpus`, not just `seeds`.
+    report = run_grounding(
+        client=client,
+        sidecar_path=tmp_path / "grounding.jsonl",
+        corpus=[plausible, implausible],
+        seeds=[plausible],
+    )
+
+    assert report.implausible_band_corpus_count == 1
+
+
+def test_rejection_counts_flow_from_client_diagnostics_into_the_report(tmp_path) -> None:
+    class _ClientWithDiagnostics(FakeUsdaClient):
+        def __init__(self, matches):
+            super().__init__(matches)
+            self.rejection_counts = {"kcal_too_high": 3, "mass_over_105g": 1}
+
+    recipe = _recipe(
+        "r_27", "Whatever", [Ingredient(name="chicken breast", amount=200, unit="g")], calories=330
+    )
+    client = _ClientWithDiagnostics({"chicken breast": _match("chicken breast", calories=165, protein_g=31)})
+
+    report = run_grounding(client=client, sidecar_path=tmp_path / "grounding.jsonl", corpus=[recipe], seeds=[recipe])
+
+    assert report.rejection_counts == {"kcal_too_high": 3, "mass_over_105g": 1}
+    markdown = render_report(report)
+    assert "kcal_too_high" in markdown
+    assert "| 3 |" in markdown
+
+
+def test_build_report_works_from_precomputed_results_without_any_client(tmp_path) -> None:
+    # This is the baseline-capture use case: build the extended report
+    # straight from an already-loaded sidecar, with zero network calls and
+    # no UsdaClient at all.
+    recipe = _recipe(
+        "r_28", "Chicken Bowl", [Ingredient(name="chicken breast", amount=200, unit="g")], calories=330
+    )
+    nutrition = RecipeNutrition(
+        status=GroundingStatus.GROUNDED,
+        servings=1,
+        total=FoodMacros(calories=330, protein_g=62, carbs_g=0, fat_g=7.14, fiber_g=0),
+        per_serving=FoodMacros(calories=330, protein_g=62, carbs_g=0, fat_g=7.14, fiber_g=0),
+        contributions=[],
+        ungrounded_ingredients=[],
+        coverage=1.0,
+    )
+
+    report = build_report(corpus=[recipe], seeds=[recipe], results={"r_28": nutrition})
+
+    assert report.total_recipes == 1
+    assert report.status_counts == {"grounded": 1}
+    assert report.seed_rows[0].computed_kcal == 330
 
 
 def test_render_report_includes_flags_and_counts(tmp_path) -> None:
