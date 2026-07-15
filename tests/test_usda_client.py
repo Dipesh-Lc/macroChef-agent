@@ -6,6 +6,7 @@ import requests
 
 from app.config import Settings
 from app.services.nutrition_cache import FdcCache
+from app.schemas.nutrition import FoodMacros
 from app.services.usda_client import (
     _BRANDED_DATA_TYPES,
     _BRANDED_PAGE_SIZE,
@@ -14,6 +15,7 @@ from app.services.usda_client import (
     UsdaClient,
     _classify_preparation,
     _is_relevant_match,
+    _plausibility_reject_reason,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -530,17 +532,19 @@ def test_no_preparation_leaves_search_query_unaugmented(tmp_path) -> None:
 
 
 def test_known_unreliable_query_returns_none_without_any_network_call(tmp_path) -> None:
-    # "shrimp"/"tomato sauce" (wrong-form, no preparation gate applies) and
-    # "chili powder"/"ginger" (0 kcal Branded data defects) are deliberately
-    # excluded (see _KNOWN_UNRELIABLE_QUERIES). Must fail closed before ever
-    # touching the network or cache.
+    # "shrimp"/"tomato sauce" (wrong-form, no preparation gate applies, and
+    # the wrong-form match's macros are plausible-looking enough that the
+    # plausibility gate alone wouldn't catch it) are deliberately excluded
+    # (see _KNOWN_UNRELIABLE_QUERIES). Must fail closed before ever touching
+    # the network or cache. "chili powder"/"ginger" used to be on this list
+    # too but were dropped once the plausibility gate could catch their
+    # specific failure mode (0 kcal data defect) generally -- see
+    # test_plausibility_gate_rejects_zero_kcal_defect below.
     session = FakeSession(exc=AssertionError("must not be called"))
     client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
 
     assert client.search_food("shrimp") is None
     assert client.search_food("tomato sauce") is None
-    assert client.search_food("chili powder") is None
-    assert client.search_food("ginger") is None
     assert session.calls == 0
 
 
@@ -716,6 +720,115 @@ def test_old_decision_cache_format_is_discarded_not_misinterpreted(tmp_path) -> 
     assert match is not None
     assert match.data_type == "SR Legacy"
     assert session.calls == 1
+
+
+@pytest.mark.parametrize(
+    ("calories", "protein_g", "fat_g", "carbs_g", "expected"),
+    [
+        (165, 31, 3.57, 0, None),  # ordinary chicken breast -- passes
+        (0, 0, 0, 0, "kcal_too_low"),
+        (4.9, 0, 0, 0, "kcal_too_low"),
+        (951, 0, 0, 0, "kcal_too_high"),
+        (884, 0, 100, 0, None),  # pure fat, at the edge -- still passes
+        (500, 50, 40, 40, "mass_over_105g"),  # 130g macro mass in 100g food
+        (920, 10, 2, 20, "atwater_mismatch"),  # kJ-scale-looking defect
+        (18, 0, 0, 0.9, None),  # vinegar-like: absolute Atwater escape
+    ],
+)
+def test_plausibility_reject_reason(calories, protein_g, fat_g, carbs_g, expected) -> None:
+    macros = FoodMacros(calories=calories, protein_g=protein_g, fat_g=fat_g, carbs_g=carbs_g, fiber_g=0)
+    assert _plausibility_reject_reason(macros) == expected
+
+
+# --- Plausibility gate: reject a relevant, correctly-prepped candidate
+# whose own reported macros are physically implausible ---
+
+
+def test_plausibility_gate_rejects_zero_kcal_defect(tmp_path) -> None:
+    # The exact defect that used to require "chili powder"/"ginger" on
+    # _KNOWN_UNRELIABLE_QUERIES: a real, relevant record reporting 0
+    # kcal/100g (no genuine spice is calorie-free).
+    payload = {
+        "foods": [_macro_food(1, "Ginger, ground", "Branded", calories=0, protein_g=0, fat_g=0, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("ginger")
+
+    assert match is None
+
+
+def test_plausibility_gate_rejects_kj_scale_defect(tmp_path) -> None:
+    # A record whose "calories" value is actually reported on a kJ scale
+    # (roughly 4x a real kcal figure for this macro composition) -- passes
+    # the bare <950 absolute ceiling but fails the Atwater cross-check.
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, raw", "Foundation", calories=920, protein_g=10, fat_g=2, carbs_g=20)
+            # Atwater estimate: 4*10 + 4*20 + 9*2 = 138 kcal. 920 kcal is
+            # neither within [0.5x, 1.7x] of 138 nor within 25 kcal of it.
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_plausibility_gate_rejects_macro_mass_over_105g(tmp_path) -> None:
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, raw", "Foundation", calories=500, protein_g=50, fat_g=40, carbs_g=40)
+            # 50 + 40 + 40 = 130g of macronutrients in 100g of food.
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_plausibility_gate_allows_low_calorie_low_macro_food_via_absolute_escape(tmp_path) -> None:
+    # Vinegar: genuinely low-calorie with near-zero protein/carbs/fat, so its
+    # Atwater estimate is near zero too -- the ratio check alone would reject
+    # it (dividing by ~0), but the absolute <=25 kcal escape lets it through.
+    payload = {
+        "foods": [
+            _macro_food(1, "Vinegar, cider", "SR Legacy", calories=18, protein_g=0, fat_g=0, carbs_g=0.9)
+            # Atwater estimate: 4*0.9 = 3.6 kcal. abs(18 - 3.6) = 14.4 <= 25.
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("vinegar")
+
+    assert match is not None
+    assert match.macros.calories == 18
+
+
+def test_plausibility_gate_falls_through_to_next_ranked_candidate(tmp_path) -> None:
+    # An implausible top-ranked candidate doesn't ground the ingredient to
+    # nothing if a lower-ranked candidate is both relevant and plausible.
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, raw", "Foundation", calories=0, protein_g=0, fat_g=0, carbs_g=0),
+            _macro_food(2, "Widget, raw", "SR Legacy", calories=50, protein_g=2, fat_g=1, carbs_g=10),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is not None
+    assert match.fdc_id == 2
+    assert match.macros.calories == 50
 
 
 def test_payload_cache_key_distinguishes_page_size(tmp_path) -> None:

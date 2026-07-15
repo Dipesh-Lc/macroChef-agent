@@ -216,9 +216,70 @@ class MatchOutcome:
     rejections: list[str] = field(default_factory=list)
 
 
+# Absolute-plausibility gate applied to EVERY candidate's per-100g macros,
+# regardless of dataType tier -- a bad number should never win just because
+# it's Foundation-ranked. This exists because relevance/preparation alone
+# only checks that a candidate is *the same food*, never that its reported
+# values are physically sane; live FDC data has both unit-scale defects
+# (e.g. a record reporting kilojoules under the "208"/kcal nutrient number)
+# and flat data-entry defects (e.g. a spice reporting 0 kcal/100g, or a sum
+# of macronutrient grams exceeding what fits in 100g of food).
+#
+# Bounds:
+#   - kcal < 5 or kcal > 950: outside any real whole food's per-100g range
+#     (950 comfortably covers pure fats/oils at ~884-900; 5 excludes "0 kcal"
+#     data defects like the ginger/chili powder case while still allowing a
+#     genuinely near-zero-calorie item like plain water or ice).
+#   - protein_g + carbs_g + fat_g > 105: 100g of food cannot contain more
+#     than ~100g of macronutrient mass; 105 gives a small tolerance for
+#     independently-rounded USDA values without opening the door to a
+#     genuinely impossible record.
+#   - Atwater mismatch: reported kcal should be explainable by the reported
+#     macros via the standard Atwater factors (4 kcal/g protein, 4 kcal/g
+#     carbs, 9 kcal/g fat) -- catches a kJ-scale defect (reported kcal ~4x
+#     too high relative to its own macros) even when it's still under the
+#     950 absolute ceiling. A candidate passes if EITHER its kcal is within
+#     [0.5x, 1.7x] of its own Atwater estimate (generous enough for real
+#     dietary-fiber/sugar-alcohol/rounding variance) OR its absolute
+#     difference from the Atwater estimate is <=25 kcal -- the second,
+#     absolute escape is what lets a genuinely low-calorie, low-macro food
+#     (e.g. vinegar: ~18 kcal/100g against a near-zero Atwater estimate from
+#     its trace protein/carbs/fat) pass without being penalized by a ratio
+#     computed against a near-zero denominator.
+_PLAUSIBLE_MIN_KCAL = 5.0
+_PLAUSIBLE_MAX_KCAL = 950.0
+_PLAUSIBLE_MAX_MACRO_MASS_G = 105.0
+_ATWATER_RATIO_LOW = 0.5
+_ATWATER_RATIO_HIGH = 1.7
+_ATWATER_ABSOLUTE_ESCAPE_KCAL = 25.0
+
+
+def _plausibility_reject_reason(macros: FoodMacros) -> str | None:
+    """Returns a reason code if `macros` fails the absolute-plausibility
+    gate, else `None`. See the gate's module-level comment for the bounds
+    and their rationale."""
+    if macros.calories < _PLAUSIBLE_MIN_KCAL:
+        return "kcal_too_low"
+    if macros.calories > _PLAUSIBLE_MAX_KCAL:
+        return "kcal_too_high"
+
+    macro_mass = macros.protein_g + macros.carbs_g + macros.fat_g
+    if macro_mass > _PLAUSIBLE_MAX_MACRO_MASS_G:
+        return "mass_over_105g"
+
+    atwater = 4 * macros.protein_g + 4 * macros.carbs_g + 9 * macros.fat_g
+    within_ratio = (_ATWATER_RATIO_LOW * atwater) <= macros.calories <= (_ATWATER_RATIO_HIGH * atwater)
+    within_absolute = abs(macros.calories - atwater) <= _ATWATER_ABSOLUTE_ESCAPE_KCAL
+    if not (within_ratio or within_absolute):
+        return "atwater_mismatch"
+
+    return None
+
+
 def _best_match(payload: dict[str, Any], query: str, preparation: str | None = None) -> MatchOutcome:
-    """Pick the best-ranked food with usable macros, gated by relevance and
-    by `preparation` when given.
+    """Pick the best-ranked food with usable, plausible macros, gated by
+    relevance, by `preparation` when given, and by absolute plausibility
+    (see `_plausibility_reject_reason`).
 
     Every candidate must pass `_is_relevant_match` against `query` -- a
     candidate that is a different or derived food (see its docstring) is
@@ -227,11 +288,15 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
     state (see `_classify_preparation`) -- an unclassifiable or
     differently-stated candidate is skipped even if it would otherwise rank
     first, so a declared-cooked ingredient can never resolve to a raw record
-    (or vice versa). If nothing in the ranked list matches, `match` is
-    `None` (ungrounded) rather than falling back to the best unrelated
-    candidate.
+    (or vice versa). A candidate whose extracted macros fail the
+    plausibility gate is also skipped, with its rejection reason recorded in
+    `MatchOutcome.rejections` for the corpus-wide report -- a confidently
+    wrong number is worse than an honest unknown. If nothing in the ranked
+    list matches, `match` is `None` (ungrounded) rather than falling back to
+    the best unrelated or implausible candidate.
     """
     foods = payload.get("foods") or []
+    rejections: list[str] = []
     ranked = sorted(foods, key=lambda food: _DATA_TYPE_PRIORITY.get(food.get("dataType"), 99))
     for food in ranked:
         description = food.get("description", "")
@@ -242,6 +307,10 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
         macros = _extract_macros(food)
         if macros is None:
             continue
+        reject_reason = _plausibility_reject_reason(macros)
+        if reject_reason is not None:
+            rejections.append(reject_reason)
+            continue
         return MatchOutcome(
             match=FoodMatch(
                 fdc_id=food["fdcId"],
@@ -249,33 +318,38 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
                 data_type=food.get("dataType", ""),
                 macros=macros,
                 query=query,
-            )
+            ),
+            rejections=rejections,
         )
-    return MatchOutcome(match=None)
+    return MatchOutcome(match=None, rejections=rejections)
 
 
-# Queries where the general mechanism (relevance check + preparation gate)
-# reliably lands on a wrong-form or untrustworthy record, confirmed by manual
-# review against real-world reference values (item 1.4 Step B closeout) --
-# and where no honest `preparation` declaration fixes it, unlike the
-# grain/legume/meat cases the field was built for:
+# Queries where the general mechanism (relevance check + preparation gate +
+# plausibility gate) reliably lands on a wrong-form record with plausible-
+# looking macros, confirmed by manual review against real-world reference
+# values (item 1.4 Step B closeout) -- and where no honest `preparation`
+# declaration fixes it, unlike the grain/legume/meat cases the field was
+# built for:
 #   - "shrimp": no relevant Foundation/SR Legacy/Survey record exists even
 #     with preparation="raw"; the best available match is a Branded "RAW
 #     SHRIMP" at 71 kcal/100g against a true range of ~85-99 kcal/100g --
-#     not accurate enough to trust.
+#     plausible-looking (passes the absolute-plausibility gate), but not
+#     accurate enough to trust.
 #   - "tomato sauce": matches a Branded "chili sauce" variant (92 kcal/100g)
 #     instead of plain tomato sauce (~24-35 kcal/100g). A sauce has no
 #     raw/cooked/canned state to declare, so this mismatch can't be gated the
-#     way grain/legume/meat state ambiguity is.
-#   - "chili powder" / "ginger": the only reachable Branded record for each
-#     reports 0 kcal/100g -- a data defect (no real spice is calorie-free),
-#     not a wrong-form match, so `preparation` gating doesn't apply. A
-#     confidently-wrong zero is worse than an honest unknown.
+#     way grain/legume/meat state ambiguity is, and 92 kcal/100g is itself
+#     plausible enough to clear the absolute gate.
+# "chili powder" and "ginger" were dropped from this list once the
+# plausibility gate landed: both failed solely because their only reachable
+# Branded record reported 0 kcal/100g, a data defect `_plausibility_reject_
+# reason` ("kcal_too_low") now catches generally -- no ingredient-specific
+# exclusion needed for that failure mode anymore.
 # Deliberately narrow and disclosed rather than a general rule change with
 # unclear corpus-wide blast radius -- an honest "we checked, don't trust
 # this" list, not an attempt to force a match either way. Keyed by the exact
 # normalized query (see `normalize_ingredient`).
-_KNOWN_UNRELIABLE_QUERIES = {"shrimp", "tomato sauce", "chili powder", "ginger"}
+_KNOWN_UNRELIABLE_QUERIES = {"shrimp", "tomato sauce"}
 
 
 class UsdaClient:
