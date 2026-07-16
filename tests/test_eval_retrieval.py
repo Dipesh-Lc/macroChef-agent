@@ -14,16 +14,35 @@ from app.rag.chroma_client import collection_count
 from app.services.recipe_retriever import RecipeRetriever
 
 
-def test_load_eval_queries_has_62_queries_with_pinned_nonempty_ground_truth() -> None:
+def test_load_eval_queries_has_67_queries_with_pinned_nonempty_ground_truth() -> None:
+    """67 queries: 25 ingredient / 10 dish / 5 cuisine / 5 meal_type / 5
+    dietary / 8 paraphrase_syn / 9 paraphrase_oov. See
+    scripts/gen_retrieval_eval_queries.py's docstring for the Phase 1.5
+    closeout decontamination (strict local ground-truth predicate) and the
+    paraphrase_syn/paraphrase_oov split rationale."""
     queries = load_eval_queries()
 
-    assert len(queries) == 62
+    assert len(queries) == 67
     for query in queries:
         assert query.relevant_recipe_ids, f"{query.query_id} has an empty ground-truth set"
 
     categories = {query.category for query in queries}
-    assert categories == {"ingredient", "dish", "cuisine", "meal_type", "dietary", "paraphrase"}
-    assert sum(1 for q in queries if q.category == "paraphrase") >= 10
+    assert categories == {
+        "ingredient",
+        "dish",
+        "cuisine",
+        "meal_type",
+        "dietary",
+        "paraphrase_syn",
+        "paraphrase_oov",
+    }
+    # paraphrase_syn: colloquial anchors resolvable via SYNONYMS -- a
+    # synonym-table regression test, not the embedding-value test.
+    assert sum(1 for q in queries if q.category == "paraphrase_syn") >= 8
+    # paraphrase_oov: colloquial anchors verifiably absent from SYNONYMS/fuzzy
+    # -- the true embedding-generalization test. n(oov) >= 8 per the Phase 1.5
+    # closeout spec (was n=4, too thin to trust either way it lands).
+    assert sum(1 for q in queries if q.category == "paraphrase_oov") >= 8
 
 
 def test_run_retrieval_eval_computes_aggregate_from_per_query_rows(monkeypatch) -> None:

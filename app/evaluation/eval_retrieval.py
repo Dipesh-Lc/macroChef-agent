@@ -36,8 +36,12 @@ printed methodology note, which is the canonical description of the gate):
   ground truth (ingredient-membership / exact cuisine / exact meal_type), so
   keyword's near-1.0 score there is an ORACLE UPPER BOUND, not evidence
   keyword search "works" in the way semantic search generalizing to
-  paraphrases would be a finding. See scripts/evaluate_retrieval.py's
-  methodology note.
+  paraphrases would be a finding. `gen_retrieval_eval_queries.py`'s ground
+  truth for these three categories uses its OWN strict local predicate
+  (word-boundary token containment, not `ingredient_matches`) -- see that
+  script's docstring -- but `keyword_search` production code is unchanged, so
+  the oracle-upper-bound relationship still holds by construction. See
+  scripts/evaluate_retrieval.py's methodology note.
 - The HYBRID path calls `RecipeRetriever.retrieve()` itself (semantic query
   + metadata `where` filter + automatic keyword fallback when semantic
   returns fewer than `limit` results) with `user_id=None`, i.e. base-corpus

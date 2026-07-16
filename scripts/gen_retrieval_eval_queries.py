@@ -21,15 +21,66 @@ CORRECTION: this independence does NOT hold for the KEYWORD baseline.
 `RecipeRetriever.keyword_search` (app/services/recipe_retriever.py) scores
 recipes by literally the same predicates used here to build ground truth for
 the `ingredient`, `cuisine`, and `meal_type` categories (ingredient-membership
-via `ingredient_matches`, exact cuisine match, exact meal_type match). So
-keyword's near-1.0 score on those three categories is an ORACLE UPPER BOUND
--- it is measuring "does the label-generating predicate match itself",
-not evidence the keyword path handles real user queries well. The `dish`,
-`dietary`, and `paraphrase` categories (title-substring match, diet-tag
-match, and a canonical-ingredient predicate paired with colloquial/synonym
-query text respectively) are genuinely method-independent for BOTH keyword
-and semantic, and are the meaningful comparison categories --
-see scripts/evaluate_retrieval.py's methodology note and gate definition.
+via production's `ingredient_matches`, exact cuisine match, exact meal_type
+match). So keyword's near-1.0 score on those three categories is an ORACLE
+UPPER BOUND -- it is measuring "does the label-generating predicate match
+itself", not evidence the keyword path handles real user queries well. The
+`dish`, `dietary`, and `paraphrase_syn`/`paraphrase_oov` categories
+(title-substring match, diet-tag match, and a canonical-ingredient predicate
+paired with colloquial/synonym query text respectively) are genuinely
+method-independent for BOTH keyword and semantic -- see
+scripts/evaluate_retrieval.py's methodology note and gate definition.
+
+GROUND-TRUTH MATCHING PREDICATE -- Phase 1.5 closeout decontamination:
+
+Ground truth here does NOT use `app.utils.ingredient_normalizer.ingredient_matches`
+(the function production `keyword_search` and every other consumer uses).
+That function is unsuitable for GROUND TRUTH -- as opposed to a live search
+result a human can see and discard -- because of two compounding effects:
+
+  1. Raw substring containment (`left in right or right in left`), which
+     matches "egg" inside "eggplant", "onion" inside "green onion", "pea"
+     inside "chickpea" purely at the character level, not the word level.
+  2. `normalize_ingredient`'s trailing fuzzy fallback
+     (`fuzzy_normalize_ingredient`, rapidfuzz `token_sort_ratio >= 85`),
+     which can fold an unrelated ingredient onto a `CANONICAL_INGREDIENTS`
+     entry when nothing else in normalization matched.
+
+On this corpus that inflated some single-ingredient relevant sets by
+10-40x -- e.g. "eggplant" matched 1,197 of 4,263 recipes via
+`ingredient_matches` (nearly every recipe that happens to contain "egg"
+somewhere), collapsing to 31 under the strict predicate below. See
+docs/phase-1.5-closeout.md for the full before/after table.
+`ingredient_matches` itself is UNCHANGED here and remains in production use
+(disliked-ingredient filtering, recipe discovery, procurement,
+recipe_validation_service) -- fixing it there is a separately tracked
+backlog item (see the closeout doc), out of scope for this eval-only pass.
+
+This generator instead uses its own `_strict_ingredient_match`, used ONLY to
+compute the pinned ground truth below:
+
+  - Both sides are normalized with `normalize_ingredient` (dict synonyms +
+    descriptor stripping + plural stripping + fuzzy fallback -- the same
+    normalization keyword_search itself performs on each side individually,
+    so reusing it here is mechanical name-cleanup, not a new judgment call).
+  - Matching is then WORD-BOUNDARY TOKEN containment: the (whitespace-split)
+    token set of one normalized name must be a subset of the other's -- NOT
+    a raw substring check, and NO additional fuzzy step at the matching
+    stage. This alone kills the raw-substring false positives above, since
+    e.g. {"egg"} is never a subset of {"eggplant"} as *token sets* (they are
+    different single-word tokens), even though the characters "egg" are a
+    substring of "eggplant".
+  - Token-set subset containment is still too permissive for a small set of
+    single-word ingredient names that are also the HEAD of a longer
+    canonical name for a materially different ingredient: "onion" (tokens
+    {"onion"}) is a token-subset of "green onion" ({"green", "onion"}), and
+    "pepper" is a token-subset of "bell pepper". `AMBIGUOUS_HEADS` forces
+    EXACT normalized-string equality for these four terms -- a plain
+    "onion" query no longer counts a "green onion" recipe as relevant (and
+    vice versa), same for "pepper"/"bell pepper", "egg"/"eggplant" (and
+    "egg"/"egg white"), and "pea"/"chickpea" (killed by tokenization alone,
+    but kept in the set for symmetry/defense-in-depth since "pea" is also a
+    head of other two-word canonical peas dishes should the corpus grow one).
 
 BACKLOG (not implemented here): corpus metadata enrichment. `cuisine`,
 `meal_type`, and `diet_tags` are populated for the 25 hand-curated seed
@@ -57,13 +108,35 @@ if str(ROOT) not in sys.path:
 
 from app.rag.loaders import load_corpus  # noqa: E402
 from app.schemas.recipe import Recipe  # noqa: E402
-from app.utils.ingredient_normalizer import ingredient_matches  # noqa: E402
+from app.utils.ingredient_normalizer import normalize_ingredient  # noqa: E402
 
 OUTPUT_PATH = ROOT / "app" / "evaluation" / "data" / "retrieval_eval_queries.jsonl"
 
+# Single-word ingredient names that are also the head of a longer canonical
+# name for a materially different ingredient. See the module docstring's
+# "GROUND-TRUTH MATCHING PREDICATE" section for the full rationale.
+AMBIGUOUS_HEADS = {"egg", "onion", "pepper", "pea"}
+
+
+def _strict_ingredient_match(query_name: str, inventory_name: str) -> bool:
+    """Ground-truth-only ingredient match. NOT `ingredient_matches` -- see
+    the module docstring. Normalize both sides, then require word-boundary
+    token containment, with `AMBIGUOUS_HEADS` forcing exact equality."""
+    query_norm = normalize_ingredient(query_name).lower().strip()
+    inventory_norm = normalize_ingredient(inventory_name).lower().strip()
+    if not query_norm or not inventory_norm:
+        return False
+    if query_norm == inventory_norm:
+        return True
+    if query_norm in AMBIGUOUS_HEADS or inventory_norm in AMBIGUOUS_HEADS:
+        return False
+    query_tokens = set(query_norm.split())
+    inventory_tokens = set(inventory_norm.split())
+    return query_tokens <= inventory_tokens or inventory_tokens <= query_tokens
+
 
 def _has_ingredient(recipe: Recipe, name: str) -> bool:
-    return any(ingredient_matches(name, item.name) for item in recipe.ingredients)
+    return any(_strict_ingredient_match(name, item.name) for item in recipe.ingredients)
 
 
 def _has_all_ingredients(recipe: Recipe, names: list[str]) -> bool:
@@ -97,6 +170,8 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
         )
 
     # --- 25 ingredient-based queries (pantry-style: "what can I make with X, Y?") ---
+    # Each entry is (description, structured `ingredients` field, [optional]
+    # ground-truth match terms if they must differ from the structured field).
     ingredient_combos = [
         ("chicken breast and mushroom", ["chicken breast", "mushroom"]),
         ("chicken breast, soy sauce, and ginger", ["chicken breast", "soy sauce", "ginger"]),
@@ -120,15 +195,31 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
         ("zucchini and parmesan", ["zucchini", "parmesan"]),
         ("sweet potato and black beans", ["sweet potato", "black bean"]),
         ("ginger, garlic, and soy sauce", ["ginger", "garlic", "soy sauce"]),
-        ("bacon, cheddar cheese, and potato", ["bacon", "cheddar cheese", "potato"]),
+        # Ground truth intentionally drops "potato" from the match terms
+        # here (structured `ingredients` field keeps all 3, unaffected):
+        # `normalize_ingredient`'s naive plural-stripping turns "potatoes"
+        # into "potatoe" (off-by-one, not "potato") on many corpus items
+        # like "-12 mashed potatoes", so a bare "potato" match term fails to
+        # find them even though they're clearly potato recipes. That is a
+        # pre-existing `ingredient_normalizer` bug (see BACKLOG in
+        # docs/phase-1.5-closeout.md), out of scope for this eval-only pass
+        # -- worked around here the same way the paraphrase category already
+        # decouples its colloquial `ingredients` field from the canonical
+        # match predicate.
+        ("bacon, cheddar cheese, and potato", ["bacon", "cheddar cheese", "potato"], ["bacon", "cheddar cheese"]),
         ("pumpkin and cream cheese", ["pumpkin", "cream cheese"]),
         ("mushroom, spinach, and garlic", ["mushroom", "spinach", "garlic"]),
     ]
-    for i, (desc, ings) in enumerate(ingredient_combos, start=1):
+    for i, combo in enumerate(ingredient_combos, start=1):
+        if len(combo) == 3:
+            desc, ings, match_ings = combo
+        else:
+            desc, ings = combo
+            match_ings = ings
         add(
             f"ing_{i:02d}", "ingredient", f"What can I make with {desc}?",
             ingredients=ings,
-            predicate=lambda r, ings=ings: _has_all_ingredients(r, ings),
+            predicate=lambda r, names=match_ings: _has_all_ingredients(r, names),
         )
 
     # --- 10 dish/title queries ("I want to make X") -- ground truth is a title
@@ -195,36 +286,50 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
             predicate=lambda r, tag=diet_tag, ings=ings: _has_diet_tag(r, tag) and _has_all_ingredients(r, ings),
         )
 
-    # --- paraphrase queries: the method-independent vocabulary-bridging test.
-    # Ground truth uses the SAME `_has_all_ingredients` predicate over
-    # CANONICAL corpus ingredient names as the `ingredient` category above,
-    # but the free-text `description` AND the structured `ingredients` field
-    # use colloquial/synonym surface forms a real user might type instead of
-    # the canonical name. This isolates whether a retrieval method can
-    # bridge vocabulary a literal `ingredient_matches` lookup cannot --
-    # independent of which method is under test, since the ground truth
-    # never touches either method's matching logic.
+    # --- paraphrase queries: the method-independent vocabulary-bridging test,
+    # split into two subcategories (Phase 1.5 closeout respecification -- see
+    # scripts/evaluate_retrieval.py's methodology note and gate definition):
     #
-    # Some surface forms below (e.g. "prawns"->shrimp, "capsicum"->bell
-    # pepper) ARE already resolved by
-    # app.utils.ingredient_normalizer.SYNONYMS, so keyword_search's own
-    # normalization will also succeed on those -- that is a legitimate
-    # finding (the synonym table already covers that gap), not a broken
-    # query. Others ("bean curd", "leftover roast chicken", "minced beef")
-    # are genuine gaps the normalizer does not cover, which is where a
-    # semantic-vs-keyword gap would be expected to show up if embeddings are
-    # doing real vocabulary generalization.
+    # `paraphrase_syn`: the colloquial anchor IS resolvable by
+    # `app.utils.ingredient_normalizer.SYNONYMS` (directly, or after
+    # descriptor-stripping/plural-stripping feeds back into a SYNONYMS hit --
+    # verified per-term below). This means keyword_search's own normalization
+    # also resolves these, so it is a SYNONYM-TABLE REGRESSION test (keyword
+    # is expected to do fine here too) rather than a semantic-vs-keyword
+    # embedding-value test. Reported, not gated against semantic.
+    #
+    # `paraphrase_oov`: the colloquial/regional anchor is verifiably ABSENT
+    # from SYNONYMS and out of `fuzzy_normalize_ingredient`'s reach (verified
+    # per-term below: `normalize_ingredient(term)` does NOT resolve to the
+    # canonical anchor via SYNONYMS/fuzzy -- 8 of the 9 terms pass through
+    # normalization completely unchanged; the exception is "garbanzos",
+    # where mechanical plural-stripping alone turns it into "garbanzo"
+    # without SYNONYMS or the fuzzy fallback ever firing, so it still does
+    # NOT resolve to the canonical "chickpea" anchor either way), with a
+    # canonical anchor that has real corpus recipes. This is the TRUE
+    # embedding-value test --
+    # whether semantic search can bridge vocabulary a literal keyword lookup
+    # cannot. Reported honestly whichever way it lands; see
+    # scripts/evaluate_retrieval.py for why an OOV loss does not fail the
+    # Phase 1.5 gate.
+    #
+    # Ground truth for both subcategories uses `_has_all_ingredients` over
+    # CANONICAL corpus ingredient names -- same predicate as the `ingredient`
+    # category above -- paired with colloquial/synonym query text a real user
+    # might type instead of the canonical name. This isolates vocabulary
+    # bridging independent of which method is under test, since the ground
+    # truth never touches either method's matching logic.
     #
     # NOTE on combo sizes: several canonical terms ("green onion", "bell
-    # pepper", "eggplant") are prone to spurious `ingredient_matches` hits
-    # via short-substring overlap (e.g. "onion" matches "green onion",
-    # "egg" matches "eggplant" -- see NOTICED-NOT-FIXED in the Phase 1.5
-    # closeout report). Pairing those terms with a second/third co-occurring
-    # canonical ingredient (mirroring how the `ingredient` category above
-    # mostly uses 2-3 term AND-predicates) keeps ground truth reasonably
-    # precise without touching `ingredient_matches` itself, which is a
-    # pre-existing, separately-scoped issue.
-    paraphrase_queries = [
+    # pepper", "eggplant") were historically prone to spurious matches via
+    # short-substring overlap under the OLD ground-truth predicate (e.g.
+    # "onion" matching "green onion", "egg" matching "eggplant") -- the
+    # `_strict_ingredient_match`/`AMBIGUOUS_HEADS` predicate above now
+    # prevents that. Queries still pair those terms with a second/third
+    # co-occurring canonical ingredient (mirroring the `ingredient` category's
+    # 2-3 term AND-predicates) to keep relevant-set sizes reasonable, not to
+    # work around a substring bug.
+    paraphrase_syn_queries = [
         (
             "garbanzo beans and cumin",
             ["chickpea", "cumin"],
@@ -239,12 +344,6 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
             ["scallions", "tamari", "ginger"],
         ),
         (
-            "leftover roast chicken with ginger",
-            ["chicken breast", "ginger"],
-            "a way to use up leftover roast chicken with some fresh ginger",
-            ["leftover roast chicken", "ginger"],
-        ),
-        (
             "aubergine, garlic, and tomato",
             ["eggplant", "garlic", "tomato"],
             "a recipe with aubergine, garlic, and tomato",
@@ -256,24 +355,11 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
             "a dish with fresh cilantro and cumin",
             ["fresh cilantro", "cumin"],
         ),
-        ("bean curd", ["tofu"], "a recipe using bean curd", ["bean curd"]),
         (
             "courgette and parmesan",
             ["zucchini", "parmesan"],
             "a dish with courgette and parmesan",
             ["courgette", "parmesan"],
-        ),
-        (
-            "garbanzos and spinach",
-            ["chickpea", "spinach"],
-            "garbanzos and spinach for dinner",
-            ["garbanzos", "spinach"],
-        ),
-        (
-            "minced beef and carrot",
-            ["beef", "carrot"],
-            "a dish with minced beef and carrot",
-            ["minced beef", "carrot"],
         ),
         (
             "capsicum and cumin",
@@ -288,9 +374,67 @@ def build_queries(recipes: list[Recipe]) -> list[dict]:
             ["capsicum", "corn", "black beans"],
         ),
     ]
-    for i, (_label, canonical, desc, colloquial_ings) in enumerate(paraphrase_queries, start=1):
+    for i, (_label, canonical, desc, colloquial_ings) in enumerate(paraphrase_syn_queries, start=1):
         add(
-            f"para_{i:02d}", "paraphrase", desc,
+            f"para_syn_{i:02d}", "paraphrase_syn", desc,
+            ingredients=colloquial_ings,
+            predicate=lambda r, names=canonical: _has_all_ingredients(r, names),
+        )
+
+    paraphrase_oov_queries = [
+        (
+            "leftover roast chicken with ginger",
+            ["chicken breast", "ginger"],
+            "a way to use up leftover roast chicken with some fresh ginger",
+            ["leftover roast chicken", "ginger"],
+        ),
+        ("bean curd", ["tofu"], "a recipe using bean curd", ["bean curd"]),
+        (
+            "garbanzos and spinach",
+            ["chickpea", "spinach"],
+            "garbanzos and spinach for dinner",
+            ["garbanzos", "spinach"],
+        ),
+        (
+            "minced beef and carrot",
+            ["beef", "carrot"],
+            "a dish with minced beef and carrot",
+            ["minced beef", "carrot"],
+        ),
+        (
+            "double cream and sugar",
+            ["heavy cream", "sugar"],
+            "a dessert using double cream and sugar",
+            ["double cream", "sugar"],
+        ),
+        (
+            "streaky bacon and eggs",
+            ["bacon", "egg"],
+            "streaky bacon and eggs for breakfast",
+            ["streaky bacon", "eggs"],
+        ),
+        (
+            "mince and onion",
+            ["ground beef", "onion"],
+            "mince and onion for dinner",
+            ["mince", "onion"],
+        ),
+        (
+            "gammon and potato",
+            ["ham", "potato"],
+            "a gammon and potato bake",
+            ["gammon", "potato"],
+        ),
+        (
+            "rotisserie chicken and rice",
+            ["chicken breast", "rice"],
+            "a quick meal with rotisserie chicken and rice",
+            ["rotisserie chicken", "rice"],
+        ),
+    ]
+    for i, (_label, canonical, desc, colloquial_ings) in enumerate(paraphrase_oov_queries, start=1):
+        add(
+            f"para_oov_{i:02d}", "paraphrase_oov", desc,
             ingredients=colloquial_ings,
             predicate=lambda r, names=canonical: _has_all_ingredients(r, names),
         )
