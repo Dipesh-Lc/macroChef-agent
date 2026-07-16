@@ -28,11 +28,105 @@ from app.schemas.ingredient import Ingredient
 from app.schemas.nutrition import GroundingStatus, IngredientContribution, RecipeNutrition
 from app.schemas.recipe import Recipe
 from app.services.nutrition_grounding import compute_recipe_macros
-from app.services.usda_client import UsdaClient
+from app.services.usda_client import (
+    REASON_ALL_CANDIDATES_REJECTED,
+    REASON_GROUNDED,
+    REASON_NO_RELEVANT_CANDIDATE,
+    UsdaClient,
+)
 from app.utils.ingredient_normalizer import normalize_ingredient
 from app.utils.logging import get_logger
+from app.utils.unit_converter import to_grams
 
 logger = get_logger(__name__)
+
+# --- Corpus-wide per-ingredient-occurrence terminal-outcome tally ---
+#
+# Distinct from `UsdaClient.rejection_counts` (an aggregate, per-CANDIDATE
+# tally -- see its docstring, and the retitled table in `render_report`):
+# this classifies the FINAL fate of every single ingredient occurrence in
+# the corpus into exactly one of five mutually-exclusive buckets, in the
+# same two-stage order `compute_recipe_macros` itself uses (unit conversion,
+# then USDA matching) so the totals reconcile against the corpus's actual
+# ingredient-row count (see `_terminal_outcome_for_ingredient` and the
+# assertion in `run_grounding`):
+#   - TERMINAL_NO_UNIT: `ingredient.unit` is `None` and `to_grams` could not
+#     resolve an amount anyway (no per-piece weight for a bare count either)
+#     -- `search_food` is never reached. This is the corpus's dominant
+#     failure mode (see the phase 1.5 closeout report: ~35,059/35,183
+#     imported ingredient rows have `unit: None`).
+#   - TERMINAL_UNIT_UNCONVERTIBLE: `ingredient.unit` IS set, but `to_grams`
+#     still returned `None` (most commonly a volume unit with no density
+#     entry for this ingredient, or a mass/volume/count unit string
+#     `to_grams` doesn't recognize at all) -- `search_food` is never
+#     reached either.
+#   - TERMINAL_NO_RELEVANT_CANDIDATE / TERMINAL_ALL_CANDIDATES_REJECTED /
+#     TERMINAL_GROUNDED: `to_grams` succeeded and `search_food_with_reason`
+#     was actually called -- see `UsdaClient.search_food_with_reason`'s
+#     docstring for exactly how these three are distinguished. Note a
+#     declared-`preparation` candidate that fails the state-classification
+#     gate (see `_best_match`) currently falls under
+#     TERMINAL_NO_RELEVANT_CANDIDATE, not TERMINAL_ALL_CANDIDATES_REJECTED
+#     -- that gate doesn't record a `rejections` entry the way the
+#     plausibility/modifier gates do, so it isn't distinguishable from
+#     "nothing relevant was found at all" with the data available today.
+TERMINAL_NO_UNIT = "no_unit"
+TERMINAL_UNIT_UNCONVERTIBLE = "unit_unconvertible"
+TERMINAL_NO_RELEVANT_CANDIDATE = REASON_NO_RELEVANT_CANDIDATE
+TERMINAL_ALL_CANDIDATES_REJECTED = REASON_ALL_CANDIDATES_REJECTED
+TERMINAL_GROUNDED = REASON_GROUNDED
+
+# Rendered table row order (report readability only -- a dict/Counter has no
+# guaranteed order worth relying on).
+_TERMINAL_OUTCOME_ORDER = [
+    TERMINAL_GROUNDED,
+    TERMINAL_NO_UNIT,
+    TERMINAL_UNIT_UNCONVERTIBLE,
+    TERMINAL_NO_RELEVANT_CANDIDATE,
+    TERMINAL_ALL_CANDIDATES_REJECTED,
+]
+
+
+def _terminal_outcome_for_ingredient(ingredient: Ingredient, client: UsdaClient) -> str:
+    """Classify one ingredient occurrence's terminal outcome -- see the
+    module comment above for the five buckets and their precedence.
+
+    Calls `client.search_food_with_reason` a second time for occurrences
+    that clear unit conversion (the same query `compute_recipe_macros`
+    already issued for this exact ingredient during the main grounding
+    pass) -- this is a cache hit against the SAME `UsdaClient`/`FdcCache`
+    instance (no additional network I/O), re-running only the deterministic
+    Python-side matching logic to recover the terminal reason for the
+    report.
+    """
+    grams = to_grams(ingredient.amount, ingredient.unit, name=ingredient.name)
+    if grams is None:
+        return TERMINAL_NO_UNIT if ingredient.unit is None else TERMINAL_UNIT_UNCONVERTIBLE
+
+    search_with_reason = getattr(client, "search_food_with_reason", None)
+    if search_with_reason is not None:
+        # `record_diagnostics=False`: this call re-classifies a query the
+        # main `compute_recipe_macros` pass already issued once through
+        # this same method for this same ingredient occurrence -- without
+        # this, the cumulative `rejection_counts`/`branded_dispersion_
+        # events` diagnostics would double-count every occurrence that
+        # reaches the matching stage (see `search_food_with_reason`'s
+        # docstring).
+        _match, reason = search_with_reason(
+            ingredient.name, preparation=ingredient.preparation, record_diagnostics=False
+        )
+        return reason
+
+    # Fallback for a caller-supplied test double that only implements the
+    # bare `search_food(name, *, preparation=None) -> FoodMatch | None`
+    # contract (see many test doubles in test_grounding_job.py/test_
+    # nutrition_grounding.py) -- can still tell grounded from not-grounded,
+    # but can't distinguish the two failure sub-reasons without the richer
+    # method, so it reports the coarser TERMINAL_NO_RELEVANT_CANDIDATE
+    # rather than raising `AttributeError`. Never hit by the real
+    # `UsdaClient`, which always has `search_food_with_reason`.
+    match = client.search_food(ingredient.name, preparation=ingredient.preparation)
+    return TERMINAL_GROUNDED if match is not None else TERMINAL_NO_RELEVANT_CANDIDATE
 
 # Corpus-wide tag-vs-computed ratio bounds outside of which a recipe is
 # surfaced as an outlier in the report -- report-only, never demoting (see
@@ -102,7 +196,7 @@ _KNOWN_RESIDUALS = [
         "ginger (RESOLVED by phase 1.5/P4)",
         "Previously the only reachable Branded record reported 0 kcal/100g "
         "(a data defect the P1 plausibility gate correctly rejects as "
-        "'kcal_too_low'), leaving it UNGROUNDED. Resolved by adding "
+        "'kcal_too_low_branded'), leaving it UNGROUNDED. Resolved by adding "
         "usda_client._FDC_QUERY_ALIASES['ginger'] = 'spices ginger ground', "
         "which reaches the real SR Legacy 'Spices, ginger, ground' record "
         "(~335 kcal/100g) at the generic tier, never reaching the defective "
@@ -121,26 +215,33 @@ _KNOWN_RESIDUALS = [
         "chili powder",
         "The only reachable Branded record reports 0 kcal/100g -- a data "
         "defect the P1 plausibility gate correctly rejects as "
-        "'kcal_too_low', and no generic-tier 'Spices, chili powder' record "
+        "'kcal_too_low_branded', and no generic-tier 'Spices, chili powder' record "
         "was found to alias to (unlike the other spices resolved in "
         "phase 1.5/P4) -- stays on usda_client._KNOWN_UNRELIABLE_QUERIES "
         "as a disclosed, deliberate exclusion pending that verification.",
     ),
     (
-        "salt / baking soda / baking powder (fundamental plausibility-gate tension, NOT alias-fixable)",
+        "salt / baking soda / baking powder (RESOLVED by phase 1.5 closeout/P2 -- was a plausibility-gate tension, "
+        "NOT alias-fixable; the corpus-wide cap on these is now the unit problem below, not this)",
         "Live-verified (phase 1.5/P4 investigation): the real, relevant FDC "
         "records for these (e.g. 'Salt, table') report a true, physically "
-        "correct near-zero kcal/100g -- not a data defect. The P1 "
-        "plausibility gate's absolute floor (_PLAUSIBLE_MIN_KCAL = 5, "
-        "written to catch a 0-kcal Branded data-entry defect) rejects them "
-        "for the same reason it correctly rejects a genuine defect: it "
-        "cannot distinguish 'this food really is ~calorie-free' from 'this "
-        "record is wrong.' No alias changes a real food's own true kcal "
-        "value, so this is a gap in the plausibility gate's design, not a "
-        "matching problem -- flagged for a follow-up ADVISE consult "
-        "(a per-food or near-zero-macro-consistent exception) rather than "
-        "special-cased here. In practice these ingredients' calorie "
-        "contribution to a recipe is genuinely negligible regardless.",
+        "correct near-zero kcal/100g -- not a data defect. The gate's "
+        "absolute floor (_PLAUSIBLE_MIN_KCAL = 5, written to catch a 0-kcal "
+        "Branded data-entry defect) used to reject them for the same reason "
+        "it correctly rejects a genuine defect: it could not distinguish "
+        "'this food really is ~calorie-free' from 'this record is wrong.' "
+        "RESOLVED by phase 1.5 closeout/P2: the floor is now applied only to "
+        "Branded candidates (see usda_client._plausibility_reject_reason's "
+        "module comment) -- Foundation/SR Legacy/Survey candidates fall "
+        "through to the mass + Atwater checks instead, which correctly pass "
+        "a genuine all-zero record. This does NOT mean salt/baking soda/"
+        "baking powder now ground corpus-wide, though: the overwhelming "
+        "majority of their occurrences never reach `search_food` at all, "
+        "because the imported corpus's ingredient rows have `unit: None` "
+        "at the data level (see the corpus-wide terminal-outcome tally's "
+        "`no_unit` bucket) -- a separate, NOT-fixed-here problem. In "
+        "practice these ingredients' calorie contribution to a recipe is "
+        "genuinely negligible regardless.",
     ),
     (
         "olive oil",
@@ -241,6 +342,12 @@ class GroundingReport:
     implausible_band_corpus_count: int = 0
     rejection_counts: dict[str, int] = field(default_factory=dict)
     branded_dispersion_events: list[BrandedDispersionEvent] = field(default_factory=list)
+    # Corpus-wide per-ingredient-OCCURRENCE terminal-outcome tally -- see the
+    # module comment above `_terminal_outcome_for_ingredient` for the five
+    # buckets. Unlike `rejection_counts`, these counts are mutually
+    # exclusive and sum to the corpus's total ingredient-row count exactly
+    # (see the assertion in `run_grounding`).
+    terminal_outcome_counts: dict[str, int] = field(default_factory=dict)
 
     def implausible_band_flags(self) -> list[SeedRow]:
         return [row for row in self.seed_rows if row.implausible_band]
@@ -317,9 +424,27 @@ def run_grounding(
     seeds = seeds if seeds is not None else load_recipes()
 
     results: dict[str, RecipeNutrition] = {}
+    terminal_outcome_counts: Counter[str] = Counter()
+    total_ingredient_occurrences = 0
     for recipe in sorted(corpus, key=lambda r: r.recipe_id):
         nutrition = compute_recipe_macros(recipe.ingredients, servings=recipe.servings or 1, client=client)
         results[recipe.recipe_id] = _apply_trust_flags(nutrition)
+        for ingredient in recipe.ingredients:
+            total_ingredient_occurrences += 1
+            terminal_outcome_counts[_terminal_outcome_for_ingredient(ingredient, client)] += 1
+
+    # The five buckets are constructed to be mutually exclusive and
+    # exhaustive over every ingredient occurrence in `corpus` (see the
+    # module comment above `_terminal_outcome_for_ingredient`) -- this is
+    # what makes the tally trustworthy rather than just another partial
+    # count. A mismatch here would mean the classification logic itself is
+    # broken (e.g. double-counting or silently skipping an occurrence), not
+    # a data quirk, so it fails loudly rather than shipping a report with an
+    # unreconciled table.
+    assert sum(terminal_outcome_counts.values()) == total_ingredient_occurrences, (
+        f"terminal-outcome tally ({sum(terminal_outcome_counts.values())}) does not reconcile "
+        f"with total ingredient occurrences ({total_ingredient_occurrences})"
+    )
 
     _write_sidecar(Path(sidecar_path), results)
 
@@ -339,6 +464,7 @@ def run_grounding(
         results=results,
         rejection_counts=rejection_counts,
         branded_dispersion_events=branded_dispersion_events,
+        terminal_outcome_counts=dict(terminal_outcome_counts),
     )
 
     if report.implausible_band_flags():
@@ -363,6 +489,7 @@ def build_report(
     results: dict[str, RecipeNutrition],
     rejection_counts: dict[str, int] | None = None,
     branded_dispersion_events: list[BrandedDispersionEvent] | None = None,
+    terminal_outcome_counts: dict[str, int] | None = None,
 ) -> GroundingReport:
     """Build a `GroundingReport` purely from already-computed data -- no
     `UsdaClient`, no network, no re-fetching. This is what lets a report be
@@ -373,6 +500,13 @@ def build_report(
 
     `results` must be keyed by `recipe_id`; a `corpus` recipe absent from it
     is simply skipped in every corpus-wide diagnostic (never fabricated).
+
+    `terminal_outcome_counts`, like `rejection_counts`/`branded_dispersion_
+    events`, must be computed by the caller (see `run_grounding`, the only
+    place with a live `client` to classify occurrences against) -- this
+    function only stores whatever it's handed, never recomputes it, so a
+    report rebuilt from a sidecar without a client still renders (with this
+    table simply empty).
     """
     seeds_by_id = {recipe.recipe_id: recipe for recipe in seeds}
 
@@ -472,6 +606,7 @@ def build_report(
     report.implausible_band_corpus_count = implausible_band_corpus_count
     report.rejection_counts = dict(rejection_counts or {})
     report.branded_dispersion_events = list(branded_dispersion_events or [])
+    report.terminal_outcome_counts = dict(terminal_outcome_counts or {})
 
     return report
 
@@ -537,12 +672,62 @@ def render_report(report: GroundingReport) -> str:
     lines.append(f"- count: {report.implausible_band_corpus_count}")
     lines.append("")
 
-    lines.append("## Plausibility rejection counts by reason, corpus-wide (candidates rejected while matching)")
+    lines.append(
+        "## Corpus-wide ingredient-occurrence terminal outcomes "
+        "(what actually happens to every ingredient row)"
+    )
+    lines.append("")
+    lines.append(
+        "Every ingredient occurrence in the corpus lands in EXACTLY ONE of the buckets below "
+        "(mutually exclusive, and reconciled at grounding time to sum to the corpus's total "
+        "ingredient-row count -- see `grounding_job._terminal_outcome_for_ingredient`). This is "
+        "the table that explains ungroundedness; the rejection-counts table further below does NOT."
+    )
+    lines.append("")
+    if not report.terminal_outcome_counts:
+        lines.append(
+            "None recorded (the report was built without a live client's diagnostics -- see "
+            "`build_report`'s `terminal_outcome_counts` parameter)."
+        )
+    else:
+        total = sum(report.terminal_outcome_counts.values())
+        lines.append("| outcome | count | % of occurrences |")
+        lines.append("|---|---|---|")
+        for outcome in _TERMINAL_OUTCOME_ORDER:
+            count = report.terminal_outcome_counts.get(outcome, 0)
+            pct = (count / total * 100) if total else 0.0
+            lines.append(f"| {outcome} | {count} | {pct:.1f}% |")
+        # Defensive: render any bucket name not in the expected order too,
+        # rather than silently dropping it (should not happen in practice --
+        # `_terminal_outcome_for_ingredient` only ever returns the five known
+        # constants -- but a rendered report should never hide data).
+        for outcome, count in report.terminal_outcome_counts.items():
+            if outcome not in _TERMINAL_OUTCOME_ORDER:
+                pct = (count / total * 100) if total else 0.0
+                lines.append(f"| {outcome} (unexpected) | {count} | {pct:.1f}% |")
+    lines.append("")
+
+    lines.append(
+        "## Individual-candidate rejection counts by reason, corpus-wide "
+        "(NOT a table of ungroundedness causes)"
+    )
+    lines.append("")
+    lines.append(
+        "**Read this table carefully.** Each count is the number of individual FDC CANDIDATES "
+        "skipped during matching for the reason shown -- tallied once per candidate, across every "
+        "`search_food` call this run made. It is NOT a count of queries/occurrences that failed "
+        "to ground, and it is NOT a list of \"why ingredients are ungrounded\" (see the terminal-"
+        "outcome table above for that). A query whose candidate was skipped here may still have "
+        "gone on to ground successfully via a later candidate or the Branded fallback -- e.g. "
+        "`processed_state_modifier:creamed` is almost entirely the imported corpus's egg "
+        "occurrences correctly skipping an 'Egg, creamed' candidate while still grounding fine "
+        "against a different candidate."
+    )
     lines.append("")
     if not report.rejection_counts:
         lines.append("None recorded (either no candidates were rejected, or the report was built without a live client's diagnostics -- see `build_report`'s `rejection_counts` parameter).")
     else:
-        lines.append("| reason | count |")
+        lines.append("| reason | candidates skipped |")
         lines.append("|---|---|")
         for reason, count in sorted(report.rejection_counts.items(), key=lambda kv: -kv[1]):
             lines.append(f"| {reason} | {count} |")

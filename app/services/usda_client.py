@@ -247,10 +247,10 @@ class MatchOutcome:
 # of macronutrient grams exceeding what fits in 100g of food).
 #
 # Bounds:
-#   - kcal < 5 or kcal > 950: outside any real whole food's per-100g range
-#     (950 comfortably covers pure fats/oils at ~884-900; 5 excludes "0 kcal"
-#     data defects like the ginger/chili powder case while still allowing a
-#     genuinely near-zero-calorie item like plain water or ice).
+#   - kcal < 5 (Branded only -- see the tier-aware note below) or kcal > 950
+#     (every tier): outside any real whole food's per-100g range (950
+#     comfortably covers pure fats/oils at ~884-900; 5 excludes a "0 kcal"
+#     data defect like the ginger/chili powder case).
 #   - protein_g + carbs_g + fat_g > 105: 100g of food cannot contain more
 #     than ~100g of macronutrient mass; 105 gives a small tolerance for
 #     independently-rounded USDA values without opening the door to a
@@ -267,6 +267,41 @@ class MatchOutcome:
 #     (e.g. vinegar: ~18 kcal/100g against a near-zero Atwater estimate from
 #     its trace protein/carbs/fat) pass without being penalized by a ratio
 #     computed against a near-zero denominator.
+#
+# --- Tier-aware near-zero admission (phase 1.5 closeout P2) ---
+#
+# The kcal floor used to apply unconditionally, BEFORE the Atwater check
+# ever ran -- which meant it also rejected a genuinely all-zero real food
+# (salt, water, baking soda: true near-0 kcal/100g, internally consistent
+# with their all-zero macros) exactly like it rejects an actual data defect
+# (ginger/chili powder's Branded records, which also report 0 kcal but are
+# NOT physically meaningful). Confirmed live and pinned as a regression
+# fixture: for query "water", this floor rejected the correct record
+# ('Water, tap', Survey (FNDDS), 0 kcal) and the matcher fell through to
+# 'Water, tonic' (34 kcal/100g, a plausible-looking but WRONG record) --
+# the gate built to prevent a confidently-wrong number was manufacturing
+# one. Atwater consistency alone can't distinguish the two cases either
+# (both are 0 kcal against 0 macros -- internally consistent), so dataType
+# tier is the deterministic signal used instead: the floor now applies ONLY
+# to Branded candidates (the distrusted, last-resort, uncurated tier this
+# codebase already treats as the least-trusted -- see `_DATA_TYPE_PRIORITY`/
+# `_select_branded_match`), while Foundation/SR Legacy/Survey candidates
+# skip the floor and fall through to the mass + Atwater checks, which
+# correctly pass a genuine all-zero record and still reject an internally
+# INCONSISTENT one (0 kcal but nonzero macros -- `atwater_mismatch`).
+#
+# Disclosed blind spot: a genuine-tier (Foundation/SR Legacy/Survey) all-
+# ZERO defect record (0 kcal AND all-zero macros, so Atwater can't catch it
+# either) would now be admitted where it previously wasn't. Accepted
+# tradeoff: both documented zero-kcal defects on record (ginger, chili
+# powder -- see _KNOWN_RESIDUALS) are Branded, and the generic tiers are
+# USDA-curated (Foundation/SR Legacy/Survey are USDA's own maintained
+# datasets, not third-party-submitted like Branded), so an all-zero defect
+# surviving curation into one of them is a materially rarer failure mode
+# than a manufacturer-submitted Branded record being wrong -- and the
+# dispersion check (`_select_branded_match`) and the implausible-band net
+# (`grounding_job.IMPLAUSIBLE_MIN_KCAL_PER_SERVING`) remain behind it either
+# way.
 _PLAUSIBLE_MIN_KCAL = 5.0
 _PLAUSIBLE_MAX_KCAL = 950.0
 _PLAUSIBLE_MAX_MACRO_MASS_G = 105.0
@@ -274,13 +309,32 @@ _ATWATER_RATIO_LOW = 0.5
 _ATWATER_RATIO_HIGH = 1.7
 _ATWATER_ABSOLUTE_ESCAPE_KCAL = 25.0
 
+# The only dataType tiers EXEMPT from the kcal floor -- i.e. FDC's own
+# curated, generic datasets (same set as `_GENERIC_DATA_TYPES`, restated
+# here as its own name so this gate's meaning reads standalone). Every other
+# tier -- Branded, or an unrecognized/absent dataType -- still gets the
+# floor: fail CLOSED (apply the stricter check) on anything that isn't
+# affirmatively known to be a curated generic record, consistent with
+# `_DATA_TYPE_PRIORITY` already treating Branded as the least-trusted,
+# last-resort tier.
+_PLAUSIBLE_FLOOR_EXEMPT_TIERS = frozenset(_GENERIC_DATA_TYPES)
 
-def _plausibility_reject_reason(macros: FoodMacros) -> str | None:
+
+def _plausibility_reject_reason(macros: FoodMacros, data_type: str | None = None) -> str | None:
     """Returns a reason code if `macros` fails the absolute-plausibility
     gate, else `None`. See the gate's module-level comment for the bounds
-    and their rationale."""
-    if macros.calories < _PLAUSIBLE_MIN_KCAL:
-        return "kcal_too_low"
+    and their rationale, including why the kcal floor is now conditional on
+    `data_type`.
+
+    `data_type` is the candidate's FDC `dataType` string (e.g. "Foundation",
+    "Branded"). The floor is skipped ONLY when `data_type` is one of the
+    recognized generic tiers (`_PLAUSIBLE_FLOOR_EXEMPT_TIERS`); `None` (the
+    default, e.g. an older caller/test that doesn't pass a tier) or any
+    other value keeps the floor applied -- the conservative, fail-closed
+    default.
+    """
+    if data_type not in _PLAUSIBLE_FLOOR_EXEMPT_TIERS and macros.calories < _PLAUSIBLE_MIN_KCAL:
+        return "kcal_too_low_branded"
     if macros.calories > _PLAUSIBLE_MAX_KCAL:
         return "kcal_too_high"
 
@@ -402,7 +456,7 @@ def _best_match(payload: dict[str, Any], query: str, preparation: str | None = N
         if macros is None:
             continue
 
-        reject_reason = _plausibility_reject_reason(macros)
+        reject_reason = _plausibility_reject_reason(macros, food.get("dataType"))
         if reject_reason is not None:
             rejections.append(reject_reason)
             continue
@@ -484,7 +538,7 @@ def _select_branded_match(payload: dict[str, Any], query: str, preparation: str 
         if macros is None:
             continue
 
-        reject_reason = _plausibility_reject_reason(macros)
+        reject_reason = _plausibility_reject_reason(macros, food.get("dataType"))
         if reject_reason is not None:
             rejections.append(reject_reason)
             continue
@@ -587,18 +641,26 @@ _KNOWN_UNRELIABLE_QUERIES = {"shrimp", "tomato sauce"}
 # explicitly ruled out). Most of the baseline's top-50 ungrounded entries
 # (salt, butter, sugar, water, flour, milk, ...) are NOT here: live
 # verification showed the large majority fail for a DIFFERENT reason this
-# table can't fix -- `app.utils.unit_converter.to_grams` has no density
-# entry for the volume unit they're most commonly given in (e.g. "1 tsp
-# salt"), so `search_food` is never even reached for most occurrences (see
-# `nutrition_grounding.compute_recipe_macros`). A few genuinely reach FDC
-# and are STILL correctly ungrounded even after an alias would be found:
-# salt/baking soda/baking powder's only relevant FDC records report a true,
-# near-zero per-100g kcal that the plausibility gate's absolute floor
-# (`_PLAUSIBLE_MIN_KCAL = 5`) was written to exclude as a data-defect signal
-# -- an honest tension between "exclude 0-kcal defects" and "some real
-# foods are genuinely ~calorie-free" that an alias cannot resolve (adding a
-# per-food plausibility exception is a rule change outside this item's
-# scope; flagged for a follow-up consult rather than special-cased here).
+# table can't fix -- the imported corpus's ingredient rows overwhelmingly
+# have `unit: None` at the DATA level (35,059 of 35,183 rows in the imported corpus;
+# see phase 1.5 closeout), and `app.utils.unit_converter.to_grams` has no
+# density/piece-weight fallback for a bare, unit-less amount unless the
+# ingredient is in `_PIECE_WEIGHT_G` (e.g. "2 eggs") -- none of salt,
+# butter, sugar, water, flour, or milk are. So `search_food` is never even
+# reached for most of these occurrences (see `nutrition_grounding.
+# compute_recipe_macros`, and `grounding_job`'s `no_unit` terminal-outcome
+# bucket) -- this is NOT a missing-density-entry problem: `sugar`, `water`,
+# `flour`, and `milk` all already have real entries in `_DENSITY_G_PER_ML`
+# (only `salt` and `butter` genuinely lack one), it's that there is no unit
+# value at all for these rows to look a density up against. A few
+# occurrences DO carry a real unit, genuinely reach FDC, and are STILL
+# correctly ungrounded even after an alias would be found: salt/baking
+# soda/baking powder's only relevant FDC records report a true, near-zero
+# per-100g kcal -- previously excluded by the plausibility gate's kcal floor
+# as an indistinguishable-from-a-data-defect case; RESOLVED by phase 1.5
+# closeout/P2 (`_plausibility_reject_reason`'s tier-aware floor -- see its
+# module comment), which now lets a genuine Foundation/SR Legacy/Survey
+# near-zero record through while still rejecting a Branded 0-kcal defect.
 # Different table from `app.utils.ingredient_normalizer.SYNONYMS` --
 # deliberately NOT merged: that table maps free-form recipe text to a
 # canonical pantry name for matching/scoring; this one maps a canonical
@@ -646,6 +708,18 @@ _FDC_QUERY_ALIASES: dict[str, str] = {
 }
 
 
+# Terminal per-OCCURRENCE outcome reasons returned by `UsdaClient.
+# search_food_with_reason` -- see its docstring for how these differ from
+# `rejection_counts` (an aggregate, per-CANDIDATE tally) and for the exact
+# rule used to choose between the two failure reasons. Consumed by
+# `grounding_job.build_report`'s corpus-wide terminal-outcome tally, which
+# also has two unit-conversion-stage reasons of its own (`no_unit`, `unit_
+# unconvertible`) for occurrences that never reach `search_food` at all.
+REASON_GROUNDED = "grounded"
+REASON_NO_RELEVANT_CANDIDATE = "no_relevant_candidate"
+REASON_ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
+
+
 class UsdaClient:
     """Client for USDA FoodData Central's `/foods/search` endpoint.
 
@@ -668,11 +742,16 @@ class UsdaClient:
         self._session = session or requests.Session()
         self._cache = cache if cache is not None else FdcCache(self._settings.fdc_cache_path)
         self._sleep = sleep
-        # Cumulative, diagnostic-only tally of candidate-rejection reasons
-        # (see `MatchOutcome.rejections`) across every `search_food` call made
-        # through this client instance -- read by `grounding_job.run_grounding`
-        # after a full corpus pass to report "N candidates rejected for
-        # reason X" corpus-wide. Never consulted by matching logic itself.
+        # Cumulative, diagnostic-only tally of INDIVIDUAL-CANDIDATE rejection
+        # reasons (see `MatchOutcome.rejections`), incremented once per
+        # candidate skipped during matching -- NOT once per query/occurrence
+        # that ended up ungrounded, and NOT a tally of "causes of
+        # ungroundedness" (a query whose candidate got skipped here may still
+        # go on to ground via a later candidate or the Branded fallback; see
+        # `search_food_with_reason`/`REASON_*` for the actual per-occurrence
+        # terminal outcome). Read by `grounding_job.run_grounding` after a
+        # full corpus pass to report "N *candidates* rejected for reason X"
+        # corpus-wide. Never consulted by matching logic itself.
         self.rejection_counts: Counter[str] = Counter()
         # Cumulative, diagnostic-only log of Branded-tier high-dispersion
         # events (see `_select_branded_match`/`MatchOutcome.dispersion`) --
@@ -687,12 +766,50 @@ class UsdaClient:
 
         The cache key includes `preparation` so a raw-gated and cooked-gated
         lookup of the same ingredient are never conflated.
+
+        Thin wrapper around `search_food_with_reason` that discards the
+        terminal-outcome reason -- every caller except the corpus-wide
+        diagnostic tally in `grounding_job` uses this form.
+        """
+        match, _reason = self.search_food_with_reason(name, preparation=preparation)
+        return match
+
+    def search_food_with_reason(
+        self, name: str, *, preparation: str | None = None, record_diagnostics: bool = True
+    ) -> tuple[FoodMatch | None, str]:
+        """As `search_food`, but also returns the terminal per-OCCURRENCE
+        outcome reason for this exact call -- one of `REASON_GROUNDED`,
+        `REASON_NO_RELEVANT_CANDIDATE`, `REASON_ALL_CANDIDATES_REJECTED`.
+
+        This is deliberately a DIFFERENT axis from `rejection_counts` (see
+        its docstring): `rejection_counts` tallies individual skipped
+        candidates across the whole run, while the reason returned here
+        classifies how THIS ONE call ended -- grounded, or not, and if not,
+        whether any candidate reached the plausibility/modifier gates and
+        got rejected there (`REASON_ALL_CANDIDATES_REJECTED`) versus nothing
+        relevant/usable ever being found at all (`REASON_NO_RELEVANT_
+        CANDIDATE` -- also used for an empty/normalized-away query, a
+        `_KNOWN_UNRELIABLE_QUERIES` exclusion, and a fetch failure/no API
+        key, none of which produce a candidate-level rejection either).
+        Consumed by `grounding_job.build_report`'s corpus-wide terminal-
+        outcome tally; never consulted by matching logic itself.
+
+        `record_diagnostics` (default `True`) gates whether this call
+        updates the cumulative `self.rejection_counts` / `self.
+        branded_dispersion_events` -- pass `False` for a call that re-runs
+        the SAME query a caller already issued once through this method
+        (e.g. `grounding_job`'s terminal-outcome tally, which re-classifies
+        an ingredient already looked up once by `compute_recipe_macros`
+        during the same corpus pass) so that occurrence isn't double-
+        counted into the cumulative, whole-run diagnostics. Matching
+        behavior/the returned match and reason are completely unaffected
+        either way -- this only controls bookkeeping.
         """
         query = normalize_ingredient(name)
         if not query:
-            return None
+            return None, REASON_NO_RELEVANT_CANDIDATE
         if query in _KNOWN_UNRELIABLE_QUERIES:
-            return None
+            return None, REASON_NO_RELEVANT_CANDIDATE
 
         # Alias to FDC's own filing vocabulary (see `_FDC_QUERY_ALIASES`)
         # BEFORE building the search string, so every use of `query` below --
@@ -719,24 +836,36 @@ class UsdaClient:
         # component is needed for it.
         search_query = f"{query} {preparation}" if preparation else query
 
+        # Rejections seen during THIS call only (as opposed to
+        # `self.rejection_counts`, cumulative across the whole run) -- used
+        # purely to classify the terminal reason below, never to change
+        # matching behavior.
+        call_rejections: list[str] = []
+
         generic_payload = self._get_payload(search_query, _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE)
         if generic_payload is not None:
             outcome = _best_match(generic_payload, query, preparation)
-            self.rejection_counts.update(outcome.rejections)
+            if record_diagnostics:
+                self.rejection_counts.update(outcome.rejections)
+            call_rejections.extend(outcome.rejections)
             if outcome.match is not None:
-                return outcome.match
+                return outcome.match, REASON_GROUNDED
 
         branded_payload = self._get_payload(search_query, _BRANDED_DATA_TYPES, _BRANDED_PAGE_SIZE)
         if branded_payload is not None:
             branded_outcome = _select_branded_match(branded_payload, query, preparation)
-            self.rejection_counts.update(branded_outcome.rejections)
+            if record_diagnostics:
+                self.rejection_counts.update(branded_outcome.rejections)
+            call_rejections.extend(branded_outcome.rejections)
             if branded_outcome.dispersion is not None:
                 min_kcal, max_kcal, count = branded_outcome.dispersion
-                self.branded_dispersion_events.append((query, min_kcal, max_kcal, count))
+                if record_diagnostics:
+                    self.branded_dispersion_events.append((query, min_kcal, max_kcal, count))
             if branded_outcome.match is not None:
-                return branded_outcome.match
+                return branded_outcome.match, REASON_GROUNDED
 
-        return None
+        reason = REASON_ALL_CANDIDATES_REJECTED if call_rejections else REASON_NO_RELEVANT_CANDIDATE
+        return None, reason
 
     def _get_payload(
         self, search_query: str, data_types: list[str], page_size: int

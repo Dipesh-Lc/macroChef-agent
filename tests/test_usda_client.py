@@ -762,21 +762,30 @@ def test_old_decision_cache_format_is_discarded_not_misinterpreted(tmp_path) -> 
 
 
 @pytest.mark.parametrize(
-    ("calories", "protein_g", "fat_g", "carbs_g", "expected"),
+    ("calories", "protein_g", "fat_g", "carbs_g", "data_type", "expected"),
     [
-        (165, 31, 3.57, 0, None),  # ordinary chicken breast -- passes
-        (0, 0, 0, 0, "kcal_too_low"),
-        (4.9, 0, 0, 0, "kcal_too_low"),
-        (951, 0, 0, 0, "kcal_too_high"),
-        (884, 0, 100, 0, None),  # pure fat, at the edge -- still passes
-        (500, 50, 40, 40, "mass_over_105g"),  # 130g macro mass in 100g food
-        (920, 10, 2, 20, "atwater_mismatch"),  # kJ-scale-looking defect
-        (18, 0, 0, 0.9, None),  # vinegar-like: absolute Atwater escape
+        (165, 31, 3.57, 0, "Foundation", None),  # ordinary chicken breast -- passes
+        # Tier-aware kcal floor (phase 1.5 closeout/P2): the floor only
+        # applies to Branded (or an unrecognized/absent dataType -- fail
+        # closed). A genuine generic-tier near-zero record (salt/water/
+        # baking-soda class) is NOT rejected by the floor -- see the
+        # dedicated fixtures below for the full salt/water/baking-soda and
+        # Branded-all-zero-still-rejected regressions.
+        (0, 0, 0, 0, "Branded", "kcal_too_low_branded"),
+        (4.9, 0, 0, 0, "Branded", "kcal_too_low_branded"),
+        (0, 0, 0, 0, None, "kcal_too_low_branded"),  # unrecognized/absent dataType -- fail closed, floor still applies
+        (0, 0, 0, 0, "Foundation", None),  # genuine generic-tier all-zero record -- now passes (was "kcal_too_low")
+        (4.9, 0, 0, 0, "SR Legacy", None),  # ditto, SR Legacy
+        (951, 0, 0, 0, "Foundation", "kcal_too_high"),  # kcal ceiling applies regardless of tier
+        (884, 0, 100, 0, "Foundation", None),  # pure fat, at the edge -- still passes
+        (500, 50, 40, 40, "Foundation", "mass_over_105g"),  # 130g macro mass in 100g food
+        (920, 10, 2, 20, "Foundation", "atwater_mismatch"),  # kJ-scale-looking defect
+        (18, 0, 0, 0.9, "SR Legacy", None),  # vinegar-like: absolute Atwater escape
     ],
 )
-def test_plausibility_reject_reason(calories, protein_g, fat_g, carbs_g, expected) -> None:
+def test_plausibility_reject_reason(calories, protein_g, fat_g, carbs_g, data_type, expected) -> None:
     macros = FoodMacros(calories=calories, protein_g=protein_g, fat_g=fat_g, carbs_g=carbs_g, fiber_g=0)
-    assert _plausibility_reject_reason(macros) == expected
+    assert _plausibility_reject_reason(macros, data_type) == expected
 
 
 # --- Plausibility gate: reject a relevant, correctly-prepped candidate
@@ -854,9 +863,15 @@ def test_plausibility_gate_allows_low_calorie_low_macro_food_via_absolute_escape
 def test_plausibility_gate_falls_through_to_next_ranked_candidate(tmp_path) -> None:
     # An implausible top-ranked candidate doesn't ground the ingredient to
     # nothing if a lower-ranked candidate is both relevant and plausible.
+    # The zero-kcal candidate must be Branded here (phase 1.5 closeout/P2):
+    # a generic-tier (Foundation/SR Legacy/Survey) all-zero record is no
+    # longer rejected by the kcal floor at all (see the tier-aware
+    # regression fixtures below) -- this test is specifically about an
+    # implausible candidate still being skipped, so it needs a candidate
+    # the gate still actually rejects.
     payload = {
         "foods": [
-            _macro_food(1, "Widget, raw", "Foundation", calories=0, protein_g=0, fat_g=0, carbs_g=0),
+            _macro_food(1, "Widget, raw", "Branded", calories=0, protein_g=0, fat_g=0, carbs_g=0),
             _macro_food(2, "Widget, raw", "SR Legacy", calories=50, protein_g=2, fat_g=1, carbs_g=10),
         ]
     }
@@ -868,6 +883,109 @@ def test_plausibility_gate_falls_through_to_next_ranked_candidate(tmp_path) -> N
     assert match is not None
     assert match.fdc_id == 2
     assert match.macros.calories == 50
+
+
+# --- Tier-aware near-zero admission (phase 1.5 closeout/P2) -- pinned
+# regression fixtures. See `_plausibility_reject_reason`'s module comment
+# for the full rationale and the disclosed blind spot. ---
+
+
+@pytest.mark.parametrize(
+    ("query", "description", "data_type"),
+    [
+        ("salt", "Salt, table", "Foundation"),
+        ("water", "Water, tap", "Survey (FNDDS)"),
+        ("baking soda", "Baking soda", "SR Legacy"),
+    ],
+)
+def test_tier_aware_gate_admits_genuine_near_zero_generic_records(
+    tmp_path, query, description, data_type
+) -> None:
+    # Genuine near-zero-kcal, all-zero-macro records from a curated generic
+    # tier (Foundation/SR Legacy/Survey) are internally CONSISTENT (Atwater
+    # estimate is also 0) -- these are real foods, not data defects, and the
+    # tier-aware gate now admits them instead of rejecting them at the old,
+    # tier-blind kcal floor.
+    payload = {
+        "foods": [_macro_food(1, description, data_type, calories=0, protein_g=0, fat_g=0, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food(query)
+
+    assert match is not None
+    assert match.macros.calories == 0
+
+
+def test_tier_aware_gate_still_rejects_branded_all_zero_record(tmp_path) -> None:
+    # The exact defect the floor was originally written for (ginger/chili
+    # powder's real Branded records) -- an all-zero Branded record must
+    # still be rejected even though the tier-aware change lets a
+    # generic-tier all-zero record through.
+    payload = {
+        "foods": [_macro_food(1, "Widget, raw", "Branded", calories=0, protein_g=0, fat_g=0, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_tier_aware_gate_rejects_zero_kcal_nonzero_macros_via_atwater(tmp_path) -> None:
+    # A generic-tier record reporting 0 kcal but nonzero macros is
+    # internally INCONSISTENT -- Atwater estimate is nonzero while the
+    # reported kcal is 0 -- so it's still rejected, just via
+    # `atwater_mismatch` instead of the (now tier-gated) kcal floor. This is
+    # what distinguishes a genuine all-zero food (salt/water/baking soda)
+    # from a defective record even on a trusted generic tier.
+    payload = {
+        # Atwater estimate: 4*5 + 9*5 = 65 kcal; reported 0 kcal is neither
+        # within [0.5x, 1.7x] of 65 nor within 25 kcal of it.
+        "foods": [_macro_food(1, "Widget, raw", "Foundation", calories=0, protein_g=5, fat_g=5, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_water_query_grounds_to_tap_not_tonic(tmp_path) -> None:
+    # Pinned regression for the exact bug this item fixes: BEFORE the
+    # tier-aware gate, "water" rejected the correct 'Water, tap' record
+    # (0 kcal, Survey (FNDDS) -- a genuine, internally-consistent all-zero
+    # record) at the tier-blind kcal floor, and silently fell through to
+    # 'Water, tonic' (34 kcal/100g, Survey (FNDDS)) -- a real FDC record for
+    # a DIFFERENT beverage that happens to pass every relevance/plausibility
+    # check on its own. Payload replicates the actual live FDC response
+    # shape for a "water" search (fdcIds/descriptions/macros confirmed
+    # against the real cached payload during this item's investigation).
+    payload = {
+        "foods": [
+            _macro_food(2710707, "Water, tap", "Survey (FNDDS)", calories=0, protein_g=0, fat_g=0, carbs_g=0),
+            _macro_food(
+                2708178, "Crackers, water", "Survey (FNDDS)", calories=384, protein_g=7.14, fat_g=7.14, carbs_g=72.81
+            ),
+            _macro_food(2710538, "Water, tonic", "Survey (FNDDS)", calories=34, protein_g=0, fat_g=0, carbs_g=8.8),
+            _macro_food(
+                2710656, "Whiskey and water", "Survey (FNDDS)", calories=59, protein_g=0, fat_g=0, carbs_g=0
+            ),
+            _macro_food(2710669, "Vodka and water", "Survey (FNDDS)", calories=59, protein_g=0, fat_g=0, carbs_g=0),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("water")
+
+    assert match is not None
+    assert match.fdc_id == 2710707
+    assert match.description == "Water, tap"
+    assert match.macros.calories == 0
 
 
 # --- Undeclared-preparation handling: processed-state modifier blocklist
