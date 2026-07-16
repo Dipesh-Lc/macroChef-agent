@@ -31,6 +31,31 @@ from app.main import create_app
 from app.schemas.recipe import Recipe
 
 
+@pytest.fixture(autouse=True)
+def _session_secret(monkeypatch: pytest.MonkeyPatch):
+    """Provide an explicit SESSION_SECRET so this suite tests the real
+    signing/verification behavior regardless of ambient environment state.
+
+    Without this, `_token()` below mints via the ambient `get_settings()`,
+    which only resolves because a developer's local `.env` happens to have
+    SESSION_SECRET set -- CI's `test` job sets only EMBEDDING_PROVIDER=hash
+    and has no `.env` (gitignored), so `_resolve_session_secret` would raise
+    there (see app.dependencies). `get_settings` is `lru_cache`d, so the
+    cache must be cleared both before (to pick up the monkeypatched env) and
+    after (so a stale Settings instance never leaks into a later test) --
+    matches the pattern in tests/conftest.py's `force_mock_model_provider`.
+    This also covers the FastAPI startup hook (validate_session_secret_at_
+    startup, which reads ambient settings and is unaffected by dependency
+    overrides): if any client here were constructed via
+    `with TestClient(app):`, the ambient secret set here would still let it
+    pass.
+    """
+    monkeypatch.setenv("SESSION_SECRET", "library-isolation-test-session-secret")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture()
 def isolated_session_factory(monkeypatch: pytest.MonkeyPatch):
     """Point RecipeLibraryRepository's default (no-session-passed) path at a

@@ -1,14 +1,24 @@
 """Unit tests for app.dependencies.get_session_user -- the sole source of
 truth for "who is this /library request from" (see task: library user-data
 isolation). A missing, forged, tampered, or expired token must always be
-rejected with 401, never silently treated as a new anonymous session."""
+rejected with 401, never silently treated as a new anonymous session.
+
+Every test here builds `Settings` with an explicit `SESSION_SECRET` rather
+than relying on `get_settings()` / the ambient environment or the insecure
+dev-fallback default (see app.dependencies._resolve_session_secret, which
+now raises instead of silently falling back when SESSION_SECRET is unset).
+Depending on the ambient fallback would make this suite pass "by accident"
+whenever a developer's local `.env` happens to have SESSION_SECRET set, and
+fail outright in any environment (e.g. CI) where it is not -- neither
+outcome actually exercises the signing/verification behavior under test.
+"""
 
 import time
 
 import pytest
 from fastapi import HTTPException
 
-from app.config import get_settings
+from app.config import Settings
 from app.dependencies import (
     SESSION_TOKEN_MAX_AGE_SECONDS,
     get_session_user,
@@ -16,8 +26,8 @@ from app.dependencies import (
 )
 
 
-def _settings():
-    return get_settings()
+def _settings() -> Settings:
+    return Settings(SESSION_SECRET="test-suite-session-secret")
 
 
 def _tamper(token: str) -> str:
@@ -91,8 +101,6 @@ def test_token_signed_with_a_different_secret_is_rejected_with_401(
 ) -> None:
     """A token forged by someone who guessed/used a different secret than
     the server's configured SESSION_SECRET must never be accepted."""
-    from app.config import Settings
-
     attacker_settings = Settings(SESSION_SECRET="attacker-guessed-secret")
     forged_token = mint_session_token("victim_user", attacker_settings)
 

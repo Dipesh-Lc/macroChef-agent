@@ -1,8 +1,43 @@
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import app.data.recipe_library_repository as repo_module
+from app.data.db import Base
 from app.graph.library_builder import run_library_discovery_graph
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.recipe_discovery_service import RecipeDiscoveryService
 from app.services.recipe_generation_service import RecipeGenerationService
+
+
+@pytest.fixture(autouse=True)
+def _isolated_library_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The library discovery graph's deduplication_node reads/writes via
+    RecipeLibraryRepository, which lazily opens SessionLocal() against
+    `app.data.db`'s module-level, real on-disk engine (default
+    sqlite:///./macrochef.db) unless overridden. run_library_discovery_graph
+    is called directly here (no FastAPI app, so init_db() -- only ever
+    invoked from the startup hook -- never fires), so on a genuinely fresh
+    checkout (no pre-existing macrochef.db, exactly what CI's `test` job
+    starts from) this raises `OperationalError: no such table:
+    user_saved_recipes`. This was previously masked on a dev machine only
+    because a real macrochef.db with that table already happens to exist on
+    disk.
+
+    Point the repository at a fresh in-memory SQLite DB instead, mirroring
+    the same pattern tests/test_recipe_library_isolation.py and
+    tests/test_rate_limiting.py already use for the same reason.
+    """
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    monkeypatch.setattr(repo_module, "SessionLocal", test_session_local)
 
 
 def test_mock_discovery_returns_requested_count() -> None:

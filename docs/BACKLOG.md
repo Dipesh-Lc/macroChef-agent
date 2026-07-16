@@ -47,13 +47,41 @@ were pre-registered before anyone saw a result.
   safe-controls (`safe_025`, `safe_050`, `morphology_015`, `morphology_034`).
 - **`crustacean` + "shellfish stock"** — was SERVED, now blocked; the wider
   parallel-set audit is done, but re-check if new alias keys are added.
+- **Unknown `diet_type` fails OPEN in `_violates_requested_diet`** —
+  `app/services/recipe_validation_service.py`, final `return False` (~line 152).
+  The function returns `False` (ADMIT, no violation) for any diet type it doesn't
+  recognize. `RecipeDiscoveryRequest.diet_type` (`app/schemas/library.py`) is
+  freeform `str | None`, so an API caller sending e.g. `diet_type="nut-free"`
+  silently gets ZERO diet filtering. **PRE-EXISTING, not from commit 61e03f8.**
+  Low severity today: FastAPI binds `127.0.0.1:8000` (internal only, verified in
+  container) and Streamlit dropdown enforces values. API-reachable only, not exposed.
+  **If the API gains public ingress, this becomes live and must be fixed first.**
+  Fix shape (already decided): constrain `RecipeDiscoveryRequest.diet_type` to
+  validated set (like `UserProfile.diet_type` does in `app/schemas/user.py:35-41`),
+  OR mirror `constraint_engine.violates_diet_type`'s fail-loud `ValueError` — the
+  engine's comment reads "Returning False would silently claim the recipe is safe...
+  fail loudly instead". Engine defends; discovery-request path has neither defense.
+- **Vegetarian/vegan/high-protein remain tag-only in `_violates_requested_diet`** —
+  same file and function. Those three diets are decided by tag presence
+  (`requested not in tags`) rather than through the constraint engine. Explicitly
+  scoped out of commit 61e03f8. Advisor analysis: admit set is strict SUBSET of
+  engine's (`violates_diet_type` admits tagged OR ingredient-clean; service admits
+  tagged only), so it fails CLOSED for untagged recipes — over-blocking, the safe
+  direction. Residual risk is falsely-tagged recipes, pre-existing in `constraint_engine
+  .violates_diet_type`'s own tag opt-out (including LLM-authored `diet_tags` on
+  `ai_generated` candidates). Entry recorded here because commit message is not the
+  backlog: per CLAUDE.md, "refine later" means never unless written down.
 
-## Safety benchmark (case set is FROZEN at 397; everything downstream deferred)
+## Safety benchmark (case set is FROZEN at 371; everything downstream deferred)
 
 - Independent judge (`app/evaluation/benchmark/safety_judge.py`) with an
   **enforced import ban** on `ingredient_normalizer`/`constraint_engine`,
   tested by walking the import graph.
-- Harness `scripts/run_safety_benchmark.py`: arms = MacroChef(mock),
+- **`scripts/run_safety_benchmark.py` does not exist yet** — `app/evaluation/benchmark/`
+  currently has `case_schema.py`, `loader.py`, and the frozen `cases/` directory, but
+  no runner. Building the runner and executing all 371 cases against a paid API is a
+  money gate requiring human cost approval.
+- Harness specification (future): arms = MacroChef(mock),
   MacroChef(real, gated), 3 models x {naive, steelman}; both execution
   surfaces; structured-JSON contract; response cache; `non_answer` category.
 - First MacroChef run + gap triage (any violation = stop-the-line, disclosed
@@ -109,7 +137,26 @@ were pre-registered before anyone saw a result.
 
 - Alembic (currently `create_all` only — never alters existing tables).
 - Multi-replica / external vector store (embedded Chroma is single-writer
-  -> `min_replicas=1`).
+  -> `min_replicas=1`). **The in-memory rate limiter
+  (`app/services/rate_limiter.py`, wired in `app/dependencies.py` for
+  `/library/discover`, `/recipes/recommend`, `/library/reindex`) shares this
+  exact assumption**: counts live in one process's memory, so they are
+  correct only because `min-replicas=1`/`max-replicas=1` is pinned. If
+  replicas ever go above 1, the limiter silently becomes per-replica (a user
+  could get up to `limit * replica_count` requests with no error) — this
+  must move to a shared store (e.g. Redis) in the same change that lifts
+  the replica pin, not as an afterthought.
+- **`/library/reindex` rate limit is per-session, not global** — it caps
+  each individual verified session to `RATE_LIMIT_REINDEX_MAX` (default 2)
+  calls per `RATE_LIMIT_REINDEX_WINDOW_SECONDS` (default 3600s), same as
+  `/library/discover` and `/recipes/recommend`. But reindex rebuilds one
+  *shared* corpus index, not anything scoped to the caller, so many distinct
+  anonymous sessions (trivial to mint — no login) could still each spend
+  their own small quota against this expensive synchronous endpoint, adding
+  up to more load than the per-session cap alone suggests. A global
+  (all-sessions) cap in addition to the per-session one was considered and
+  deliberately deferred — flagged for the advisor review this task requires,
+  not decided unilaterally here.
 - Magic-link auth via an email provider (anonymous signed session cookie
   ships first).
 - `extract_inventory_with_provider_chain` ends in an unconditional `return

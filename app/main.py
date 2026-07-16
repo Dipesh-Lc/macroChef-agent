@@ -9,6 +9,7 @@ from app.api.routes_inventory import router as inventory_router
 from app.api.routes_library import router as library_router
 from app.api.routes_recommendations import router as recommendations_router
 from app.data.db import init_db
+from app.dependencies import validate_session_secret_at_startup
 
 
 def create_app() -> FastAPI:
@@ -44,6 +45,10 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _startup() -> None:
+        # Fail closed BEFORE the app can serve traffic if SESSION_SECRET is
+        # missing outside local dev -- see app.dependencies for the signal
+        # used to detect local dev and why raising here (not warning) matters.
+        validate_session_secret_at_startup()
         init_db()
 
     return app

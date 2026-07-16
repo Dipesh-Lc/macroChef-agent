@@ -1,11 +1,11 @@
 from html import escape
 from urllib.parse import quote_plus
 
-import requests
 import streamlit as st
 
 from app.schemas.recipe import Recipe
 from app.services.nutrition_view import macro_display_state
+from session_client import request_with_session
 
 
 def _macro_badge(recipe: dict) -> str:
@@ -45,13 +45,18 @@ def _tags(items: list[str], css_class: str) -> str:
 
 
 def _post_feedback(api_url: str, recipe_id: str, feedback_type: str) -> None:
+    # No user_id in the payload, deliberately -- identity for this request
+    # is derived exclusively from the verified session token, sent via
+    # `request_with_session` (see frontend.session_client and
+    # app.schemas.recommendation.FeedbackRequest).
     payload = {
-        "user_id": "demo_user",
         "recipe_id": recipe_id,
         "feedback_type": feedback_type,
         "notes": "Submitted from Streamlit demo",
     }
-    requests.post(f"{api_url}/feedback", json=payload, timeout=15).raise_for_status()
+    request_with_session(
+        "POST", f"{api_url}/feedback", json=payload, timeout=15
+    ).raise_for_status()
     st.toast(f"Saved: {feedback_type}")
 
 

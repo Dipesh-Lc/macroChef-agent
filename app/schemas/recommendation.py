@@ -39,7 +39,11 @@ class RejectedRecipe(BaseModel):
 
 
 class RecommendationRequest(BaseModel):
-    user_id: str = "demo_user"
+    # No user_id field here, deliberately -- identity for this request is
+    # derived exclusively from the verified session token (see
+    # app.dependencies.get_session_user), never from client-supplied wire
+    # data. This mirrors app.schemas.library's request schemas, which the
+    # same fix already applied to the /library routes.
     input_type: Literal["text", "image", "manual", "mixed"] = "text"
     image_path: str | None = None
     typed_ingredients: str | None = None
@@ -59,7 +63,13 @@ class RecommendationResponse(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    user_id: str
+    # No user_id field here, deliberately -- identity for this request is
+    # derived exclusively from the verified session token (see
+    # app.dependencies.get_session_user), never from client-supplied wire
+    # data. This mirrors RecommendationRequest above, which the same fix
+    # already applied to the /recipes/recommend route; POST /feedback was the
+    # third instance of the same bug class (after /library and
+    # /recipes/recommend).
     recipe_id: str
     feedback_type: Literal["liked", "disliked", "cooked", "skipped"]
     notes: str | None = None

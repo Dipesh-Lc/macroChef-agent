@@ -31,7 +31,6 @@ def _profile(
 def scenarios() -> list[RecommendationRequest]:
     return [
         RecommendationRequest(
-            user_id="demo_user",
             input_type="text",
             typed_ingredients="chicken breast, spinach, rice, bell pepper, Greek yogurt",
             user_profile=_profile(cuisine="Mediterranean"),
@@ -39,7 +38,6 @@ def scenarios() -> list[RecommendationRequest]:
             meal_type="dinner",
         ),
         RecommendationRequest(
-            user_id="demo_user",
             input_type="text",
             typed_ingredients="tofu, rice noodles, broccoli, bell pepper",
             user_profile=_profile(allergies=["peanut"], cuisine="Thai"),
@@ -47,7 +45,6 @@ def scenarios() -> list[RecommendationRequest]:
             meal_type="dinner",
         ),
         RecommendationRequest(
-            user_id="demo_user",
             input_type="text",
             typed_ingredients="brown rice, black beans, corn, avocado, tomato",
             user_profile=_profile(diet_type="vegan", cuisine="Mexican", max_time=30),
@@ -55,7 +52,6 @@ def scenarios() -> list[RecommendationRequest]:
             meal_type="lunch",
         ),
         RecommendationRequest(
-            user_id="demo_user",
             input_type="text",
             typed_ingredients="lentils, spinach, tomato, onion, rice",
             user_profile=_profile(allergies=["dairy"], cuisine="Indian"),
@@ -68,7 +64,7 @@ def scenarios() -> list[RecommendationRequest]:
 def main() -> None:
     metric_rows: list[dict[str, float]] = []
     for index, request in enumerate(scenarios(), start=1):
-        response = run_recommendation_graph(request)
+        response = run_recommendation_graph(request, "demo_user")
         row = summarize_response(response, request.user_profile)
         metric_rows.append(row)
         print(f"\nScenario {index}: {request.cuisine_preference or 'Any'}")

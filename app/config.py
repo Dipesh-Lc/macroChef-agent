@@ -90,14 +90,50 @@ class Settings(BaseSettings):
     fdc_cache_path: str = "./data/cache/fdc_cache.json"
 
     # Signed session cookie secret (anonymous session identity), consumed by
-    # app/dependencies.py to sign/verify the session token. Falls back to a
-    # dev-only insecure default there when unset; production must set this
-    # via the ACA secret wired up in .github/workflows/ci.yml.
+    # app/dependencies.py to sign/verify the session token. The secure
+    # default is fail-closed: if this is unset, both
+    # app.dependencies._resolve_session_secret (every token mint/verify, in
+    # both the FastAPI and Streamlit processes) and
+    # app.dependencies.validate_session_secret_at_startup (FastAPI boot)
+    # raise a RuntimeError rather than serve traffic. This is NEVER inferred
+    # from database_url or any other unrelated setting -- see
+    # allow_insecure_session_secret below for the only opt-out. Production
+    # must set this via the ACA secret wired up in .github/workflows/ci.yml.
     session_secret: str | None = Field(default=None, alias="SESSION_SECRET")
+
+    # Explicit, localhost-only opt-in to run without a real SESSION_SECRET.
+    # When True and session_secret is unset, falls back to a hardcoded,
+    # publicly-known dev default (loud warning logged every time). Must
+    # never be set in a deployed environment -- there is deliberately no
+    # env var or heuristic (like DATABASE_URL) that turns this on
+    # automatically; a human must opt in explicitly.
+    allow_insecure_session_secret: bool = Field(
+        default=False, alias="ALLOW_INSECURE_SESSION_SECRET"
+    )
 
     # PostHog analytics. Absent key => silent no-op (see app/services/analytics.py).
     posthog_api_key: str | None = Field(default=None, alias="POSTHOG_API_KEY")
     posthog_host: str = Field(default="https://us.i.posthog.com", alias="POSTHOG_HOST")
+
+    # Per-session in-memory rate limits (see app/services/rate_limiter.py and
+    # app/dependencies.py). All three gate an LLM call or heavy synchronous
+    # work; defaults are sized for a single-replica public hobby demo, not a
+    # multi-tenant product -- tune upward only alongside real usage data.
+    rate_limit_discover_max: int = Field(default=20, alias="RATE_LIMIT_DISCOVER_MAX")
+    rate_limit_discover_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_DISCOVER_WINDOW_SECONDS"
+    )
+    rate_limit_recommend_max: int = Field(default=20, alias="RATE_LIMIT_RECOMMEND_MAX")
+    rate_limit_recommend_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_RECOMMEND_WINDOW_SECONDS"
+    )
+    # Reindex re-embeds the whole corpus synchronously -- the single most
+    # expensive endpoint in the app -- so it gets the tightest cap of the
+    # three by a wide margin.
+    rate_limit_reindex_max: int = Field(default=2, alias="RATE_LIMIT_REINDEX_MAX")
+    rate_limit_reindex_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_REINDEX_WINDOW_SECONDS"
+    )
 
     @property
     def chroma_dir(self) -> Path:

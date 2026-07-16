@@ -1,5 +1,7 @@
 import streamlit as st
 
+from html_safe import tag_row_html
+
 
 def _add_tag(input_key: str, list_key: str) -> None:
     value = st.session_state.get(input_key, "").strip()
@@ -11,13 +13,23 @@ def _add_tag(input_key: str, list_key: str) -> None:
     st.session_state[input_key] = ""
 
 
+def _tag_row_markup(items: list[str], css_class: str) -> str:
+    """Build a row of `<span class="...">value</span>` pills.
+
+    `items` are user self-input (typed allergy/dislike tags kept only in
+    local `st.session_state`, never round-tripped through server storage
+    and echoed back here) -- lower risk than LLM/import-derived content,
+    but escaped anyway via `html_safe.tag_row_html` per the audit's
+    "escape everything that isn't a static literal" rule.
+    """
+    return tag_row_html(items, css_class)
+
+
 def _render_tags(list_key: str) -> list[str]:
     items = st.session_state.setdefault(list_key, [])
     if items:
         st.markdown(
-            '<div class="tag-row">'
-            + "".join(f'<span class="profile-tag">{item}</span>' for item in items)
-            + "</div>",
+            '<div class="tag-row">' + _tag_row_markup(items, "profile-tag") + "</div>",
             unsafe_allow_html=True,
         )
     return items
