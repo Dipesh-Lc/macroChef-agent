@@ -5,10 +5,11 @@ automated, what's manual, and the exact `az` fallback commands if the
 automated create-if-absent steps ever fail on permissions.
 
 The pipeline lives in `.github/workflows/ci.yml` (jobs: `test` -> `preflight`
--> `build-and-push` -> `deploy`). Only the API container (`app/main.py`,
-served by `uvicorn`) is deployed — the Streamlit frontend stays local/Docker
-Compose for now (not in this task's scope; see "Noticed, not fixed" in the
-executor report that added this pipeline).
+-> `build-and-push` -> `deploy`). A single container runs both Streamlit and
+FastAPI, started by `docker-entrypoint.sh`. Streamlit is the only public
+ingress (`0.0.0.0:8501`); FastAPI binds to `127.0.0.1:8000` (loopback only,
+not reachable externally). If either process dies, the container exits
+non-zero and is not reported healthy by the platform.
 
 ## What's automated
 
@@ -35,6 +36,44 @@ branch, with the `deploy` input left at its default `true`:
 Ordinary `git push` / pull requests only ever run the `test` job — nothing
 builds, pushes, or deploys automatically. This matches CLAUDE.md's "Public
 actions" human gate: everything is prepared, a human clicks "Run workflow".
+
+## Topology — single container, Streamlit public + internal FastAPI
+
+The deployed image runs one container with two processes orchestrated by
+`docker-entrypoint.sh`:
+
+- **Streamlit** (port `0.0.0.0:8501`): the only public ingress. Container Apps
+  injects the `PORT` env var; locally, it defaults to 8501. The workflow
+  deploys with `--target-port 8501`.
+- **FastAPI/uvicorn** (port `127.0.0.1:8000`): loopback only, **not reachable
+  from outside the container**. Streamlit reaches it via the `MACROCHEF_API_URL`
+  env var. This avoids exposing the API to the internet.
+
+**Process supervision and health checks:**
+
+- If either process dies, `docker-entrypoint.sh` uses `wait -n` to exit the
+  container with non-zero status, so the platform never reports a half-dead
+  container as healthy.
+- A `HEALTHCHECK` in the Dockerfile curls the internal FastAPI directly. This
+  is necessary because Azure Container Apps' ingress probe only reaches
+  Streamlit on port 8501 and cannot detect an API-only outage.
+
+**Vector index and embeddings:**
+
+- The Chroma vector index (`data/chroma/`) and the MiniLM embedding model are
+  **baked into the image at build time** — no runtime download. This avoids
+  startup delays and ensures consistent embeddings across revisions.
+- Scaling to multiple replicas is blocked: the embedded Chroma is a single-writer
+  store; multiple replicas would corrupt the index. `min-replicas=1 /
+  max-replicas=1` is deliberate (see "Cost implication" below).
+- Image size: ~3.42 GB (PyTorch dominates).
+
+**Local development differs intentionally:**
+
+The root `docker-compose.yml` runs Streamlit and FastAPI as two separate
+services (on ports 8501 and 8000 respectively), suitable for local development
+with live reload and separate debugging. This is a separate, intentional path
+from the production single-container topology — not an inconsistency to "fix".
 
 ## What's manual (you)
 

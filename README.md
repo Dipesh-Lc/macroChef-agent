@@ -4,7 +4,7 @@
 
 > **Hobby project — not medical advice.** MacroChef is an unpaid personal project,
 > not a certified nutrition or allergy-safety product. Its adversarial safety
-> benchmark (397 cases, see below) has been authored but **has not yet been run**,
+> benchmark (371 cases, see below) has been authored but **has not yet been run**,
 > so no violation-rate claim is made anywhere in this README. **If you have a food
 > allergy, you must independently verify every ingredient before you eat anything
 > this app suggests.**
@@ -41,7 +41,7 @@ deterministically by the scorer. The LLM cannot override a safety decision — b
 construction, not by prompt. Macro targets are *soft* constraints used only to
 rank, never to include or exclude on safety grounds.
 
-> A reproducible adversarial safety benchmark (397 cases: allergy-contradiction
+> A reproducible adversarial safety benchmark (371 cases: allergy-contradiction
 > traps, hidden allergens like "satay sauce" → peanut, diet-type traps, and more)
 > has been authored to publish a violation-rate comparison vs. direct LLM
 > prompting, but **has not yet been run** — no violation-rate number is published
