@@ -100,6 +100,32 @@ def test_structured_ingredient_allergen_rejected() -> None:
     assert not result.is_valid
 
 
+def test_milk_allergen_caught_before_and_after_quantity_parser_range_fix() -> None:
+    # app/utils/quantity_parser.py item: "2-4 tbsp milk" used to parse to
+    # name="-4 tbsp milk" (amount/unit dropped, en dash left glued to "4").
+    # It now parses to name="milk", amount=3.0, unit="tbsp". Both the
+    # before-shape and the after-shape must trip a milk allergy so the fix is
+    # provably non-regressive on the safety path (constraint_engine reads
+    # only ingredient names, never amount/unit).
+    before = _recipe(ingredients=[Ingredient(name="–4 tbsp milk", amount=2.0, unit=None)], allergens=[])
+    after = _recipe(ingredients=[Ingredient(name="milk", amount=3.0, unit="tbsp")], allergens=[])
+
+    assert not validate_recipe(before, _profile(allergies=["milk"])).is_valid
+    assert not validate_recipe(after, _profile(allergies=["milk"])).is_valid
+
+
+def test_peanut_allergen_caught_before_and_after_glued_unicode_fraction_fix() -> None:
+    # Same item: "1½ cup peanut butter" used to parse to
+    # name="½ cup peanut butter" (amount/unit dropped). It now parses to
+    # name="peanut butter", amount=1.5, unit="cup". Both shapes must trip a
+    # peanut allergy.
+    before = _recipe(ingredients=[Ingredient(name="½ cup peanut butter", amount=1.0, unit=None)], allergens=[])
+    after = _recipe(ingredients=[Ingredient(name="peanut butter", amount=1.5, unit="cup")], allergens=[])
+
+    assert not validate_recipe(before, _profile(allergies=["peanut"])).is_valid
+    assert not validate_recipe(after, _profile(allergies=["peanut"])).is_valid
+
+
 def test_whole_egg_still_triggers_egg_allergen() -> None:
     # "eggs"/"egg" were renamed to "whole egg" (nutrition grounding item 1.4)
     # to disambiguate against USDA's "egg white" record. ALLERGEN_ALIASES["egg"]
