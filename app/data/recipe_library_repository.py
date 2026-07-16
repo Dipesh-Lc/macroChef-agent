@@ -3,14 +3,13 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.data.db import SessionLocal, init_db
+from app.data.db import SessionLocal
 from app.data.models import UserSavedRecipe
 from app.schemas.recipe import Recipe
 
 
 class RecipeLibraryRepository:
     def __init__(self, db: Session | None = None):
-        init_db()
         self._external_db = db
 
     def _session(self) -> Session:

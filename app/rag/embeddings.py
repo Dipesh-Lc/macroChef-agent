@@ -4,9 +4,6 @@ from collections.abc import Sequence
 from functools import lru_cache
 
 from app.config import get_settings
-from app.utils.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 class HashingEmbeddingFunction:
@@ -91,12 +88,30 @@ class SentenceTransformerEmbeddingFunction:
         return cls(model_name=str(config.get("model_name") or get_settings().embedding_model))
 
 
+class EmbeddingModelUnavailableError(RuntimeError):
+    """Raised when EMBEDDING_PROVIDER=local is explicitly requested but the
+    real sentence-transformers model cannot be loaded.
+
+    This is intentionally NOT swallowed into a hashing-embedding fallback:
+    a container that silently degrades to hash embeddings against a
+    MiniLM-built Chroma index would serve semantically meaningless
+    retrieval while still reporting healthy. Callers that want the
+    deterministic fallback must opt in explicitly via EMBEDDING_PROVIDER=hash.
+    """
+
+
 @lru_cache(maxsize=1)
 def get_embedding_function():
     settings = get_settings()
-    if settings.embedding_provider.lower() == "local":
+    provider = settings.embedding_provider.lower()
+    if provider == "local":
         try:
             return SentenceTransformerEmbeddingFunction(settings.embedding_model)
-        except Exception as exc:  # pragma: no cover - depends on local model availability
-            logger.warning("Falling back to deterministic hashing embeddings: %s", exc)
+        except Exception as exc:
+            raise EmbeddingModelUnavailableError(
+                f"EMBEDDING_PROVIDER=local was requested but "
+                f"'{settings.embedding_model}' could not be loaded: {exc}. "
+                "Set EMBEDDING_PROVIDER=hash to explicitly opt into the "
+                "deterministic hashing fallback instead."
+            ) from exc
     return HashingEmbeddingFunction()

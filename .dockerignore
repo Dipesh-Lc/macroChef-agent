@@ -19,7 +19,7 @@ macrochef.db
 *.db
 *.sqlite
 *.sqlite3
-data/chroma
+!data/chroma/**
 data/raw/uploads
 data/library/*.jsonl
 frontend/.streamlit
