@@ -155,11 +155,25 @@ def test_source_citation_requires_all_fields() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_loader_loads_scaffold_examples_from_real_cases_dir() -> None:
+def test_loader_loads_all_authored_cases_from_real_cases_dir() -> None:
+    """The real cases directory grows as authors add cases, so this
+    deliberately does not pin an exact count. It asserts the loader
+    succeeds against the live directory, every loaded record validates
+    against the schema (implicit in `load_all_cases` not raising), the
+    count is non-zero, all 9 categories are represented, and the total
+    equals the sum of non-blank lines across the category files (a
+    self-updating cross-check rather than a hardcoded number)."""
     cases = load_all_cases()
-    assert len(cases) == 18  # 2 per category x 9 categories
+
+    assert len(cases) > 0
     categories = {case.category for case in cases}
     assert categories == set(CATEGORY_ID_PREFIXES)
+
+    expected_total = 0
+    for jsonl_path in CASES_DIR.glob("*.jsonl"):
+        with jsonl_path.open("r", encoding="utf-8") as handle:
+            expected_total += sum(1 for line in handle if line.strip())
+    assert len(cases) == expected_total
 
 
 def test_loader_round_trips_through_model_dump_json(tmp_path: Path) -> None:
