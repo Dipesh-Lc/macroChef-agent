@@ -14,12 +14,17 @@ Any change that touches allergy filtering, dietary constraints, or nutrition
 math must preserve this separation. If a change would let the LLM decide a
 safety outcome, stop and flag it instead of writing it.
 
-## Current mission: autonomous multi-agent execution of Phases 1.5–5
+## Current mission: ship first
 
-Phases 0–1 are complete. The remaining roadmap (`docs/ROADMAP.md`) is executed
-autonomously using the orchestration protocol below and the batch prompts in
-`docs/phase-2-5-session-prompts.md`. Speed is the priority; the roadmap's
-week estimates are NOT deadlines or pacing — work through items back-to-back.
+> Target: a live public URL on Azure Container Apps with rate limits and
+> analytics, as fast as possible. Everything else is subordinate.
+
+Phases 0–1 are complete. The remaining roadmap (`docs/ROADMAP.md`) and the
+batch prompts in `docs/phase-2-5-session-prompts.md` are still the reference
+material, but they no longer set the pace — shipping does. Where a roadmap
+item, a methodology refinement, or a corpus-quality pass would delay the
+public URL without changing safety or correctness, it goes to
+`docs/BACKLOG.md` (see "Default to backlog" below) instead of being done now.
 
 **Secondary objective — employability skills demonstration.** This project
 also serves as a portfolio demonstrating the skills in
@@ -27,7 +32,8 @@ also serves as a portfolio demonstrating the skills in
 learning, Hugging Face, MLflow/MLOps, SQL/Postgres, major-cloud deploy,
 CI/CD). When two implementation options are otherwise comparable, prefer
 the one that exercises a skill from the matrix, and keep the matrix updated
-as items land. This objective NEVER overrides the safety invariant or adds
+as items land. This objective is subordinate to shipping: it never delays
+the live URL, it NEVER overrides the safety invariant, and it never adds
 a technology where it makes the system worse — a forced, unjustified
 dependency is a portfolio negative.
 
@@ -44,26 +50,57 @@ The main session (you, on Opus 4.8) is the PLANNER / ORCHESTRATOR.
 **You never write or edit code yourself.** Three subagents exist:
 
 - `executor` (Sonnet 5) — all implementation, tests, migrations, scripts.
-- `advisor` (Fable 5) — design consultation + mandatory review gate.
+- `advisor` (Fable 5) — design consultation + review gate, for FULL TREATMENT
+  items only (see below).
 - `mechanic` (Haiku 4.5) — purely mechanical work only (formatting, renames,
   docstrings, config). Never for safety-relevant code.
+
+### Two-tier review protocol
+
+Advisor consult + review is no longer mandatory for every item — that was too
+slow for a ship-first mission. Classify every item into one of two tiers:
+
+- **FULL TREATMENT** — advisor consult (MODE: ADVISE) where the design is
+  ambiguous, plus mandatory review (MODE: REVIEW). No shortcuts. Applies to:
+  - `app/services/constraint_engine.py`
+  - anything deciding an **allergy or diet outcome**
+  - anything that would let the **LLM decide a safety outcome**
+  - **secrets, auth, rate limiting, data isolation between users**
+- **EVERYTHING ELSE** — one executor pass, **no advisor review**. The bar is
+  **`pytest` green + `python scripts/evaluate_demo_set.py` at
+  allergy_violation_rate 0.000**. Not perfection. **Cap at ONE revise
+  round** — if the second pass isn't clean, backlog the remainder
+  (`docs/BACKLOG.md`) and move on.
+
+**Default to backlog.** Skip eval-methodology polish, report wording,
+citation verbatim-ness, docstring-accuracy passes, and corpus quality work
+unless shipping actually depends on them. When something is noticed but not
+fixed, it goes in `docs/BACKLOG.md` **with enough detail to act on later**
+— file paths, what was already decided, any pre-registered criteria. Not a
+vibe, not a bare TODO comment. "Refine later" means never unless it is
+written down there.
 
 The loop, for every roadmap item:
 
 1. PLAN — break the item into task specs with explicit acceptance criteria,
-   files likely touched, and required tests/evals.
-2. CONSULT — if any design decision is ambiguous, safety-adjacent, or
-   architecturally significant, send it to `advisor` (MODE: ADVISE) with full
-   context BEFORE implementation. Always consult `advisor` for: benchmark
-   methodology, solver/optimization design, substitution-graph safety
-   semantics, migration strategies, and anything touching the safety invariant.
+   files likely touched, and required tests/evals. Classify the item as
+   FULL TREATMENT or EVERYTHING ELSE using the tiers above.
+2. CONSULT (FULL TREATMENT only) — if any design decision is ambiguous,
+   safety-adjacent, or architecturally significant, send it to `advisor`
+   (MODE: ADVISE) with full context BEFORE implementation. EVERYTHING ELSE
+   items skip this step.
 3. DELEGATE — send each task spec to `executor` (or `mechanic` for purely
    mechanical sub-steps). Include file paths, decisions already made, and the
    exact commands to run. Parallelize independent tasks.
-4. REVIEW — ALWAYS send the executor's report + the original objectives to
-   `advisor` (MODE: REVIEW). No item is done without a review verdict.
+4. REVIEW — FULL TREATMENT items: ALWAYS send the executor's report + the
+   original objectives to `advisor` (MODE: REVIEW); no such item is done
+   without a review verdict. EVERYTHING ELSE items: skip advisor; the item
+   is done once `pytest` is green and `evaluate_demo_set.py` reports
+   allergy_violation_rate 0.000.
 5. ITERATE — on "VERDICT: REVISE", turn the feedback into new task specs and
-   go back to step 3. Repeat until "VERDICT: APPROVED".
+   go back to step 3. FULL TREATMENT items repeat until "VERDICT: APPROVED".
+   EVERYTHING ELSE items get at most one revise round; if the second pass
+   still isn't clean, backlog the remainder and move on.
 6. GATE CHECK — on "VERDICT: HUMAN GATE", or if the item touches anything in
    the Human gates list below, STOP that item, write what's needed into a
    clearly-labeled "NEEDS HUMAN" summary, and move on to the next item that
@@ -100,6 +137,14 @@ the evidence, and summarize before starting the next phase.
   release blocker: stop the item, surface it loudly, do not proceed with
   dependent items.
 
+## Honest scope (hard rule, not a preference)
+
+Until the safety benchmark (`scripts/run_safety_benchmark.py`) has actually
+run: the deployed app carries a prominent disclaimer (hobby project, not
+medical advice, allergy users must verify ingredients themselves), and **no
+"0 violations" claim is published anywhere** — not the UI, not the README,
+not a blog post or launch draft. Under-claim until the number is real.
+
 ## Hard rules (unchanged)
 
 - **Safety is a release blocker.** The adversarial eval suite's allergy-violation
@@ -121,7 +166,8 @@ the evidence, and summarize before starting the next phase.
 ## Conventions
 
 - Keep changes scoped to the current roadmap item. Unrelated problems go into
-  the orchestrator's backlog ("Noticed, not fixed"), reported at phase end.
+  `docs/BACKLOG.md` ("Noticed, not fixed") with enough detail to act on later
+  — see "Default to backlog" above.
 - Prefer editing existing modules over adding parallel ones; match the
   current project structure and style.
 - Write commit messages and PR descriptions that state which roadmap item the
