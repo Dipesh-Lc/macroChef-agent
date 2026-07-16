@@ -269,3 +269,73 @@ def test_unsupported_diet_type_rejected_at_profile_intake() -> None:
     # fail loudly at intake rather than silently pass every recipe as safe.
     with pytest.raises(ValidationError):
         _profile(diet_type="halal")
+
+
+# --- 2026-07 confirmed allergen-alias gaps (fish/worcestershire, peanut/satay,
+# tree nut/pine nuts, tree nut/marzipan) -------------------------------------
+#
+# Human-confirmed gaps: worcestershire sauce (anchovy-based), satay sauce
+# (peanut-based), pine nuts, and marzipan (almond paste) were all wrongly
+# served to matching allergies. See ALLERGEN_ALIASES["fish"/"peanut"/
+# "tree nut"] inline comments in constraint_engine.py for the authoritative
+# source cited per addition. Sanity cases (anchovy paste/fish, peanut
+# butter/peanut) are re-asserted alongside the new gap cases to prove the
+# fix didn't regress the already-working path.
+#
+# 2026-07 follow-up (advisor review): "seafood" and "nuts" are separate keys
+# from "fish"/"tree nut"/"peanut" in ALLERGEN_ALIASES and had their own,
+# independent gaps -- "seafood" + worcestershire sauce and "nuts" +
+# groundnut oil were both served. The accented "saté" transliteration is
+# pinned directly (not just "satay sauce") since it's the one most likely to
+# be typed by a user and is a distinct dict key. "amaretto" is pinned against
+# "tree nut" per the policy-consistency addition (ambiguous nut content
+# resolves toward blocking).
+
+
+@pytest.mark.parametrize(
+    "allergy,ingredient",
+    [
+        ("fish", "anchovy paste"),
+        ("peanut", "peanut butter"),
+        ("fish", "worcestershire sauce"),
+        ("peanut", "satay sauce"),
+        ("tree nut", "pine nuts"),
+        ("tree nut", "marzipan"),
+        ("peanut", "saté"),
+        ("seafood", "worcestershire sauce"),
+        ("nuts", "groundnut oil"),
+        ("tree nut", "amaretto"),
+    ],
+)
+def test_confirmed_allergen_alias_gaps_now_blocked(allergy: str, ingredient: str) -> None:
+    recipe = _recipe(ingredients=[Ingredient(name=ingredient, amount=1, unit="tbsp")], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=[allergy]))
+
+    assert not result.is_valid
+
+
+def test_worcestershire_still_blocks_vegetarian_diet_after_fish_addition() -> None:
+    # "worcestershire" was already in MEAT_ALIASES (vegetarian/vegan path)
+    # before this fix; adding it to ALLERGEN_ALIASES["fish"] (allergy path)
+    # must be additive and not disturb that existing behavior.
+    recipe = _recipe(ingredients=["rice", "worcestershire sauce"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_water_chestnut_not_over_blocked_by_tree_nut_additions() -> None:
+    # Regression guard for the tree-nut additions in this change: a near-miss
+    # name that merely shares the word "nut" must still be served, not
+    # blocked.
+    #
+    # NOTE: "eggplant" (egg allergy) and "buckwheat" (wheat allergy) were
+    # investigated as the same kind of near-miss guard, per the task spec,
+    # and found to ALREADY over-block on main before this change (substring
+    # matches on "egg" and "wheat" respectively) -- pre-existing, unrelated
+    # to the fish/peanut/tree-nut additions here, so they are reported to
+    # the orchestrator rather than fixed as part of this scoped change.
+    recipe = _recipe(ingredients=["rice", "water chestnut"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
+
+    assert result.is_valid

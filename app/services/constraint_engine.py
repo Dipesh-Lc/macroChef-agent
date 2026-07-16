@@ -47,28 +47,133 @@ ALLERGEN_ALIASES = {
         "whey",
         "yogurt",
     },
-    "peanut": {"groundnut", "peanut", "peanut butter", "peanut oil", "peanuts"},
-    "peanuts": {"groundnut", "peanut", "peanut butter", "peanut oil", "peanuts"},
+    # Satay/saté sauce is a peanut-based sauce (ground peanuts, oil, and
+    # aromatics) in its standard Southeast Asian preparations -- by
+    # definition, not a sourced claim. Peanut is a major allergen designated
+    # by FALCPA (21 U.S.C. Sec. 321(qq)) and by EU Regulation 1169/2011,
+    # Annex II, point 5 ("Peanuts") -- those two statute/regulation cites are
+    # verified. "sate"/"saté" are accepted alternate transliterations of the
+    # same dish/sauce.
+    "peanut": {
+        "groundnut",
+        "peanut",
+        "peanut butter",
+        "peanut oil",
+        "peanuts",
+        "sate",
+        "satay",
+        "satay sauce",
+        "saté",
+    },
+    "peanuts": {
+        "groundnut",
+        "peanut",
+        "peanut butter",
+        "peanut oil",
+        "peanuts",
+        "sate",
+        "satay",
+        "satay sauce",
+        "saté",
+    },
     "tree nut": {
         "almond",
         "almonds",
+        # Amaretti (Italian almond macaroons), marzipan, frangipane, praline,
+        # nougat, and gianduja are almond- and/or hazelnut-based confections
+        # or pastes by definition (not merely "may contain" products), so
+        # they are sourceable additions rather than a general/unsourced
+        # audit expansion.
+        "amaretti",
+        # Amaretto (the liqueur): the dominant commercial brand (Disaronno)
+        # is apricot-kernel-based and marketed as nut-free, but some other
+        # amaretto brands/recipes are almond-based, and AAAAI guidance notes
+        # post-distillation nut infusions/flavorings can still trigger
+        # reactions; FARE's "foods and ingredients to avoid" guidance for
+        # tree-nut allergy includes nut extracts and nut-flavored
+        # distillates generally. Given that ambiguity, this project's policy
+        # (see the nougat/Worcestershire over-blocking notes below) resolves
+        # toward blocking rather than excluding by base rate. Note: because
+        # matching is substring-based, "amaretti" above does NOT also match
+        # "amaretto" -- it is listed here as its own explicit entry.
+        "amaretto",
+        # Brazil nut is a tree nut explicitly named alongside almond,
+        # hazelnut, walnut, cashew, pecan, pistachio, and macadamia in EU
+        # Regulation 1169/2011, Annex II, point 8 ("Nuts"), and in FDA's
+        # FALCPA tree-nut guidance.
+        "brazil nut",
+        "brazil nuts",
         "cashew",
+        # Frangipane is, by definition, an almond-cream pastry filling
+        # (ground almonds, butter, sugar, egg) -- not a source-verified
+        # claim; FARE's published tree-nut hidden-sources list does not
+        # currently name frangipane explicitly.
+        "frangipane",
+        # Gianduja is, by definition, a hazelnut-and-chocolate paste (the
+        # base of Nutella-style spreads) -- FARE's tree-nut hidden-sources
+        # guidance lists it explicitly.
+        "gianduja",
         "hazelnut",
         "macadamia",
+        # Marzipan is almond paste (ground almonds + sugar) by definition;
+        # FARE's tree-nut hidden-sources guidance names marzipan as a common
+        # concealed tree-nut source.
+        "marzipan",
+        # Traditional nougat (e.g. nougat de Montelimar, and the nougat in
+        # many chocolate bars) contains almonds and/or hazelnuts by
+        # definition. FARE's PEANUT page (not the tree-nut page) lists
+        # "Nougat and marzipan" as possible peanut sources; the tree-nut
+        # classification here rests on the definitional almond/hazelnut
+        # content, not on that peanut-page citation. This over-blocks the
+        # rarer nut-free nougat -- an accepted tradeoff for an
+        # anaphylaxis-class allergen (see the Worcestershire/fish note below
+        # for the same reasoning applied to fish).
+        "nougat",
         "pecan",
+        # Pine nut is retained as a tree nut in FDA's January 2025 Edition 5
+        # "Questions and Answers Regarding Food Allergens" guidance, which
+        # narrowed the previously ~23-item tree-nut list to 12 named tree
+        # nuts and kept "Pine nut (Pinon nut)" among them.
+        "pine nut",
+        "pine nuts",
         "pistachio",
+        # Praline paste (French/Belgian confectionery) is traditionally
+        # almond- and/or hazelnut-based; American-style pralines are
+        # pecan-based. Either way it is tree-nut derived -- FARE's tree-nut
+        # hidden-sources guidance lists praline.
+        "praline",
         "walnut",
     },
+    # "nuts" mirrors both the "tree nut" and "peanut" alias vocabularies
+    # above (see those sets' inline comments for the citation behind each
+    # addition); no new citations are introduced here.
     "nuts": {
         "almond",
         "almonds",
+        "amaretti",
+        "amaretto",
+        "brazil nut",
+        "brazil nuts",
         "cashew",
+        "frangipane",
+        "gianduja",
+        "groundnut",
         "hazelnut",
         "macadamia",
+        "marzipan",
+        "nougat",
         "peanut",
         "peanut butter",
+        "peanut oil",
         "pecan",
+        "pine nut",
+        "pine nuts",
         "pistachio",
+        "praline",
+        "sate",
+        "satay",
+        "satay sauce",
+        "saté",
         "walnut",
     },
     "gluten": {
@@ -161,6 +266,19 @@ ALLERGEN_ALIASES = {
         "trout",
         "tuna",
         "white fish",
+        # Traditional Worcestershire sauce is fermented with anchovies, a
+        # fish allergen under FALCPA and under EU Regulation 1169/2011,
+        # Annex II, point 4 ("Fish"); FARE (Food Allergy Research &
+        # Education)'s fish page lists Worcestershire sauce as a common
+        # hidden source of fish. Anchovy-free "vegan" Worcestershire-style
+        # sauces do exist, so this over-blocks them -- an accepted tradeoff
+        # for an anaphylaxis-class allergen, where a false positive costs
+        # one recipe and a false negative can be fatal. "worcestershire"
+        # already appears in MEAT_ALIASES below for the unrelated
+        # vegetarian/vegan diet-type check; this is an additive, independent
+        # entry in the allergen table and does not change that path.
+        "worcestershire",
+        "worcestershire sauce",
     },
     "seafood": {
         "anchovy",
@@ -183,6 +301,13 @@ ALLERGEN_ALIASES = {
         "shellfish",
         "shrimp",
         "tuna",
+        # Worcestershire sauce is fish-derived (fermented anchovies) -- see
+        # the "fish" set's citation above for the FALCPA/EU/FARE basis.
+        # "seafood" is a superset covering fish + shellfish, so it needs the
+        # same entry to avoid a gap where "fish" blocks it but "seafood"
+        # does not.
+        "worcestershire",
+        "worcestershire sauce",
     },
     "sesame": {"sesame", "sesame oil", "sesame seeds", "tahini"},
 }
