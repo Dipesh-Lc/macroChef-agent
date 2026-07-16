@@ -22,10 +22,10 @@ opt-in · ❌ not viable in this project (and why).
 | 13 (4/15) | Prompt engineering | ✅→🔨 2 | Structured-output prompts behind validation in the provider layer; the Batch 2 adversarial benchmark IS a prompt-robustness study (documented methodology) |
 | 14 (4/15) | LLM/agent frameworks (**LangGraph**, LangChain…) | ✅ | Two LangGraph workflows (planner + library builder) with conditional edges and Pydantic node contracts |
 | 15 (4/15) | AI agents / agentic workflows | ✅ | The product itself + the multi-agent Claude Code build process (orchestrator/executor/reviewer, documented in CLAUDE.md) |
-| 16 (3/15) | RAG (chunking, vector DBs, retrieval) | ✅→🔨 1.5 | ChromaDB + embeddings + keyword fallback; RAG-vs-keyword eval on ~50 queries made valid in Batch 1.5 |
+| 16 (3/15) | RAG (chunking, vector DBs, retrieval) | ✅ | ChromaDB + embeddings + keyword fallback; RAG-vs-keyword eval on ~50 queries made valid in Batch 1.5 |
 | 17 (3/15) | NLP | ✅→🔨 3.5 | Fuzzy ingredient normalization today; allergen-suspect text classifier in 3.5 |
 | 18 (3/15) | Hugging Face | 🔨 2 + 3.5 | Benchmark published as an HF Dataset (2); fine-tuned embedding model on the HF Hub (3.5) |
-| 19 (3/15) | Pandas / NumPy | ✅→🔨 1.5 | Corpus import/validation pipeline, grounding reports, eval scripts |
+| 19 (3/15) | Pandas / NumPy | ✅ | Corpus import/validation pipeline, grounding reports, eval scripts |
 | 20 (3/15) | MLOps / MLflow | 🔨 3 + 3.5 | MLflow tracking for ranker, classifier, and fine-tune runs; versioned served models; benchmark-in-CI as a release gate |
 | 21 (2/15) | CI/CD | ✅→🔨 2 | GitHub Actions CI today; full pipeline in Batch 2: build → tests → safety benchmark gate → image push → staged deploy → manual prod promotion |
 | 21 (2/15) | Kubernetes | ⚪ 5 | Opt-in stretch: manifests/Helm verified on kind in CI |

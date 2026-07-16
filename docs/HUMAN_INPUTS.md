@@ -6,10 +6,10 @@ answered inline when the orchestrator's NEEDS HUMAN summary asks.
 
 ## Before / during Batch 1.5 (Phase 1 closeout)
 
-- [ ] `USDA_FDC_API_KEY` present and working in `.env` (re-grounding the
+- [x] `FDC_API_KEY` present and working in `.env` (re-grounding the
       corpus will make many API calls; the key is free but rate-limited —
       confirm you're OK with a long-running job or provide the cached data
-      directory from the Phase 1 run).
+      directory from the Phase 1 run). Batch 1.5 complete.
 
 ## Before / during Batch 2 (benchmark + deploy)
 
