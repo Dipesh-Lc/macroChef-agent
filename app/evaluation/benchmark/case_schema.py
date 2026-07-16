@@ -68,6 +68,19 @@ CATEGORY_ID_PREFIXES: dict[str, str] = {
 # served recommendation's ingredients.
 SAFE_CONTROL_CATEGORY = "safe_control"
 
+# Advisor pre-freeze review (item 4): a non-`safe_control` case's forbidden
+# term is either INHERENT to the named food (the food carries the allergen by
+# definition -- e.g. mayonnaise contains egg, marzipan is almond paste) or
+# PRECAUTIONARY (an external authority lists the allergen as a *possible* --
+# not definitional -- source via cross-contact or recipe variability, e.g.
+# "gravy may contain peanut"). Collapsing both into one violation rate makes
+# the release-blocking "adversarial allergy-violation rate" uninterpretable:
+# a precautionary-only miss did not actually expose anyone to an allergen,
+# but CLAUDE.md's zero-violation gate can't distinguish the two without this
+# field. This label must be settled by each case's own citation language
+# BEFORE any score exists -- see cases/README.md.
+ClaimStrength = Literal["inherent", "precautionary"]
+
 ExecutionSurface = Literal["recommendation_graph", "discovery"]
 
 
@@ -121,11 +134,23 @@ class BenchmarkCase(BaseModel):
     # asserts must never appear among a served recommendation's ingredients.
     # Empty iff expected_safe is True (see validator below).
     forbidden_terms: list[str] = Field(default_factory=list)
-    # True only for safe_control cases: the correct system behavior is to
-    # SERVE a recommendation, not to refuse/flag it.
+    # True whenever there is no forbidden-term claim to enforce: every
+    # safe_control case (by category), plus any non-control case that
+    # legitimately asserts zero forbidden terms (e.g. a morphology case
+    # confirming a lookalike name is NOT the allergen). False whenever
+    # forbidden_terms is non-empty -- see the validator below.
     expected_safe: bool
     surfaces: list[ExecutionSurface]
     source_citation: SourceCitation | None = None
+    # Whether the forbidden-term claim is inherent (the food carries the
+    # allergen by definition) or precautionary (an external authority lists
+    # it as a possible, non-definitional source). Keyed on `expected_safe`,
+    # not on category: required iff expected_safe is False (there is a
+    # forbidden-term claim to classify), and must be None when expected_safe
+    # is True (there is no claim -- this covers safe_control automatically,
+    # plus any non-control case that asserts zero forbidden terms). See
+    # ClaimStrength's module-level comment and the validator below.
+    claim_strength: ClaimStrength | None = None
     # Optional: pins real corpus recipe ids for morphology cases that need a
     # specific recipe's ingredient list rather than whatever gets retrieved.
     pinned_recipe_ids: list[str] = Field(default_factory=list)
@@ -158,6 +183,16 @@ class BenchmarkCase(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_safe_control_category_implies_expected_safe(self) -> "BenchmarkCase":
+        if self.category == SAFE_CONTROL_CATEGORY and not self.expected_safe:
+            raise ValueError(
+                f"{self.case_id}: category 'safe_control' requires "
+                "expected_safe=True -- a safe_control case asserts the "
+                "correct system behavior is to serve a recommendation."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_case_id_matches_category_prefix(self) -> "BenchmarkCase":
         expected_prefix = CATEGORY_ID_PREFIXES[self.category]
         if not self.case_id.startswith(f"{expected_prefix}_"):
@@ -171,4 +206,31 @@ class BenchmarkCase(BaseModel):
     def _validate_surfaces_non_empty(self) -> "BenchmarkCase":
         if not self.surfaces:
             raise ValueError(f"{self.case_id}: surfaces must be non-empty.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_claim_strength_matches_expected_safe(self) -> "BenchmarkCase":
+        # Keyed on expected_safe, not category: a claim_strength label
+        # classifies a forbidden-term claim, and expected_safe is exactly
+        # the field that says whether such a claim exists (expected_safe is
+        # False iff forbidden_terms is non-empty, per the validator above).
+        # Keying on category instead would force a claim_strength onto
+        # non-safe_control cases that legitimately assert zero forbidden
+        # terms (e.g. a morphology case confirming a lookalike name is NOT
+        # the allergen) -- there is no claim there to classify, so the field
+        # must be None, exactly as it is for safe_control.
+        if not self.expected_safe and self.claim_strength is None:
+            raise ValueError(
+                f"{self.case_id}: expected_safe=False requires "
+                "claim_strength to be 'inherent' or 'precautionary' (see "
+                "ClaimStrength's module docstring) -- there is a "
+                "forbidden-term claim here to classify."
+            )
+        if self.expected_safe and self.claim_strength is not None:
+            raise ValueError(
+                f"{self.case_id}: expected_safe=True cases must not set "
+                "claim_strength -- there is no forbidden-term claim to "
+                "classify as inherent or precautionary when nothing is "
+                "forbidden."
+            )
         return self

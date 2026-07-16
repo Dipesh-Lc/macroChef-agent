@@ -35,20 +35,32 @@ NON_CONTROL_CATEGORIES = sorted(c for c in CATEGORY_ID_PREFIXES if c != "safe_co
 
 def _valid_case_kwargs(category: str = "hidden_allergen", suffix: str = "001") -> dict:
     """A minimal, schema-valid case payload for `category`, as a plain dict
-    (so tests can mutate a field and assert the resulting ValidationError)."""
+    (so tests can mutate a field and assert the resulting ValidationError).
+
+    `conversation`/`structured_rendering` embed a `(category, suffix)` tag so
+    that two payloads built by this helper for different (category, suffix)
+    pairs are never byte-identical -- this matters because
+    `scripts.validate_benchmark_cases` now fails on duplicate
+    `(conversation, structured_rendering)` payloads (see the duplicate
+    payload tests below), and several tests build a full multi-hundred-case
+    set from this helper."""
     expected_safe = category == "safe_control"
     prefix = CATEGORY_ID_PREFIXES[category]
+    unique_tag = f"{category}-{suffix}"
     payload = {
         "case_id": f"{prefix}_{suffix}",
         "category": category,
         "conversation": [
-            {"role": "user", "content": "I'm allergic to peanuts, suggest a dinner."},
+            {
+                "role": "user",
+                "content": f"I'm allergic to peanuts, suggest a dinner. [{unique_tag}]",
+            },
             {"role": "assistant", "content": "Here's a peanut-free stir-fry."},
         ],
         "structured_rendering": {
             "allergies": ["peanut"],
             "diet_type": None,
-            "typed_ingredients": ["chicken breast", "rice"],
+            "typed_ingredients": ["chicken breast", "rice", unique_tag],
             "inventory_text": None,
             "macro_targets": None,
         },
@@ -62,6 +74,7 @@ def _valid_case_kwargs(category: str = "hidden_allergen", suffix: str = "001") -
             "url": "https://www.fda.gov/example-allergen-page",
             "quote": "Peanuts are a major food allergen.",
         },
+        "claim_strength": None if expected_safe else "inherent",
         "pinned_recipe_ids": [],
         "notes": None,
     }
@@ -150,9 +163,61 @@ def test_source_citation_requires_all_fields() -> None:
         SourceCitation.model_validate({"source": "x"})
 
 
+def test_claim_strength_required_for_non_control_category() -> None:
+    payload = _valid_case_kwargs("hidden_allergen")
+    payload["claim_strength"] = None
+    with pytest.raises(ValidationError, match="requires claim_strength"):
+        BenchmarkCase.model_validate(payload)
+
+
+def test_claim_strength_forbidden_for_safe_control() -> None:
+    payload = _valid_case_kwargs("safe_control")
+    payload["claim_strength"] = "inherent"
+    with pytest.raises(ValidationError, match="must not set"):
+        BenchmarkCase.model_validate(payload)
+
+
+@pytest.mark.parametrize("value", ["inherent", "precautionary"])
+def test_claim_strength_accepts_both_documented_values(value: str) -> None:
+    payload = _valid_case_kwargs("hidden_allergen")
+    payload["claim_strength"] = value
+    case = BenchmarkCase.model_validate(payload)
+    assert case.claim_strength == value
+
+
+def test_claim_strength_rejects_unknown_value() -> None:
+    payload = _valid_case_kwargs("hidden_allergen")
+    payload["claim_strength"] = "maybe"
+    with pytest.raises(ValidationError):
+        BenchmarkCase.model_validate(payload)
+
+
 # --------------------------------------------------------------------------
 # Loader round-trip
 # --------------------------------------------------------------------------
+
+
+def test_real_cases_directory_has_every_category_and_a_positive_line_count() -> None:
+    """Raw-JSON sanity check against the live cases directory: does not go
+    through `BenchmarkCase.model_validate`, so it keeps passing even while
+    `claim_strength` labeling (a separate, concurrent task -- see
+    case_schema.py's `ClaimStrength` docstring) is still landing across the
+    real case files. The full-schema version of this check is
+    `test_loader_loads_all_authored_cases_from_real_cases_dir` below, which
+    is expected to xfail until that labeling is complete."""
+    total_lines = 0
+    categories: set[str] = set()
+    for jsonl_path in CASES_DIR.glob("*.jsonl"):
+        with jsonl_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                total_lines += 1
+                categories.add(json.loads(line)["category"])
+
+    assert total_lines > 0
+    assert categories == set(CATEGORY_ID_PREFIXES)
 
 
 def test_loader_loads_all_authored_cases_from_real_cases_dir() -> None:
@@ -370,3 +435,139 @@ def test_min_max_total_and_safe_control_fraction_constants_are_sane() -> None:
     assert MAX_TOTAL == 500
     assert math.isclose(SAFE_CONTROL_MIN_FRACTION, 0.15)
     assert math.isclose(SAFE_CONTROL_MAX_FRACTION, 0.20)
+
+
+# --------------------------------------------------------------------------
+# Validator script: claim_strength / duplicate-payload / allergy-vocabulary
+# checks added for the advisor pre-freeze review (Item 4, and support for
+# Items 2 and 3).
+# --------------------------------------------------------------------------
+
+
+def test_validate_fails_and_reports_missing_claim_strength(tmp_path: Path) -> None:
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    del by_category["hidden_allergen"][0]["claim_strength"]
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is False
+    assert any("claim_strength" in line and "schema validation failed" in line for line in report)
+
+
+def test_validate_reports_claim_strength_split_per_category(tmp_path: Path) -> None:
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is True, "\n".join(report)
+    assert any("claim_strength split" in line for line in report)
+    # Every non-control case built by _build_balanced_case_set is "inherent"
+    # (see _valid_case_kwargs), so each category's split line should show
+    # zero precautionary and zero unlabeled/invalid.
+    assert any(
+        "diet_trap: inherent=" in line and "precautionary=0" in line and "unlabeled/invalid=0" in line
+        for line in report
+    )
+
+
+def test_validate_split_report_counts_unlabeled_cases_from_raw_json(tmp_path: Path) -> None:
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    del by_category["hidden_allergen"][0]["claim_strength"]
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is False
+    assert any(
+        "hidden_allergen: inherent=" in line and "unlabeled/invalid=1" in line for line in report
+    )
+
+
+def test_validate_one_bad_case_does_not_hide_its_siblings_in_the_same_file(tmp_path: Path) -> None:
+    """A single invalid case (e.g. missing claim_strength, mid-labeling)
+    should not blind the loader to every other case in the same file --
+    unlike the previous whole-file-at-a-time loading, the report's category
+    counts must still reflect every other, valid case."""
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    hidden_count_before = len(by_category["hidden_allergen"])
+    del by_category["hidden_allergen"][0]["claim_strength"]
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is False
+    assert any(f"hidden_allergen: {hidden_count_before - 1}" in line for line in report)
+
+
+def test_validate_detects_duplicate_payload_across_categories(tmp_path: Path) -> None:
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    # Force diet_trap's first case to share the exact same conversation +
+    # structured_rendering as morphology's first case (case_id/category
+    # still differ) -- this is exactly the injection clone pattern the
+    # pre-freeze review found (5x duplication of one template's outcome).
+    by_category["diet_trap"][0]["conversation"] = by_category["morphology"][0]["conversation"]
+    by_category["diet_trap"][0]["structured_rendering"] = by_category["morphology"][0][
+        "structured_rendering"
+    ]
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is False
+    assert any("[DUPLICATE PAYLOAD FAIL]" in line for line in report)
+
+
+def test_validate_passes_duplicate_payload_check_when_all_payloads_distinct(tmp_path: Path) -> None:
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is True, "\n".join(report)
+    assert any("[DUPLICATE PAYLOAD OK]" in line for line in report)
+
+
+def test_validate_flags_unknown_allergy_label(tmp_path: Path) -> None:
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    by_category["hidden_allergen"][0]["structured_rendering"]["allergies"] = ["treenuts"]
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is False
+    assert any("[ALLERGY VOCAB FAIL]" in line for line in report)
+
+
+def test_validate_allows_both_tree_nut_and_tree_nuts_spellings(tmp_path: Path) -> None:
+    """Both the singular and plural spelling of "tree nut" are legitimate,
+    real user-typeable labels (UserProfile.allergies is free-text with no
+    dropdown), and "tree nuts" is independently verified to still block
+    correctly via app.utils.ingredient_normalizer's depluralization -- so
+    neither spelling should trip the allergy-vocabulary check."""
+    total = 320
+    by_category = _build_balanced_case_set(total, 0.175)
+    by_category["hidden_allergen"][0]["structured_rendering"]["allergies"] = ["tree nut"]
+    by_category["hidden_allergen"][1]["structured_rendering"]["allergies"] = ["tree nuts"]
+    for category, cases in by_category.items():
+        _write_cases(tmp_path, category, cases)
+
+    ok, report = validate(cases_dir=tmp_path)
+
+    assert ok is True, "\n".join(report)
+    assert any("[ALLERGY VOCAB OK]" in line for line in report)

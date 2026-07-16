@@ -8,7 +8,10 @@ checks that the case *set itself* is well-formed:
 
 1. Every JSONL line parses and validates against `BenchmarkCase`
    (`app.evaluation.benchmark.case_schema`) -- malformed cases are reported
-   with file/line context, not silently skipped.
+   with file/line context, not silently skipped. Validation happens per
+   *line* (not per file): one invalid case does not hide the report for
+   every other case in the same file, which matters while `claim_strength`
+   labeling (see check 5) is still landing incrementally.
 2. QUOTA CHECKS:
    - total case count is in [300, 500].
    - `safe_control` is between 15% and 20% of the total. This is a hard
@@ -24,19 +27,47 @@ checks that the case *set itself* is well-formed:
    instead of an external authority. Ground truth must be traceable to
    something outside the implementation under test -- see
    `app/evaluation/benchmark/cases/README.md`.
+5. CLAIM_STRENGTH: `BenchmarkCase` requires `claim_strength` ("inherent" or
+   "precautionary") on every case with `expected_safe: false` -- i.e. every
+   case that actually asserts a forbidden-term claim -- and forbids it
+   otherwise (schema-enforced -- see `case_schema.py`; keyed on
+   `expected_safe`, not category, so a non-`safe_control` case that itself
+   asserts zero forbidden terms is correctly counted as having no claim to
+   classify). This script additionally reports the
+   inherent/precautionary/no_claim/unlabeled split per category, computed
+   from the raw JSON (not the validated model), so the split is visible
+   even while some cases in a category are still missing the field.
+6. DUPLICATE PAYLOAD: flags any two cases whose `(conversation,
+   structured_rendering)` pair is byte-identical, even if `case_id` and
+   other metadata differ. The pre-freeze review found `prompt_injection`
+   had 40 case_ids but only 14 distinct payloads -- 26 were clones that
+   silently 5x-multiplied one template's outcome into the denominator.
+7. ALLERGY VOCABULARY: flags any `structured_rendering.allergies` entry
+   that isn't in a documented, closed set of expected labels, to catch a
+   typo (e.g. "treenuts") that would otherwise silently produce a vacuous
+   case. Both singular and plural spellings are allowed for terms a real
+   user could type either way -- see `ALLOWED_ALLERGY_LABELS` below for why
+   this is not the same thing as forbidding plurals.
 
 Exits nonzero on ANY failure (missing quota, duplicate id, contamination
-hit, or schema error) so this can be wired into CI later as a hard gate.
+hit, schema error, duplicate payload, or unknown allergy label) so this can
+be wired into CI later as a hard gate.
 
 Deliberately does NOT import from `app.services` or `app.utils` -- this
 validator checks the case set's own internal consistency, not agreement
-with the constraint engine under test.
+with the constraint engine under test. `ALLOWED_ALLERGY_LABELS` below is a
+hardcoded mirror of the allergen vocabulary for that reason: importing
+`app.services.constraint_engine.ALLERGEN_ALIASES` would make this check
+agree with the implementation under test by construction, which is exactly
+the tautology this benchmark is designed to avoid (see case_schema.py's
+module docstring and cases/README.md's blind-authoring rule).
 """
 
 from __future__ import annotations
 
+import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +81,7 @@ from app.evaluation.benchmark.case_schema import (  # noqa: E402
     SAFE_CONTROL_CATEGORY,
     BenchmarkCase,
 )
-from app.evaluation.benchmark.loader import CASES_DIR, load_cases_from_jsonl  # noqa: E402
+from app.evaluation.benchmark.loader import CASES_DIR  # noqa: E402
 
 MIN_TOTAL = 300
 MAX_TOTAL = 500
@@ -58,6 +89,45 @@ SAFE_CONTROL_MIN_FRACTION = 0.15
 SAFE_CONTROL_MAX_FRACTION = 0.20
 
 ALL_CATEGORIES = set(CATEGORY_ID_PREFIXES)
+NON_CONTROL_CATEGORIES = ALL_CATEGORIES - {SAFE_CONTROL_CATEGORY}
+
+# Closed set of allergy labels a `structured_rendering.allergies` entry may
+# use. Mirrors `app.services.constraint_engine.ALLERGEN_ALIASES`'s public
+# keys by hand (not by import -- see module docstring), plus explicit plural
+# forms.
+#
+# Both "tree nut" and "tree nuts" are listed deliberately, not by oversight:
+# `UserProfile.allergies` is free-text (`list[str]`, no dropdown -- see
+# `StructuredRendering`'s docstring in case_schema.py), so a real user could
+# type either. Verified by execution: "tree nuts" is not itself an alias
+# key, but `app.utils.ingredient_normalizer.normalize_ingredient`
+# depluralizes it to "tree nut" before alias lookup, so it still blocks
+# correctly -- it is not a vacuous label. This set exists to catch
+# typos/unknown labels (e.g. "treenuts", "nutt"), not to forbid legitimate
+# plurals; extend it (both forms) if a case set legitimately needs a label
+# not yet listed here.
+ALLOWED_ALLERGY_LABELS = frozenset(
+    {
+        "dairy",
+        "milk",
+        "egg",
+        "eggs",
+        "peanut",
+        "peanuts",
+        "tree nut",
+        "tree nuts",
+        "nuts",
+        "wheat",
+        "gluten",
+        "soy",
+        "soya",
+        "shellfish",
+        "crustacean",
+        "fish",
+        "seafood",
+        "sesame",
+    }
+)
 
 # Markers that suggest a citation URL points back into this repository
 # (or is otherwise not an independent external authority) rather than out
@@ -98,25 +168,137 @@ def _citation_contamination_reason(case: BenchmarkCase) -> str | None:
     return None
 
 
-def _load_all_cases_reporting_errors(cases_dir: Path) -> tuple[list[BenchmarkCase], list[str]]:
-    """Loads every *.jsonl file in cases_dir, collecting schema errors
-    instead of raising on the first one, so a single validation run reports
-    every problem at once."""
+def _load_all_cases_reporting_errors(
+    cases_dir: Path,
+) -> tuple[list[BenchmarkCase], list[dict], list[str]]:
+    """Loads every *.jsonl file in cases_dir, validating line-by-line and
+    collecting every error instead of raising (or discarding a whole file)
+    on the first one, so a single validation run reports every problem at
+    once.
+
+    Returns `(cases, raw_records, errors)`:
+    - `cases`: every line that parsed as JSON *and* validated against
+      `BenchmarkCase`.
+    - `raw_records`: every line that parsed as JSON, regardless of whether
+      it validated against `BenchmarkCase`. Checks that must keep working
+      while some cases are individually invalid (the claim_strength split,
+      duplicate-payload detection, allergy vocabulary) read from this list
+      instead of `cases`, so one bad case doesn't blind those checks to
+      every other case in its file.
+    - `errors`: human-readable, file:line-scoped problem descriptions.
+    """
     cases: list[BenchmarkCase] = []
+    raw_records: list[dict] = []
     errors: list[str] = []
     jsonl_paths = sorted(cases_dir.glob("*.jsonl"))
     if not jsonl_paths:
         errors.append(f"No *.jsonl files found in {cases_dir}")
-        return cases, errors
+        return cases, raw_records, errors
 
     for path in jsonl_paths:
-        try:
-            cases.extend(load_cases_from_jsonl(path))
-        except ValidationError as exc:
-            errors.append(f"{path.name}: schema validation failed:\n{exc}")
-        except ValueError as exc:
-            errors.append(str(exc))
-    return cases, errors
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, raw_line in enumerate(handle, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    errors.append(f"{path.name}:{line_number}: invalid JSON ({exc})")
+                    continue
+                if isinstance(payload, dict):
+                    raw_records.append(payload)
+                try:
+                    cases.append(BenchmarkCase.model_validate(payload))
+                except ValidationError as exc:
+                    case_id = payload.get("case_id", "<unknown case_id>") if isinstance(payload, dict) else "<non-object line>"
+                    errors.append(
+                        f"{path.name}:{line_number} ({case_id}): schema validation failed:\n{exc}"
+                    )
+    return cases, raw_records, errors
+
+
+def _payload_fingerprint(record: dict) -> str:
+    """A canonical string of just `conversation` + `structured_rendering`,
+    for duplicate-payload detection. Deliberately excludes case_id,
+    category, surfaces, and notes -- two cases with the identical adversarial
+    content but different bookkeeping metadata are still the "same case"
+    for the purposes of this check (that's exactly the clone pattern the
+    pre-freeze review found in prompt_injection)."""
+    return json.dumps(
+        {
+            "conversation": record.get("conversation"),
+            "structured_rendering": record.get("structured_rendering"),
+        },
+        sort_keys=True,
+    )
+
+
+def _duplicate_payload_groups(raw_records: list[dict]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = defaultdict(list)
+    for record in raw_records:
+        case_id = record.get("case_id", "<unknown case_id>")
+        groups[_payload_fingerprint(record)].append(case_id)
+    return {key: ids for key, ids in groups.items() if len(ids) > 1}
+
+
+def _unknown_allergy_label_hits(raw_records: list[dict]) -> list[str]:
+    hits: list[str] = []
+    for record in raw_records:
+        case_id = record.get("case_id", "<unknown case_id>")
+        rendering = record.get("structured_rendering") or {}
+        for label in rendering.get("allergies") or []:
+            normalized = str(label).strip().lower()
+            if normalized not in ALLOWED_ALLERGY_LABELS:
+                hits.append(f"{case_id}: unexpected allergy label {label!r}")
+    return hits
+
+
+def _claim_strength_split_report(raw_records: list[dict]) -> list[str]:
+    """Per-category inherent/precautionary/unlabeled/no-claim counts, computed
+    from raw JSON so the split is visible even for categories that are still
+    mid-labeling (and therefore failing full schema validation) -- see
+    check 5 in the module docstring.
+
+    Partitions on `expected_safe`, not category (advisor pre-freeze review,
+    item 1): a case has a forbidden-term claim to classify iff
+    `expected_safe` is False, regardless of category. A non-safe_control
+    case with `expected_safe: true` (e.g. a morphology case confirming a
+    lookalike name is NOT the allergen) has no claim at all and must show up
+    as "no_claim", not silently default into "inherent" -- keying on category
+    instead of expected_safe is exactly the bug this report existed to avoid
+    surfacing."""
+    counts: dict[str, Counter] = defaultdict(Counter)
+    for record in raw_records:
+        category = record.get("category")
+        if category not in ALL_CATEGORIES:
+            continue
+        expected_safe = record.get("expected_safe")
+        claim = record.get("claim_strength")
+        if expected_safe is True:
+            bucket = "no_claim" if claim is None else "unlabeled/invalid"
+        elif expected_safe is False:
+            bucket = claim if claim in ("inherent", "precautionary") else "unlabeled/invalid"
+        else:
+            bucket = "unlabeled/invalid"
+        counts[category][bucket] += 1
+
+    lines = ["claim_strength split per category, partitioned on expected_safe "
+             "(release-blocking violation rate is computed over 'inherent' only; "
+             "'precautionary' is a separate, non-blocking number; 'no_claim' is "
+             "expected_safe=True cases with no forbidden-term claim to classify "
+             "-- see README.md):"]
+    for category in sorted(ALL_CATEGORIES):
+        category_counts = counts.get(category, Counter())
+        inherent = category_counts.get("inherent", 0)
+        precautionary = category_counts.get("precautionary", 0)
+        no_claim = category_counts.get("no_claim", 0)
+        unlabeled = category_counts.get("unlabeled/invalid", 0)
+        lines.append(
+            f"  {category}: inherent={inherent} precautionary={precautionary} "
+            f"no_claim={no_claim} unlabeled/invalid={unlabeled}"
+        )
+    return lines
 
 
 def validate(cases_dir: Path | None = None) -> tuple[bool, list[str]]:
@@ -125,7 +307,7 @@ def validate(cases_dir: Path | None = None) -> tuple[bool, list[str]]:
     report: list[str] = []
     ok = True
 
-    cases, load_errors = _load_all_cases_reporting_errors(cases_dir)
+    cases, raw_records, load_errors = _load_all_cases_reporting_errors(cases_dir)
     for error in load_errors:
         report.append(f"[SCHEMA ERROR] {error}")
         ok = False
@@ -133,7 +315,7 @@ def validate(cases_dir: Path | None = None) -> tuple[bool, list[str]]:
     total = len(cases)
     by_category: Counter[str] = Counter(case.category for case in cases)
 
-    report.append(f"Total cases loaded: {total}")
+    report.append(f"Total cases loaded (schema-valid): {total}")
     for category in sorted(ALL_CATEGORIES):
         report.append(f"  {category}: {by_category.get(category, 0)}")
 
@@ -198,6 +380,39 @@ def validate(cases_dir: Path | None = None) -> tuple[bool, list[str]]:
         ok = False
     else:
         report.append("[CONTAMINATION OK] no suspect source citations found")
+
+    # --- Duplicate payload detection (item 2 support) -------------------
+    duplicate_payload_groups = _duplicate_payload_groups(raw_records)
+    if duplicate_payload_groups:
+        report.append(
+            "[DUPLICATE PAYLOAD FAIL] cases with byte-identical "
+            "(conversation, structured_rendering):"
+        )
+        for case_ids in duplicate_payload_groups.values():
+            report.append(f"  - {sorted(case_ids)}")
+        ok = False
+    else:
+        report.append(
+            "[DUPLICATE PAYLOAD OK] no two cases share an identical "
+            "(conversation, structured_rendering) payload"
+        )
+
+    # --- Allergy vocabulary check (item 3 support) -----------------------
+    unknown_allergy_hits = _unknown_allergy_label_hits(raw_records)
+    if unknown_allergy_hits:
+        report.append(
+            "[ALLERGY VOCAB FAIL] structured_rendering.allergies label(s) "
+            f"not in the documented closed set ({sorted(ALLOWED_ALLERGY_LABELS)}):"
+        )
+        for hit in unknown_allergy_hits:
+            report.append(f"  - {hit}")
+        ok = False
+    else:
+        report.append("[ALLERGY VOCAB OK] every allergy label is in the documented closed set")
+
+    # --- claim_strength split report (item 4) ---------------------------
+    report.append("")
+    report.extend(_claim_strength_split_report(raw_records))
 
     report.append("")
     report.append(f"RESULT: {'PASS' if ok else 'FAIL'}")
