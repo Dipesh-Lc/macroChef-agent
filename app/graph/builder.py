@@ -19,6 +19,7 @@ from app.graph.nodes import (
 )
 from app.graph.state import MacroChefState, ensure_state
 from app.schemas.recommendation import RecommendationRequest, RecommendationResponse
+from app.services.analytics import get_analytics
 
 
 class SequentialMacroChefGraph:
@@ -123,7 +124,7 @@ def run_recommendation_graph(request: RecommendationRequest) -> RecommendationRe
     state = request_to_state(request)
     result = graph.invoke(state.model_dump())
     final_state = ensure_state(result)
-    return RecommendationResponse(
+    response = RecommendationResponse(
         recommendations=final_state.final_recommendations,
         shopping_list=final_state.shopping_list,
         rejected_recipes=final_state.rejected_recipes,
@@ -131,3 +132,17 @@ def run_recommendation_graph(request: RecommendationRequest) -> RecommendationRe
         debug_trace=final_state.debug_trace,
         errors=final_state.errors,
     )
+
+    analytics = get_analytics()
+    analytics.capture(
+        request.user_id,
+        "request completed",
+        {"had_errors": bool(response.errors), "recommendation_count": len(response.recommendations)},
+    )
+    if response.recommendations:
+        analytics.capture(
+            request.user_id,
+            "plan generated",
+            {"recommendation_count": len(response.recommendations)},
+        )
+    return response

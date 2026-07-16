@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import requests
 import streamlit as st
@@ -7,9 +8,48 @@ from components.inventory_input import render_inventory_input
 from components.profile_form import render_profile_sidebar
 from components.recommendation_cards import render_recommendations
 
+from app.services.analytics import get_analytics
+
 API_URL = os.getenv("MACROCHEF_API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="MacroChef Agent", page_icon="MC", layout="wide")
+
+
+def _track_return_visit() -> None:
+    """Fire a "return visit" analytics event using an anonymous cookie.
+
+    Best-effort and non-critical: any failure here (e.g. no request
+    context, cookie blocked) is swallowed so it can never break the page.
+    Guarded by session_state so it runs at most once per browser session,
+    not on every widget-triggered rerun.
+    """
+    if st.session_state.get("_analytics_return_visit_checked"):
+        return
+    st.session_state["_analytics_return_visit_checked"] = True
+    try:
+        cookie_name = "mc_anon_id"
+        existing_id = st.context.cookies.get(cookie_name)
+        analytics = get_analytics()
+        if existing_id:
+            analytics.capture(existing_id, "return visit", {})
+            return
+        new_id = str(uuid.uuid4())
+        st.components.v1.html(
+            f"""
+            <script>
+            try {{
+                window.parent.document.cookie =
+                    "{cookie_name}={new_id}; path=/; max-age=31536000; SameSite=Lax";
+            }} catch (e) {{}}
+            </script>
+            """,
+            height=0,
+        )
+    except Exception:
+        pass
+
+
+_track_return_visit()
 
 st.markdown(
     """
@@ -270,6 +310,14 @@ st.markdown(
 )
 
 profile_bundle = render_profile_sidebar()
+
+st.warning(
+    "**Hobby project — not medical advice.** MacroChef is an unpaid personal "
+    "project, not a certified nutrition or allergy-safety product. Its adversarial "
+    "safety benchmark has not yet been run, so no violation-rate claim is made. "
+    "**If you have a food allergy, you must independently verify every "
+    "ingredient before you eat anything suggested here.**"
+)
 
 st.markdown(
     """

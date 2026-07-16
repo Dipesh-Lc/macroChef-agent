@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     )
     fdc_cache_path: str = "./data/cache/fdc_cache.json"
 
+    # Signed session cookie secret (anonymous session identity), consumed by
+    # app/dependencies.py to sign/verify the session token. Falls back to a
+    # dev-only insecure default there when unset; production must set this
+    # via the ACA secret wired up in .github/workflows/ci.yml.
+    session_secret: str | None = Field(default=None, alias="SESSION_SECRET")
+
+    # PostHog analytics. Absent key => silent no-op (see app/services/analytics.py).
+    posthog_api_key: str | None = Field(default=None, alias="POSTHOG_API_KEY")
+    posthog_host: str = Field(default="https://us.i.posthog.com", alias="POSTHOG_HOST")
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)

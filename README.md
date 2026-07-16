@@ -2,6 +2,13 @@
 
 ![CI](https://github.com/Dipesh-Lc/macroChef-agent/actions/workflows/ci.yml/badge.svg)
 
+> **Hobby project — not medical advice.** MacroChef is an unpaid personal project,
+> not a certified nutrition or allergy-safety product. Its adversarial safety
+> benchmark (397 cases, see below) has been authored but **has not yet been run**,
+> so no violation-rate claim is made anywhere in this README. **If you have a food
+> allergy, you must independently verify every ingredient before you eat anything
+> this app suggests.**
+
 **A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
 > **The LLM never enforces your allergies and never computes your macros.
@@ -34,10 +41,11 @@ deterministically by the scorer. The LLM cannot override a safety decision — b
 construction, not by prompt. Macro targets are *soft* constraints used only to
 rank, never to include or exclude on safety grounds.
 
-> A reproducible adversarial safety benchmark (allergy-contradiction traps, hidden
-> allergens like "satay sauce" → peanut, diet-type traps) is planned for a future
-> release to publish a violation-rate comparison vs. direct LLM prompting. See
-> `docs/ROADMAP.md`.
+> A reproducible adversarial safety benchmark (397 cases: allergy-contradiction
+> traps, hidden allergens like "satay sauce" → peanut, diet-type traps, and more)
+> has been authored to publish a violation-rate comparison vs. direct LLM
+> prompting, but **has not yet been run** — no violation-rate number is published
+> anywhere in this README until it has. See `docs/ROADMAP.md`.
 
 ---
 
@@ -82,6 +90,9 @@ docker compose up --build
 
 - API: http://localhost:8000  (health check: `GET /health`)
 - UI:  http://localhost:8501
+
+Deploying the API to Azure Container Apps is automated (CI/CD, manual
+production trigger) — see `docs/DEPLOY.md`.
 
 ---
 
@@ -323,9 +334,10 @@ Invoke-RestMethod -Uri "http://localhost:8000/recipes/recommend" -Method Post -C
 
 ## Evaluation
 
-Deterministic metrics computed over a demo set:
+Deterministic metrics computed over a small internal demo set (not the
+adversarial safety benchmark — see the disclaimer at the top of this README):
 
-- Allergy violation rate (must be 0)
+- Allergy violation rate (release-blocking gate: must be 0 on this demo set)
 - Pantry utilization rate
 - Macro deviation
 - Missing ingredient count
