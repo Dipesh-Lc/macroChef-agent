@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
-from app.services.constraint_engine import validate_recipe
+from app.services.constraint_engine import ALLERGEN_ALIASES, validate_recipe
 
 
 def _profile(**kwargs) -> UserProfile:
@@ -339,3 +339,87 @@ def test_water_chestnut_not_over_blocked_by_tree_nut_additions() -> None:
     result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
 
     assert result.is_valid
+
+
+# --- ALLERGEN_ALIASES composition restructure -------------------------------
+#
+# ALLERGEN_ALIASES used to keep hand-synced duplicate sets (dairy==milk,
+# peanut==peanuts, soy==soya, egg==eggs) and hand-copied composed sets
+# (seafood as a copy of fish+shellfish+crustacean, nuts as a copy of tree
+# nut+peanut). That's exactly the shape of hazard commit 1cba9a9 fixed once
+# for "fish"/Worcestershire sauce and missed for the identical "seafood" gap,
+# because nothing structurally tied the two hand-maintained sets together.
+#
+# The table now composes every public key from private frozenset base sets
+# (_FISH, _CRUSTACEAN, _MOLLUSK, _TREE_NUT, _PEANUT, _DAIRY, _SOY, _EGG,
+# _WHEAT), so a duplicate pair is the *same object* and a composed key is a
+# structural (not copied) union. These tests assert the composition
+# invariants directly -- this is the real regression guard: it fails loudly
+# if a future edit reintroduces a hand-copied, driftable set.
+
+
+def test_allergen_alias_exact_duplicates_are_identical_objects() -> None:
+    # Not just equal -- the *same* frozenset object, so an edit to one can
+    # never leave the other stale.
+    assert ALLERGEN_ALIASES["dairy"] is ALLERGEN_ALIASES["milk"]
+    assert ALLERGEN_ALIASES["peanut"] is ALLERGEN_ALIASES["peanuts"]
+    assert ALLERGEN_ALIASES["soy"] is ALLERGEN_ALIASES["soya"]
+    assert ALLERGEN_ALIASES["egg"] is ALLERGEN_ALIASES["eggs"]
+
+
+def test_allergen_alias_composed_keys_are_structural_supersets() -> None:
+    assert ALLERGEN_ALIASES["seafood"] >= ALLERGEN_ALIASES["fish"]
+    assert ALLERGEN_ALIASES["seafood"] >= ALLERGEN_ALIASES["shellfish"]
+    assert ALLERGEN_ALIASES["seafood"] >= ALLERGEN_ALIASES["crustacean"]
+    assert ALLERGEN_ALIASES["shellfish"] >= ALLERGEN_ALIASES["crustacean"]
+    assert ALLERGEN_ALIASES["nuts"] >= ALLERGEN_ALIASES["tree nut"]
+    assert ALLERGEN_ALIASES["nuts"] >= ALLERGEN_ALIASES["peanut"]
+    assert ALLERGEN_ALIASES["gluten"] >= ALLERGEN_ALIASES["wheat"]
+
+
+def test_seafood_blocks_white_fish_via_explicit_table_entry() -> None:
+    # Must be an explicit member of the resolved set, not an accident of
+    # substring matching ("white fish" happening to contain "fish").
+    assert "white fish" in ALLERGEN_ALIASES["seafood"]
+
+    recipe = _recipe(ingredients=["white fish fillet", "lemon"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["seafood"]))
+
+    assert not result.is_valid
+
+
+def test_crustacean_blocks_ambiguous_shellfish_stock() -> None:
+    # "shellfish stock" is ambiguous -- it may well contain crustaceans.
+    # Allergen ambiguity in this table resolves toward blocking.
+    assert "shellfish" in ALLERGEN_ALIASES["crustacean"]
+
+    recipe = _recipe(ingredients=["shellfish stock", "rice noodles"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["crustacean"]))
+
+    assert not result.is_valid
+
+
+def test_seafood_blocks_crayfish_and_prawn() -> None:
+    # Discovered during the composition restructure: hand-copied "seafood"
+    # was missing "crayfish" and "prawn" even though they were already in
+    # "crustacean" -- a third hand-sync gap beyond the two the restructure
+    # was scoped to fix, caught by the seafood>=crustacean invariant above
+    # and now fixed structurally (seafood is composed from _CRUSTACEAN).
+    crayfish_recipe = _recipe(ingredients=["crayfish", "rice"], allergens=[])
+    prawn_recipe = _recipe(ingredients=["prawn crackers", "rice"], allergens=[])
+
+    assert not validate_recipe(crayfish_recipe, _profile(allergies=["seafood"])).is_valid
+    assert not validate_recipe(prawn_recipe, _profile(allergies=["seafood"])).is_valid
+
+
+def test_nuts_blocks_plural_peanuts() -> None:
+    # Discovered during the composition restructure: hand-copied "nuts" was
+    # missing the plural "peanuts" even though it was already in "peanut" --
+    # caught by the nuts>=peanut invariant above and now fixed structurally
+    # (nuts is composed from _PEANUT, which is shared with "peanut"/"peanuts").
+    assert "peanuts" in ALLERGEN_ALIASES["nuts"]
+
+    recipe = _recipe(ingredients=["mixed peanuts", "raisins"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["nuts"]))
+
+    assert not result.is_valid

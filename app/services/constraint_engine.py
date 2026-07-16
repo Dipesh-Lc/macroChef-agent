@@ -4,8 +4,27 @@ from app.schemas.user import NO_RESTRICTION_DIET_TYPES, UserProfile
 from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
 
 
-ALLERGEN_ALIASES = {
-    "dairy": {
+# --- Base allergen term sets --------------------------------------------
+#
+# These are the single source of truth for each allergen vocabulary. Public
+# ALLERGEN_ALIASES keys below are *composed* from these (frozenset unions),
+# never hand-copied -- so an edit to a base set is automatically reflected
+# in every public key built from it, and two keys that are supposed to be
+# identical (e.g. "dairy"/"milk") are literally the same object, not two
+# hand-synced copies that can silently drift apart.
+#
+# This structure is a direct fix for a demonstrated hazard: commit 1cba9a9
+# fixed a gap in "fish" (missing Worcestershire sauce) but missed the
+# identical gap under "seafood", because nothing structurally tied the two
+# hand-maintained sets together. See ALLERGEN_ALIASES's composition below
+# and the structural invariant tests in test_constraint_engine.py.
+#
+# frozenset (not set) is deliberate: immutability means a later in-place
+# edit (e.g. `ALLERGEN_ALIASES["fish"].add(...)`) can't mutate one base set
+# and silently affect every other key composed from it.
+
+_DAIRY = frozenset(
+    {
         "butter",
         "casein",
         "cheddar",
@@ -25,36 +44,18 @@ ALLERGEN_ALIASES = {
         "ricotta",
         "whey",
         "yogurt",
-    },
-    "milk": {
-        "butter",
-        "casein",
-        "cheddar",
-        "cheese",
-        "cream",
-        "feta",
-        "ghee",
-        "Greek yogurt",
-        "half and half",
-        "half-and-half",
-        "lactose",
-        "mascarpone",
-        "milk",
-        "mozzarella",
-        "paneer",
-        "parmesan",
-        "ricotta",
-        "whey",
-        "yogurt",
-    },
-    # Satay/saté sauce is a peanut-based sauce (ground peanuts, oil, and
-    # aromatics) in its standard Southeast Asian preparations -- by
-    # definition, not a sourced claim. Peanut is a major allergen designated
-    # by FALCPA (21 U.S.C. Sec. 321(qq)) and by EU Regulation 1169/2011,
-    # Annex II, point 5 ("Peanuts") -- those two statute/regulation cites are
-    # verified. "sate"/"saté" are accepted alternate transliterations of the
-    # same dish/sauce.
-    "peanut": {
+    }
+)
+
+# Satay/saté sauce is a peanut-based sauce (ground peanuts, oil, and
+# aromatics) in its standard Southeast Asian preparations -- by
+# definition, not a sourced claim. Peanut is a major allergen designated
+# by FALCPA (21 U.S.C. Sec. 321(qq)) and by EU Regulation 1169/2011,
+# Annex II, point 5 ("Peanuts") -- those two statute/regulation cites are
+# verified. "sate"/"saté" are accepted alternate transliterations of the
+# same dish/sauce.
+_PEANUT = frozenset(
+    {
         "groundnut",
         "peanut",
         "peanut butter",
@@ -64,19 +65,11 @@ ALLERGEN_ALIASES = {
         "satay",
         "satay sauce",
         "saté",
-    },
-    "peanuts": {
-        "groundnut",
-        "peanut",
-        "peanut butter",
-        "peanut oil",
-        "peanuts",
-        "sate",
-        "satay",
-        "satay sauce",
-        "saté",
-    },
-    "tree nut": {
+    }
+)
+
+_TREE_NUT = frozenset(
+    {
         "almond",
         "almonds",
         # Amaretti (Italian almond macaroons), marzipan, frangipane, praline,
@@ -143,41 +136,11 @@ ALLERGEN_ALIASES = {
         # hidden-sources guidance lists praline.
         "praline",
         "walnut",
-    },
-    # "nuts" mirrors both the "tree nut" and "peanut" alias vocabularies
-    # above (see those sets' inline comments for the citation behind each
-    # addition); no new citations are introduced here.
-    "nuts": {
-        "almond",
-        "almonds",
-        "amaretti",
-        "amaretto",
-        "brazil nut",
-        "brazil nuts",
-        "cashew",
-        "frangipane",
-        "gianduja",
-        "groundnut",
-        "hazelnut",
-        "macadamia",
-        "marzipan",
-        "nougat",
-        "peanut",
-        "peanut butter",
-        "peanut oil",
-        "pecan",
-        "pine nut",
-        "pine nuts",
-        "pistachio",
-        "praline",
-        "sate",
-        "satay",
-        "satay sauce",
-        "saté",
-        "walnut",
-    },
-    "gluten": {
-        "barley",
+    }
+)
+
+_WHEAT = frozenset(
+    {
         "biscuit",
         "bread",
         "bulgur",
@@ -192,9 +155,6 @@ ALLERGEN_ALIASES = {
         "lasagna",
         "linguine",
         "macaroni",
-        # "malt" (barley-derived) is gluten but not wheat -- listed here only,
-        # not in the "wheat" set below.
-        "malt",
         "pasta",
         "pastry",
         "phyllo",
@@ -204,55 +164,29 @@ ALLERGEN_ALIASES = {
         # positive rather than a missed detection, consistent with existing
         # "cornflour"/"eggplant" substring trade-offs elsewhere in this file.
         "spaghetti",
-        "rye",
         "seitan",
         "tortilla",
         "wheat",
         "whole wheat pasta",
-    },
-    "wheat": {
-        "biscuit",
-        "bread",
-        "bulgur",
-        "couscous",
-        "cracker",
-        "crouton",
-        "farro",
-        "fettuccine",
-        "filo",
-        "flour",
-        "graham cracker",
-        "lasagna",
-        "linguine",
-        "macaroni",
-        "pasta",
-        "pastry",
-        "phyllo",
-        "semolina",
-        "spaghetti",
-        "seitan",
-        "tortilla",
-        "wheat",
-        "whole wheat pasta",
-    },
-    "soy": {"edamame", "miso", "soy", "soy sauce", "soya", "tamari", "tempeh", "tofu"},
-    "soya": {"edamame", "miso", "soy", "soy sauce", "soya", "tamari", "tempeh", "tofu"},
-    "egg": {"egg", "egg whites", "eggs", "mayonnaise"},
-    "eggs": {"egg", "egg whites", "eggs", "mayonnaise"},
-    "shellfish": {
-        "clam",
-        "crab",
-        "crayfish",
-        "lobster",
-        "mussel",
-        "oyster",
-        "prawn",
-        "scallop",
-        "shellfish",
-        "shrimp",
-    },
-    "crustacean": {"crab", "crayfish", "lobster", "prawn", "shrimp"},
-    "fish": {
+    }
+)
+
+_SOY = frozenset({"edamame", "miso", "soy", "soy sauce", "soya", "tamari", "tempeh", "tofu"})
+
+_EGG = frozenset({"egg", "egg whites", "eggs", "mayonnaise"})
+
+# Crustaceans (crab, lobster, shrimp, ...) and mollusks (clam, mussel,
+# oyster, scallop) are the two biological groupings that make up
+# "shellfish". The bare term "shellfish" itself is deliberately filed under
+# _MOLLUSK (not _CRUSTACEAN): it's an ambiguous umbrella term that could
+# refer to either group, and "crustacean" below explicitly re-adds it (see
+# that composition) so a crustacean-only allergy still catches an
+# ambiguous "shellfish stock" ingredient rather than risk missing it.
+_CRUSTACEAN = frozenset({"crab", "crayfish", "lobster", "prawn", "shrimp"})
+_MOLLUSK = frozenset({"clam", "mussel", "oyster", "scallop", "shellfish"})
+
+_FISH = frozenset(
+    {
         "anchovy",
         "cod",
         "fish",
@@ -279,37 +213,46 @@ ALLERGEN_ALIASES = {
         # entry in the allergen table and does not change that path.
         "worcestershire",
         "worcestershire sauce",
-    },
-    "seafood": {
-        "anchovy",
-        "clam",
-        "cod",
-        "flounder",
-        "haddock",
-        "halibut",
-        "snapper",
-        "sole",
-        "trout",
-        "crab",
-        "fish",
-        "lobster",
-        "mussel",
-        "oyster",
-        "salmon",
-        "sardine",
-        "scallop",
-        "shellfish",
-        "shrimp",
-        "tuna",
-        # Worcestershire sauce is fish-derived (fermented anchovies) -- see
-        # the "fish" set's citation above for the FALCPA/EU/FARE basis.
-        # "seafood" is a superset covering fish + shellfish, so it needs the
-        # same entry to avoid a gap where "fish" blocks it but "seafood"
-        # does not.
-        "worcestershire",
-        "worcestershire sauce",
-    },
-    "sesame": {"sesame", "sesame oil", "sesame seeds", "tahini"},
+    }
+)
+
+ALLERGEN_ALIASES = {
+    "dairy": _DAIRY,
+    "milk": _DAIRY,
+    "peanut": _PEANUT,
+    "peanuts": _PEANUT,
+    "tree nut": _TREE_NUT,
+    # "nuts" is the union of the tree-nut and peanut vocabularies -- composed
+    # here, not hand-copied, so it can never silently drift from either
+    # source set (see those sets' inline comments for the citation behind
+    # each addition; no new citations are introduced by this union).
+    "nuts": _TREE_NUT | _PEANUT,
+    "wheat": _WHEAT,
+    # "malt" (barley-derived) and "rye" are gluten but not wheat -- added
+    # only at this composition, not in _WHEAT.
+    "gluten": _WHEAT | {"barley", "malt", "rye"},
+    "soy": _SOY,
+    "soya": _SOY,
+    "egg": _EGG,
+    "eggs": _EGG,
+    # "shellfish" = every crustacean + every mollusk (including the bare
+    # "shellfish" term itself, filed under _MOLLUSK -- see that set's
+    # comment).
+    "shellfish": _CRUSTACEAN | _MOLLUSK,
+    # "crustacean" explicitly adds the ambiguous bare term "shellfish": a
+    # crustacean allergy must still catch an ingredient like "shellfish
+    # stock", which may well contain crustaceans, rather than risk a false
+    # negative on ambiguous wording (allergen ambiguity resolves toward
+    # blocking throughout this table -- see the nougat/amaretto notes above).
+    "crustacean": _CRUSTACEAN | {"shellfish"},
+    "fish": _FISH,
+    # "seafood" is the union of fish + crustaceans + mollusks -- composed
+    # here so it can never silently miss a term present in any of those
+    # three sets (that composition is what makes it a structural superset,
+    # verified by the invariant tests in test_constraint_engine.py, rather
+    # than a hand-copied list of the other three).
+    "seafood": _FISH | _CRUSTACEAN | _MOLLUSK,
+    "sesame": frozenset({"sesame", "sesame oil", "sesame seeds", "tahini"}),
 }
 
 # Meat/poultry (and their processed/derived forms) aren't in ALLERGEN_ALIASES
@@ -373,7 +316,7 @@ DIET_TYPE_EXCLUDED_TERMS = {
 }
 
 
-def _normalized_terms(values: list[str] | set[str]) -> set[str]:
+def _normalized_terms(values: list[str] | set[str] | frozenset[str]) -> set[str]:
     terms: set[str] = set()
     for value in values:
         normalized = normalize_ingredient(value)
