@@ -3,10 +3,11 @@ from dataclasses import dataclass, field
 from pydantic import ValidationError
 
 from app.schemas.library import RecipeDiscoveryRequest
+from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.constraint_engine import contains_allergen
 from app.services.recipe_image_service import placeholder_image_url
-from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
+from app.utils.ingredient_normalizer import ingredient_matches
 
 
 @dataclass
@@ -108,7 +109,7 @@ class RecipeValidationService:
         if (
             request
             and request.diet_type
-            and self._violates_requested_diet(candidate, request.diet_type)
+            and self._violates_requested_diet(recipe, candidate, request.diet_type)
         ):
             errors.append(f"Does not satisfy requested diet type: {request.diet_type}")
         return errors, warnings
@@ -120,14 +121,28 @@ class RecipeValidationService:
             for ingredient in ingredients
         )
 
-    def _violates_requested_diet(self, candidate: RecipeCandidate, diet_type: str) -> bool:
+    def _violates_requested_diet(
+        self, recipe: Recipe, candidate: RecipeCandidate, diet_type: str
+    ) -> bool:
         requested = diet_type.lower()
-        tags = {tag.lower() for tag in candidate.diet_tags}
-        allergens = {normalize_ingredient(item).lower() for item in candidate.allergens}
+        # dairy-free/gluten-free are routed through contains_allergen -- the
+        # same deterministic substring-matching safety authority
+        # constraint_engine.violates_diet_type itself uses -- rather than a
+        # second, weaker opinion built from the candidate's stored
+        # `allergens` labels. Those labels come from derive_allergen_labels'
+        # exact-set matching, which misses compound ingredient names (e.g.
+        # "buttermilk", "all-purpose flour"); relying on them here was the
+        # exact leak constraint_engine's diet-leak fix (commit 6c89292)
+        # already closed for its own diet check. See
+        # tests/test_recipe_validation_service.py's leak-closed regression
+        # tests for the real corpus recipes that demonstrated this gap.
         if requested == "dairy-free":
-            return "dairy" in allergens
+            return contains_allergen(recipe, ["dairy"])
         if requested == "gluten-free":
-            return "gluten" in allergens
+            return contains_allergen(recipe, ["gluten"])
+        # vegetarian/vegan/high-protein check candidate.diet_tags -- a
+        # separate mechanism, out of scope for this fix.
+        tags = {tag.lower() for tag in candidate.diet_tags}
         if requested in {"vegetarian", "vegan", "high-protein"}:
             return requested not in tags
         return False
