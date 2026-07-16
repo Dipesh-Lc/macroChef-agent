@@ -12,6 +12,7 @@ if str(FRONTEND_DIR) not in sys.path:
 from components.library_builder_form import render_library_builder_form  # noqa: E402
 from components.recipe_candidate_cards import render_recipe_candidate_cards  # noqa: E402
 from components.saved_recipe_library import render_saved_recipe_library  # noqa: E402
+from session_client import request_with_session  # noqa: E402
 
 API_URL = os.getenv("MACROCHEF_API_URL", "http://localhost:8000")
 
@@ -41,7 +42,9 @@ form_payload = render_library_builder_form()
 
 if st.button("Discover recipes", type="primary", width="stretch"):
     try:
-        response = requests.post(f"{API_URL}/library/discover", json=form_payload, timeout=90)
+        response = request_with_session(
+            "POST", f"{API_URL}/library/discover", json=form_payload, timeout=90
+        )
         response.raise_for_status()
         st.session_state["library_discovery_response"] = response.json()
     except requests.RequestException as exc:
@@ -59,12 +62,11 @@ if discovery_response:
     selected = render_recipe_candidate_cards(discovery_response.get("candidates", []))
 
     if st.button("Save selected recipes", width="stretch", disabled=not selected):
-        payload = {
-            "user_id": form_payload["user_id"],
-            "selected_candidates": selected,
-        }
+        payload = {"selected_candidates": selected}
         try:
-            response = requests.post(f"{API_URL}/library/save", json=payload, timeout=90)
+            response = request_with_session(
+                "POST", f"{API_URL}/library/save", json=payload, timeout=90
+            )
             response.raise_for_status()
             result = response.json()
             st.session_state["library_save_response"] = result
@@ -87,4 +89,4 @@ if discovery_response:
             for step in save_response.get("debug_trace", []):
                 st.write(step)
 
-render_saved_recipe_library(API_URL, form_payload["user_id"])
+render_saved_recipe_library(API_URL)

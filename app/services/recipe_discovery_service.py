@@ -428,11 +428,11 @@ class RecipeDiscoveryService:
         self.import_service = import_service or RecipeImportService()
         self.warnings: list[str] = []
 
-    def discover(self, request: RecipeDiscoveryRequest) -> list[RecipeCandidate]:
+    def discover(self, request: RecipeDiscoveryRequest, user_id: str) -> list[RecipeCandidate]:
         if request.source_mode == "llm":
-            return self._llm_or_mock(request)
+            return self._llm_or_mock(request, user_id)
         if request.source_mode == "external":
-            return self._external_or_llm_or_mock(request)
+            return self._external_or_llm_or_mock(request, user_id)
         if request.source_mode == "hybrid":
             candidates: list[RecipeCandidate] = []
             try:
@@ -444,11 +444,13 @@ class RecipeDiscoveryService:
             except Exception as exc:
                 self.warnings.append(f"LLM generation failed in hybrid mode. Details: {exc}")
             if len(candidates) < request.count:
-                candidates.extend(self._mock_candidates(request))
-            return self._ensure_candidates(request, candidates)[: request.count]
-        return self._ensure_candidates(request, self._mock_candidates(request))
+                candidates.extend(self._mock_candidates(request, user_id))
+            return self._ensure_candidates(request, candidates, user_id)[: request.count]
+        return self._ensure_candidates(request, self._mock_candidates(request, user_id), user_id)
 
-    def _external_or_llm_or_mock(self, request: RecipeDiscoveryRequest) -> list[RecipeCandidate]:
+    def _external_or_llm_or_mock(
+        self, request: RecipeDiscoveryRequest, user_id: str
+    ) -> list[RecipeCandidate]:
         try:
             candidates = self.import_service.import_candidates(request)
             if candidates:
@@ -456,9 +458,11 @@ class RecipeDiscoveryService:
             self.warnings.append("External import returned no candidates; trying LLM fallback.")
         except Exception as exc:
             self.warnings.append(f"External import failed; trying LLM fallback. Details: {exc}")
-        return self._llm_or_mock(request)
+        return self._llm_or_mock(request, user_id)
 
-    def _llm_or_mock(self, request: RecipeDiscoveryRequest) -> list[RecipeCandidate]:
+    def _llm_or_mock(
+        self, request: RecipeDiscoveryRequest, user_id: str
+    ) -> list[RecipeCandidate]:
         try:
             candidates = self.generation_service.generate(request)
             if candidates:
@@ -466,12 +470,13 @@ class RecipeDiscoveryService:
             self.warnings.append("LLM generation returned no candidates; mock fallback was used.")
         except Exception as exc:
             self.warnings.append(f"LLM generation failed; mock fallback was used. Details: {exc}")
-        return self._ensure_candidates(request, self._mock_candidates(request))
+        return self._ensure_candidates(request, self._mock_candidates(request, user_id), user_id)
 
     def _ensure_candidates(
         self,
         request: RecipeDiscoveryRequest,
         candidates: list[RecipeCandidate],
+        user_id: str,
     ) -> list[RecipeCandidate]:
         if candidates:
             return candidates[: request.count]
@@ -483,14 +488,16 @@ class RecipeDiscoveryService:
                 "excluded_ingredients": [],
             }
         )
-        relaxed = self._mock_candidates(relaxed_request)
+        relaxed = self._mock_candidates(relaxed_request, user_id)
         if relaxed:
             self.warnings.append(
                 "No recipes matched all discovery filters; returned relaxed mock candidates."
             )
         return relaxed[: request.count]
 
-    def _mock_candidates(self, request: RecipeDiscoveryRequest) -> list[RecipeCandidate]:
+    def _mock_candidates(
+        self, request: RecipeDiscoveryRequest, user_id: str
+    ) -> list[RecipeCandidate]:
         cuisines = request.cuisines or list(MOCK_LIBRARY)
         template_pairs = [
             (cuisine.title(), template)
@@ -505,7 +512,9 @@ class RecipeDiscoveryService:
             cycle(template_pairs),
             start=1,
         ):
-            candidate = self._candidate_from_template(cuisine.title(), template, request, index)
+            candidate = self._candidate_from_template(
+                cuisine.title(), template, request, index, user_id
+            )
             if self._allowed(candidate, request):
                 candidates.append(candidate)
             if len(candidates) >= request.count or index > request.count * 10:
@@ -518,6 +527,7 @@ class RecipeDiscoveryService:
         template: MockRecipeTemplate,
         request: RecipeDiscoveryRequest,
         index: int,
+        user_id: str,
     ) -> RecipeCandidate:
         title = template.title
         if index > len(MOCK_LIBRARY.get(cuisine, [])):
@@ -530,7 +540,7 @@ class RecipeDiscoveryService:
         diet_tags = sorted({*template.diet_tags})
         candidate_id = uuid5(
             NAMESPACE_URL,
-            f"macrochef-library:{request.user_id}:{cuisine}:{title}:{index}",
+            f"macrochef-library:{user_id}:{cuisine}:{title}:{index}",
         ).hex[:16]
         return RecipeCandidate(
             candidate_id=f"mock_{candidate_id}",

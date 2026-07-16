@@ -23,11 +23,19 @@ class RecipeLibraryRepository:
                 update={"owner_user_id": user_id, "is_user_saved": True, "is_active": True}
             )
             payload = recipe.model_dump_json()
+            # Scoped by BOTH user_id and recipe_id -- looking up by recipe_id
+            # alone (the previous behavior) could match another user's row
+            # and reassign its ownership (a live cross-user data leak; see
+            # __table_args__ on UserSavedRecipe for the matching DB-level
+            # fix). A recipe_id collision between two different users is now
+            # simply two separate rows, one per owner.
             existing = db.scalar(
-                select(UserSavedRecipe).where(UserSavedRecipe.recipe_id == recipe.recipe_id)
+                select(UserSavedRecipe).where(
+                    UserSavedRecipe.user_id == user_id,
+                    UserSavedRecipe.recipe_id == recipe.recipe_id,
+                )
             )
             if existing:
-                existing.user_id = user_id
                 existing.title = recipe.title
                 existing.cuisine = recipe.cuisine
                 existing.meal_type = recipe.meal_type

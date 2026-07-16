@@ -11,9 +11,6 @@ def render_library_builder_form() -> dict:
         unsafe_allow_html=True,
     )
 
-    user_id = st.text_input("User ID", value=st.session_state.get("library_user_id", "demo_user"))
-    st.session_state["library_user_id"] = user_id
-
     cuisines = st.multiselect(
         "Cuisines",
         ["Italian", "Indian", "Japanese", "Chinese", "Mexican", "Mediterranean", "American"],
@@ -47,7 +44,6 @@ def render_library_builder_form() -> dict:
     home_cookable = st.checkbox("Prioritize home-cookable recipes", value=True)
 
     return {
-        "user_id": user_id,
         "cuisines": cuisines,
         "meal_type": None if meal_type == "Any" else meal_type,
         "diet_type": None if diet_type == "Any" else diet_type,

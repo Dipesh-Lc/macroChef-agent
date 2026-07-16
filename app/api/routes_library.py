@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.data.recipe_library_repository import RecipeLibraryRepository
+from app.dependencies import get_session_user
 from app.graph.library_builder import run_library_discovery_graph, run_library_save_graph
 from app.schemas.library import (
     DeleteRecipeResponse,
@@ -17,13 +18,19 @@ router = APIRouter(prefix="/library", tags=["recipe-library"])
 
 
 @router.post("/discover", response_model=RecipeDiscoveryResponse)
-def discover_recipes(request: RecipeDiscoveryRequest) -> RecipeDiscoveryResponse:
-    return run_library_discovery_graph(request)
+def discover_recipes(
+    request: RecipeDiscoveryRequest,
+    user_id: str = Depends(get_session_user),
+) -> RecipeDiscoveryResponse:
+    return run_library_discovery_graph(request, user_id)
 
 
 @router.post("/save", response_model=SaveRecipeCandidatesResponse)
-def save_recipe_candidates(request: SaveRecipeCandidatesRequest) -> SaveRecipeCandidatesResponse:
-    return run_library_save_graph(request)
+def save_recipe_candidates(
+    request: SaveRecipeCandidatesRequest,
+    user_id: str = Depends(get_session_user),
+) -> SaveRecipeCandidatesResponse:
+    return run_library_save_graph(request, user_id)
 
 
 @router.post("/reindex", response_model=ReindexLibraryResponse)
@@ -44,14 +51,19 @@ def reindex_recipe_library() -> ReindexLibraryResponse:
     return ReindexLibraryResponse(indexed_count=indexed_count, status="ok")
 
 
-@router.get("/{user_id}", response_model=UserRecipeLibraryResponse)
-def list_user_recipe_library(user_id: str) -> UserRecipeLibraryResponse:
+@router.get("", response_model=UserRecipeLibraryResponse)
+def list_user_recipe_library(
+    user_id: str = Depends(get_session_user),
+) -> UserRecipeLibraryResponse:
     recipes = RecipeLibraryRepository().list_user_recipes(user_id)
     return UserRecipeLibraryResponse(recipes=recipes)
 
 
-@router.delete("/{user_id}/{recipe_id}", response_model=DeleteRecipeResponse)
-def delete_user_recipe(user_id: str, recipe_id: str) -> DeleteRecipeResponse:
+@router.delete("/{recipe_id}", response_model=DeleteRecipeResponse)
+def delete_user_recipe(
+    recipe_id: str,
+    user_id: str = Depends(get_session_user),
+) -> DeleteRecipeResponse:
     deleted = RecipeLibraryRepository().deactivate_recipe(user_id, recipe_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Saved recipe not found")

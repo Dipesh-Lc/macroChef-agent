@@ -1,15 +1,17 @@
 import requests
 import streamlit as st
 
+from session_client import request_with_session
 
-def render_saved_recipe_library(api_url: str, user_id: str) -> None:
+
+def render_saved_recipe_library(api_url: str) -> None:
     st.markdown('<div class="results-title">My recipe library</div>', unsafe_allow_html=True)
     if st.button("Refresh saved recipes", width="stretch"):
         st.session_state.pop("saved_library_response", None)
 
     if "saved_library_response" not in st.session_state:
         try:
-            response = requests.get(f"{api_url}/library/{user_id}", timeout=30)
+            response = request_with_session("GET", f"{api_url}/library", timeout=30)
             response.raise_for_status()
             st.session_state["saved_library_response"] = response.json()
         except requests.RequestException as exc:
@@ -34,8 +36,9 @@ def render_saved_recipe_library(api_url: str, user_id: str) -> None:
                 st.write(recipe.get("description") or "")
             if cols[1].button("Delete", key=f"delete_{recipe['recipe_id']}", width="stretch"):
                 try:
-                    response = requests.delete(
-                        f"{api_url}/library/{user_id}/{recipe['recipe_id']}",
+                    response = request_with_session(
+                        "DELETE",
+                        f"{api_url}/library/{recipe['recipe_id']}",
                         timeout=30,
                     )
                     response.raise_for_status()

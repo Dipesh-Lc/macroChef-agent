@@ -7,7 +7,6 @@ from app.services.recipe_generation_service import RecipeGenerationService
 
 def test_mock_discovery_returns_requested_count() -> None:
     request = RecipeDiscoveryRequest(
-        user_id="library_test_user",
         cuisines=["Japanese", "Indian"],
         meal_type="dinner",
         diet_type="high-protein",
@@ -16,7 +15,7 @@ def test_mock_discovery_returns_requested_count() -> None:
         allergies=["peanut"],
     )
 
-    candidates = RecipeDiscoveryService().discover(request)
+    candidates = RecipeDiscoveryService().discover(request, "library_test_user")
 
     assert len(candidates) == 10
     assert all(candidate.title for candidate in candidates)
@@ -26,7 +25,6 @@ def test_mock_discovery_returns_requested_count() -> None:
 
 def test_library_discovery_graph_multiple_cuisines_and_constraints() -> None:
     request = RecipeDiscoveryRequest(
-        user_id="library_graph_user",
         cuisines=["Japanese", "Indian"],
         meal_type="dinner",
         diet_type="high-protein",
@@ -37,7 +35,7 @@ def test_library_discovery_graph_multiple_cuisines_and_constraints() -> None:
         excluded_ingredients=["mushroom"],
     )
 
-    response = run_library_discovery_graph(request)
+    response = run_library_discovery_graph(request, "library_graph_user")
 
     assert response.candidates
     assert len(response.candidates) <= 8
@@ -58,7 +56,6 @@ def test_llm_discovery_falls_back_to_mock_when_generation_fails() -> None:
             raise ValueError("model returned prose instead of JSON")
 
     request = RecipeDiscoveryRequest(
-        user_id="fallback_user",
         cuisines=["Japanese"],
         meal_type="dinner",
         count=3,
@@ -66,7 +63,7 @@ def test_llm_discovery_falls_back_to_mock_when_generation_fails() -> None:
     )
     service = RecipeDiscoveryService(generation_service=BrokenGenerationService())
 
-    candidates = service.discover(request)
+    candidates = service.discover(request, "fallback_user")
 
     assert len(candidates) == 3
     assert service.warnings
@@ -77,13 +74,12 @@ def test_external_discovery_uses_llm_before_mock_when_import_is_empty() -> None:
     class FakeGenerationService:
         def generate(self, request):
             return [
-                RecipeDiscoveryService()._mock_candidates(request)[0].model_copy(
-                    update={"source_type": "ai_generated"}
-                )
+                RecipeDiscoveryService()
+                ._mock_candidates(request, "external_user")[0]
+                .model_copy(update={"source_type": "ai_generated"})
             ]
 
     request = RecipeDiscoveryRequest(
-        user_id="external_user",
         cuisines=["Mexican"],
         meal_type="dinner",
         count=1,
@@ -91,7 +87,7 @@ def test_external_discovery_uses_llm_before_mock_when_import_is_empty() -> None:
     )
     service = RecipeDiscoveryService(generation_service=FakeGenerationService())
 
-    candidates = service.discover(request)
+    candidates = service.discover(request, "external_user")
 
     assert len(candidates) == 1
     assert service.warnings
@@ -104,7 +100,6 @@ def test_external_discovery_falls_back_to_mock_after_llm_failure() -> None:
             raise ValueError("llm unavailable")
 
     request = RecipeDiscoveryRequest(
-        user_id="external_mock_user",
         cuisines=["Mexican"],
         meal_type="dinner",
         count=4,
@@ -112,7 +107,7 @@ def test_external_discovery_falls_back_to_mock_after_llm_failure() -> None:
     )
     service = RecipeDiscoveryService(generation_service=BrokenGenerationService())
 
-    candidates = service.discover(request)
+    candidates = service.discover(request, "external_mock_user")
 
     assert len(candidates) == 4
     assert any("trying LLM fallback" in warning for warning in service.warnings)
