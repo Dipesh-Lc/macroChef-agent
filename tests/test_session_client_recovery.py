@@ -158,7 +158,22 @@ class TestExpiredCookieConvergesToFreshSession:
 class TestInvalidCookieConvergesToFreshSession:
     def test_get_session_token_replaces_tampered_cookie(self, monkeypatch):
         valid = _mint_token()
-        tampered = valid[:-1] + ("A" if valid[-1] != "A" else "B")
+        # Corrupt a character in the middle of the signature segment (the
+        # part after the last '.'), not the last character. The signature is
+        # urlsafe-base64 without padding, so the final character carries
+        # slack bits the decoder ignores -- flipping it can decode to the
+        # SAME signature bytes for some tokens, leaving the "tampered" token
+        # still valid and making this test flaky. A middle-of-signature flip
+        # always changes the decoded bytes.
+        head, sep, signature = valid.rpartition(".")
+        mid = len(signature) // 2
+        flipped_char = "A" if signature[mid] != "A" else "B"
+        tampered_signature = signature[:mid] + flipped_char + signature[mid + 1 :]
+        tampered = f"{head}{sep}{tampered_signature}"
+        # Guard the precondition: if this ever stops being true, the test
+        # should fail loudly as a broken precondition, not flake on the
+        # assertions below.
+        assert session_client._token_is_valid(tampered) is False
         monkeypatch.setattr(session_client, "_existing_cookie_token", lambda: tampered)
 
         token = session_client.get_session_token()

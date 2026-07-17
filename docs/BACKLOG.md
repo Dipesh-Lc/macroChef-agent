@@ -104,8 +104,13 @@ were pre-registered before anyone saw a result.
 - Cost sheet -> human gate. CI gate on the MacroChef arm only.
 - **Pre-registered and not to be renegotiated after seeing a score**:
   release-blocking violation rate covers **`inherent` cases only**;
-  `precautionary` (49 cases) is a separate non-blocking number. Current
-  split: 262 inherent / 49 precautionary / 60 safe_control.
+  `precautionary` (46 cases) is a separate non-blocking number. Current
+  split: 259 inherent / 46 precautionary / 66 non-violation (60
+  safe_control + 6 morphology no_claim). [Corrected 2026-07-17: the
+  previous 262/49/60 figures were a transcription error against the
+  immutable frozen case files (verified by direct count of
+  `app/evaluation/benchmark/cases/*.jsonl`); runner denominators were
+  always 259/46/60 -- see any benchmark report. Not a renegotiation.]
 
 ## Corpus / nutrition
 
