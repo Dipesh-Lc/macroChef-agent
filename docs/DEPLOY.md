@@ -102,11 +102,15 @@ from the production single-container topology — not an inconsistency to "fix".
 
 | Secret | Status | Used for |
 |---|---|---|
-| `AZURE_CREDENTIALS` | already set | SP JSON for `azure/login`; needs Contributor on the subscription |
-| `DATABASE_URL` | already set | Neon Postgres connection string -> ACA secret `database-url` |
-| `GEMINI_API_KEY` | being added | LLM phrasing/explanation only, never safety or nutrition -> ACA secret `gemini-api-key` |
-| `SESSION_SECRET` | being added | signs/verifies the anonymous session token (`app/dependencies.py`) -> ACA secret `session-secret`; falls back to an insecure dev default with a logged warning if unset — never leave unset in production |
-| `POSTHOG_API_KEY` | being added | analytics; absent = silent no-op -> ACA secret `posthog-api-key` |
+| `AZURE_CREDENTIALS` | set (confirmed 2026-07-17) | SP JSON for `azure/login`; needs Contributor on the subscription |
+| `DATABASE_URL` | set (confirmed 2026-07-17) | Neon Postgres connection string -> ACA secret `database-url` |
+| `GEMINI_API_KEY` | set (confirmed 2026-07-17) | LLM phrasing/explanation only, never safety or nutrition -> ACA secret `gemini-api-key` |
+| `SESSION_SECRET` | set (confirmed 2026-07-17) | signs/verifies the anonymous session token (`app/dependencies.py`) -> ACA secret `session-secret`; falls back to an insecure dev default with a logged warning if unset — never leave unset in production |
+| `POSTHOG_API_KEY` | set (confirmed 2026-07-17) | analytics; absent = silent no-op -> ACA secret `posthog-api-key` |
+
+(Also confirmed present in GitHub repo secrets 2026-07-17: `FDC_API_KEY`
+and `HUGGING_FACE_TOKEN` — not consumed by the deploy workflow today;
+the HF token is for the Batch 2 dataset publication human gate.)
 
 ## Resource naming (in the workflow's `env:` block — change there, not here)
 
