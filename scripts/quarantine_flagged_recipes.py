@@ -1,14 +1,29 @@
 """One-time (re-runnable/idempotent) corpus cleanup: remove recipes flagged
-by `audit_title_ingredient_integrity.py` from `imported_recipes.jsonl` and
-move them, with their full data and the reason, into a quarantine sidecar.
+by an integrity audit from `imported_recipes.jsonl` and move them, with
+their full data and the reason, into a quarantine sidecar.
+
+Two checks are available via `--check {title,instructions}` (default
+`title`, unchanged from before this flag existed):
+  - `title` (`audit_title_ingredient_integrity` /
+    `title_ingredient_integrity`): does the recipe's TITLE name an allergen
+    absent from its own ingredients/allergens?
+  - `instructions` (`audit_instructions_integrity` /
+    `instructions_ingredient_integrity`): does the recipe's INSTRUCTIONS
+    text name a Tier A/B safety-relevant food (allergen category, animal
+    flesh, or undisclosed stock -- see `docs/instructions_integrity_spec.md`)
+    absent from its own ingredients/allergens? Tier C (report-only)
+    mismatches from that check are never used to select rows here -- see
+    that module's `tier_ab_mismatches`.
+Both checks share the exact same merge-by-id/first-decision-wins/
+atomic-write path below, untouched by which check produced the mismatches.
 
 Why quarantine and not repair: a flagged recipe's ingredient list is
-provably incomplete (its own title names a food that appears nowhere in the
-ingredients or the derived `allergens` field) -- so the row is
-UNTRUSTWORTHY, not merely mislabeled. We cannot know what else its
-ingredient list is missing. Enriching it from the instructions text would
-be a guess about a safety-critical field, which this project does not do
-(the LLM never enforces allergies or invents missing ingredient facts).
+provably incomplete (its own title or its own instructions names a food
+that appears nowhere in the ingredients or the derived `allergens` field)
+-- so the row is UNTRUSTWORTHY, not merely mislabeled. We cannot know what
+else its ingredient list is missing. Enriching it from the instructions text
+would be a guess about a safety-critical field, which this project does not
+do (the LLM never enforces allergies or invents missing ingredient facts).
 Dropping is the only sound response; quarantining (rather than a silent
 delete) preserves the row for provenance/audit per this project's
 never-delete-safety-relevant-data rule.
@@ -49,11 +64,11 @@ Manual mode -- quarantining specific recipe ids by explicit id, bypassing the
     python scripts/quarantine_flagged_recipes.py \\
         --recipe-ids imp_78c1d567c07b545a --reason "..."
 
-This exists for cases the audit's hand-authored TITLE_ALLERGEN_CATEGORIES
-vocabulary cannot see (e.g. a title word like "beef" or "fish" that is a
-MEAT_ALIASES/species word, not in that vocabulary) but which is proven
-corrupt by other means -- e.g. adjudication of a benchmark case against the
-row's own instructions column. `--recipe-ids` accepts one or more ids;
+This exists for cases neither audit's hand-authored vocabulary can see (e.g.
+a title word like "beef" or "fish" that is a MEAT_ALIASES/species word, not
+in TITLE_ALLERGEN_CATEGORIES) but which is proven corrupt by other means --
+e.g. adjudication of a benchmark case against the row's own instructions
+column. `--recipe-ids` accepts one or more ids;
 `--reason` is a single free-text string applied to all ids given in that
 invocation (run the command once per id if each needs a distinct citation).
 It reuses the exact same merge-by-id / first-decision-wins / atomic-write
@@ -71,19 +86,68 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.schemas.recipe import Recipe  # noqa: E402
-from app.services.corpus_import.title_ingredient_integrity import (  # noqa: E402
-    Mismatch,
-    build_quarantine_record,
-)
+from app.services.corpus_import import instructions_ingredient_integrity  # noqa: E402
+from app.services.corpus_import import title_ingredient_integrity  # noqa: E402
+from scripts import audit_instructions_integrity  # noqa: E402
 from scripts.audit_title_ingredient_integrity import DEFAULT_CORPUS_PATH, _load_corpus, audit  # noqa: E402
 
 DEFAULT_QUARANTINE_PATH = DEFAULT_CORPUS_PATH.parent / "quarantined_recipes.jsonl"
+
+
+@dataclass
+class _CheckAdapter:
+    """Uniform interface over the two available checks so `main()` below
+    doesn't need to branch on `--check` beyond selecting the adapter once.
+    `mismatches_by_id` is deliberately the ONLY tier-aware step: for the
+    `instructions` check it must return Tier A/B mismatches ONLY (Tier C is
+    report-only and must never select a row for quarantine here) -- see
+    `instructions_ingredient_integrity.tier_ab_mismatches`.
+    """
+
+    name: str
+    mismatches_by_id: Callable[[list[Recipe]], dict[str, list]]
+    build_quarantine_record: Callable[[Recipe, list], dict]
+
+
+def _title_mismatches_by_id(corpus: list[Recipe]) -> dict[str, list]:
+    result = audit(corpus)
+    mismatches_by_id: dict[str, list] = {}
+    for mismatch in result.mismatches:
+        mismatches_by_id.setdefault(mismatch.recipe_id, []).append(mismatch)
+    return mismatches_by_id
+
+
+def _instructions_mismatches_by_id(corpus: list[Recipe]) -> dict[str, list]:
+    result = audit_instructions_integrity.audit(corpus)
+    mismatches_by_id: dict[str, list] = {}
+    # Tier A/B ONLY -- Tier C mismatches are report-only and must never
+    # cause a row to be selected for quarantine here (spec Sec. 3's
+    # decision rule).
+    for mismatch in result.quarantine_mismatches():
+        mismatches_by_id.setdefault(mismatch.recipe_id, []).append(mismatch)
+    return mismatches_by_id
+
+
+_CHECKS: dict[str, _CheckAdapter] = {
+    "title": _CheckAdapter(
+        name="title",
+        mismatches_by_id=_title_mismatches_by_id,
+        build_quarantine_record=title_ingredient_integrity.build_quarantine_record,
+    ),
+    "instructions": _CheckAdapter(
+        name="instructions",
+        mismatches_by_id=_instructions_mismatches_by_id,
+        build_quarantine_record=instructions_ingredient_integrity.build_quarantine_record,
+    ),
+}
 
 
 def _write_corpus(path: Path, recipes: list[Recipe]) -> None:
@@ -221,12 +285,23 @@ def main() -> int:
         help="Report what would be quarantined without writing either file.",
     )
     parser.add_argument(
+        "--check",
+        choices=sorted(_CHECKS),
+        default="title",
+        help=(
+            "Which integrity audit to scan with: 'title' (default, unchanged) or "
+            "'instructions' (docs/instructions_integrity_spec.md; Tier A/B mismatches only -- "
+            "Tier C report-only findings are never used to select a row here). Ignored in "
+            "--recipe-ids manual mode, which bypasses both audit scans entirely."
+        ),
+    )
+    parser.add_argument(
         "--recipe-ids",
         nargs="+",
         default=None,
         help=(
             "Manual mode: quarantine these exact recipe id(s) directly, bypassing the "
-            "title_ingredient_integrity audit scan. Requires --reason."
+            "audit scan selected by --check. Requires --reason."
         ),
     )
     parser.add_argument(
@@ -246,17 +321,15 @@ def main() -> int:
             corpus_path, quarantine_path, args.recipe_ids, args.reason, dry_run=args.dry_run
         )
 
+    check = _CHECKS[args.check]
     corpus = _load_corpus(corpus_path)
-    result = audit(corpus)
-
-    mismatches_by_id: dict[str, list[Mismatch]] = {}
-    for mismatch in result.mismatches:
-        mismatches_by_id.setdefault(mismatch.recipe_id, []).append(mismatch)
+    mismatches_by_id = check.mismatches_by_id(corpus)
 
     kept = [recipe for recipe in corpus if recipe.recipe_id not in mismatches_by_id]
     quarantined = [recipe for recipe in corpus if recipe.recipe_id in mismatches_by_id]
 
     print(f"Loaded {len(corpus)} recipes from {corpus_path}")
+    print(f"Check: {check.name}")
     print(f"Flagged for quarantine: {len(quarantined)} ({len(quarantined) / len(corpus):.2%})")
     print(f"Remaining after quarantine: {len(kept)}")
 
@@ -265,7 +338,7 @@ def main() -> int:
         return 0
 
     quarantine_records = [
-        build_quarantine_record(recipe, mismatches_by_id[recipe.recipe_id]) for recipe in quarantined
+        check.build_quarantine_record(recipe, mismatches_by_id[recipe.recipe_id]) for recipe in quarantined
     ]
 
     existing_quarantine = _load_existing_quarantine(quarantine_path)

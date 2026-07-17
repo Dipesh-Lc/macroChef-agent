@@ -23,6 +23,7 @@ from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.services.corpus_import.title_ingredient_integrity import Mismatch, build_quarantine_record
 from scripts.quarantine_flagged_recipes import (
+    _CHECKS,
     _load_existing_quarantine,
     _merge_quarantine_records,
     _write_quarantine_atomic,
@@ -217,3 +218,146 @@ def test_write_quarantine_atomic_leaves_no_temp_file_on_success(tmp_path):
     leftover_temp_files = [p for p in tmp_path.iterdir() if p.name.startswith(".quarantined_recipes.jsonl.")]
     assert leftover_temp_files == []
     assert quarantine_path.exists()
+
+
+# --- --check {title,instructions} extension ---------------------------------
+
+
+def _instructions_flagged_recipe(recipe_id: str) -> Recipe:
+    """A recipe whose instructions name a Tier A hazard (meat: "beef") that
+    is absent from both its ingredients and its allergens field -- flagged
+    by the instructions check but NOT the title check (the title has no
+    allergen/meat word at all)."""
+    return Recipe(
+        recipe_id=recipe_id,
+        title="Weeknight Stir-Fry",
+        ingredients=[Ingredient(name="broccoli", amount=1, unit=None)],
+        instructions=["Slice the beef thinly.", "Stir-fry with broccoli."],
+        allergens=[],
+    )
+
+
+def _tier_c_only_recipe(recipe_id: str) -> Recipe:
+    """A recipe with ONLY a Tier C (report-only) instructions mismatch --
+    must NEVER be selected for quarantine by --check instructions."""
+    return Recipe(
+        recipe_id=recipe_id,
+        title="Simple Saute",
+        ingredients=[Ingredient(name="broccoli", amount=1, unit=None)],
+        instructions=["Heat the oil in a pan.", "Add broccoli and stir-fry."],
+        allergens=[],
+    )
+
+
+def test_default_check_is_title_backward_compatible(tmp_path, monkeypatch):
+    corpus_path = tmp_path / "imported_recipes.jsonl"
+    quarantine_path = tmp_path / "quarantined_recipes.jsonl"
+    _write_corpus_jsonl(corpus_path, [_mismatched_recipe("r1")])
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "quarantine_flagged_recipes.py",
+            "--corpus-path",
+            str(corpus_path),
+            "--quarantine-path",
+            str(quarantine_path),
+        ],
+    )
+    assert main() == 0
+
+    rows = _read_quarantine(quarantine_path)
+    assert len(rows) == 1
+    assert rows[0]["quarantine_reason"]["check"] == "title_ingredient_integrity"
+
+
+def test_check_instructions_flags_a_row_the_title_check_misses(tmp_path, monkeypatch):
+    corpus_path = tmp_path / "imported_recipes.jsonl"
+    quarantine_path = tmp_path / "quarantined_recipes.jsonl"
+    _write_corpus_jsonl(corpus_path, [_instructions_flagged_recipe("r1")])
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "quarantine_flagged_recipes.py",
+            "--corpus-path",
+            str(corpus_path),
+            "--quarantine-path",
+            str(quarantine_path),
+            "--check",
+            "instructions",
+        ],
+    )
+    assert main() == 0
+
+    rows = _read_quarantine(quarantine_path)
+    assert len(rows) == 1
+    assert rows[0]["recipe"]["recipe_id"] == "r1"
+    assert rows[0]["quarantine_reason"]["check"] == "instructions_ingredient_integrity"
+    assert rows[0]["quarantine_reason"]["mismatches"][0]["category"] == "meat"
+    assert rows[0]["quarantine_reason"]["mismatches"][0]["tier"] == "A"
+
+    remaining_corpus = json.loads(corpus_path.read_text(encoding="utf-8")) if corpus_path.read_text(
+        encoding="utf-8"
+    ).strip() else []
+    assert remaining_corpus == []
+
+
+def test_check_instructions_never_quarantines_tier_c_only_row(tmp_path, monkeypatch):
+    corpus_path = tmp_path / "imported_recipes.jsonl"
+    quarantine_path = tmp_path / "quarantined_recipes.jsonl"
+    _write_corpus_jsonl(corpus_path, [_tier_c_only_recipe("r1")])
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "quarantine_flagged_recipes.py",
+            "--corpus-path",
+            str(corpus_path),
+            "--quarantine-path",
+            str(quarantine_path),
+            "--check",
+            "instructions",
+        ],
+    )
+    assert main() == 0
+
+    # A Tier-C-only ("oil") mismatch must never select a row for quarantine.
+    assert _read_quarantine(quarantine_path) == []
+    remaining_ids = {
+        json.loads(line)["recipe_id"]
+        for line in corpus_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert remaining_ids == {"r1"}
+
+
+def test_check_title_still_ignores_instructions_only_mismatch(tmp_path, monkeypatch):
+    # The SAME row that --check instructions flags must be left alone by
+    # the default --check title (no title-side allergen word at all).
+    corpus_path = tmp_path / "imported_recipes.jsonl"
+    quarantine_path = tmp_path / "quarantined_recipes.jsonl"
+    _write_corpus_jsonl(corpus_path, [_instructions_flagged_recipe("r1")])
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "quarantine_flagged_recipes.py",
+            "--corpus-path",
+            str(corpus_path),
+            "--quarantine-path",
+            str(quarantine_path),
+            "--check",
+            "title",
+        ],
+    )
+    assert main() == 0
+    assert _read_quarantine(quarantine_path) == []
+
+
+def test_checks_registry_has_exactly_title_and_instructions() -> None:
+    assert set(_CHECKS) == {"title", "instructions"}

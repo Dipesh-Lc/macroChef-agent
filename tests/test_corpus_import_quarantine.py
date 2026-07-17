@@ -107,3 +107,61 @@ def test_quarantine_path_override(tmp_path: Path) -> None:
     assert custom_quarantine.exists()
     default_quarantine = output_path.parent / "quarantined_recipes.jsonl"
     assert not default_quarantine.exists()
+
+
+# --- Instructions/ingredient integrity check, wired at import time ---------
+# (app.services.corpus_import.instructions_ingredient_integrity,
+# docs/instructions_integrity_spec.md)
+
+
+def _write_instructions_defect_fixture(tmp_path: Path) -> Path:
+    csv_text = (
+        "RecipeId,Name,CookTime,RecipeServings,RecipeCategory,"
+        "RecipeIngredientParts,RecipeIngredientQuantities,RecipeInstructions,"
+        "Calories,ProteinContent,CarbohydrateContent,FatContent,FiberContent\n"
+        # Title has no allergen/meat word at all (so the TITLE check leaves
+        # it alone), but instructions name "beef" -- zero animal-flesh
+        # ingredient rows -- a Tier A "meat" mismatch.
+        '4001,Weeknight Stir-Fry,PT15M,2,dinner,'
+        '"c(""broccoli"", ""garlic"", ""ginger"")",'
+        '"c(""1"", ""1"", ""1"")",'
+        '"c(""Slice the beef thinly."", ""Stir-fry with broccoli."")",'
+        "300,20,10,12,3\n"
+        # Clean control row: chicken IS listed, so "chicken" in instructions
+        # is satisfied -- must survive.
+        '4002,Simple Chicken Dinner,PT20M,2,dinner,'
+        '"c(""chicken breast"", ""broccoli"", ""garlic"")",'
+        '"c(""1"", ""1"", ""1"")",'
+        '"c(""Cook the chicken."", ""Add broccoli and serve."")",'
+        "350,30,10,15,3\n"
+    )
+    path = tmp_path / "corpus_sample_instructions_integrity.csv"
+    path.write_text(csv_text, encoding="utf-8")
+    return path
+
+
+def test_instructions_ingredient_mismatch_is_quarantined_not_written(tmp_path: Path) -> None:
+    fixture = _write_instructions_defect_fixture(tmp_path)
+    pipeline = CorpusImportPipeline(FoodComAdapter())
+    output_path = tmp_path / "imported_recipes.jsonl"
+
+    report = pipeline.run(fixture, output_path, existing_recipes=[])
+
+    assert report.survivors == 1
+    assert report.instructions_ingredient_mismatches_flagged == 1
+    assert report.instructions_ingredient_mismatch_pairs == 1
+    # The title check never fires for this row (no title-side allergen word).
+    assert report.title_ingredient_mismatches_flagged == 0
+
+    written = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+    titles = {row["title"] for row in written}
+    assert titles == {"Simple Chicken Dinner"}
+    assert "Weeknight Stir-Fry" not in titles
+
+    quarantine_path = output_path.parent / "quarantined_recipes.jsonl"
+    quarantined = [json.loads(line) for line in quarantine_path.read_text(encoding="utf-8").splitlines()]
+    assert len(quarantined) == 1
+    assert quarantined[0]["recipe"]["title"] == "Weeknight Stir-Fry"
+    assert quarantined[0]["quarantine_reason"]["check"] == "instructions_ingredient_integrity"
+    assert quarantined[0]["quarantine_reason"]["mismatches"][0]["category"] == "meat"
+    assert quarantined[0]["quarantine_reason"]["mismatches"][0]["tier"] == "A"

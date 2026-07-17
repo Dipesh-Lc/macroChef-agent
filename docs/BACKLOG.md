@@ -256,6 +256,24 @@ were pre-registered before anyone saw a result.
   discipline: judge-flagged and adjudicated-true are ALWAYS reported as
   a pair, and the judge is never modified to close the gap between them.
 
+### From the 2026-07-17 instructions-integrity spec (docs/instructions_integrity_spec.md)
+
+- **Title-side bare-"fish"/meat-word checking remains an open residual.**
+  The instructions-vs-ingredients check (spec above) reads `instructions`
+  only, by design: bare-"fish"/meat-word TITLE checking is proven unsafe
+  ("Fish Marinade", "Marinade for Beef" — legitimate intended-use titles
+  that must not be blanket-quarantined), and in practice corrupt rows'
+  instructions name the meat anyway, so instructions-side coverage
+  catches the same rows. If a future corrupt row has a meat/fish title
+  and instructions that never name the ingredient, neither check catches
+  it; the benchmark + adjudication are the backstop. Any title-side
+  extension needs the intended-use distinction designed first (see
+  `adjudication_20260717T145539Z.md`, injection_014 "Needs").
+- **Non-safety-vocabulary omissions are out of the check's scope** (the
+  imp_f9cc221553155bfc orange-juice class): hidden non-allergen
+  ingredients can't produce an engine-visible violation. Documented
+  boundary, pinned by a must-NOT-flag test.
+
 ## Corpus / nutrition
 
 - **Wikibooks import** — human already cleared CC BY-SA 4.0 for

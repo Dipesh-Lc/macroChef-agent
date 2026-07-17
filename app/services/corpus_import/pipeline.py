@@ -23,10 +23,17 @@ from app.rag.loaders import load_recipes
 from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.corpus_import.adapters import DatasetAdapter
-from app.services.corpus_import.title_ingredient_integrity import (
-    build_quarantine_record,
-    find_title_ingredient_mismatches,
+from app.services.corpus_import.instructions_ingredient_integrity import (
+    build_quarantine_record as build_instructions_quarantine_record,
 )
+from app.services.corpus_import.instructions_ingredient_integrity import (
+    find_instructions_ingredient_mismatches,
+    tier_ab_mismatches,
+)
+from app.services.corpus_import.title_ingredient_integrity import (
+    build_quarantine_record as build_title_quarantine_record,
+)
+from app.services.corpus_import.title_ingredient_integrity import find_title_ingredient_mismatches
 from app.services.recipe_dedup_service import RecipeDedupService
 from app.services.recipe_validation_service import RecipeValidationService
 from app.utils.logging import get_logger
@@ -61,6 +68,18 @@ class ImportReport:
     title_ingredient_mismatch_pairs: int = 0
     # Capped sample for eyeballing, same idiom as example_dropped_below_min.
     example_title_ingredient_mismatches: list[dict] = field(default_factory=list)
+    # Instructions/ingredient integrity check (app.services.corpus_import.
+    # instructions_ingredient_integrity, docs/instructions_integrity_spec.md)
+    # -- catches the sibling defect class where the INSTRUCTIONS text (not
+    # the title) names a Tier A/B safety-relevant food (allergen category,
+    # animal flesh, or undisclosed stock) absent from the ingredient list.
+    # Only Tier A/B mismatches are counted/quarantined here -- Tier C
+    # (report-only) never gates. Only run for recipes that already survived
+    # the title check above (a title-flagged recipe is already quarantined
+    # and never reaches this check).
+    instructions_ingredient_mismatches_flagged: int = 0
+    instructions_ingredient_mismatch_pairs: int = 0
+    example_instructions_ingredient_mismatches: list[dict] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
@@ -76,7 +95,10 @@ class ImportReport:
             f"{self.recipes_below_min_instructions_after_cleaning} pushed below "
             f"the 2-instruction minimum) "
             f"title_ingredient_mismatches_quarantined={self.title_ingredient_mismatches_flagged} "
-            f"({self.title_ingredient_mismatch_pairs} category mismatch pairs)"
+            f"({self.title_ingredient_mismatch_pairs} category mismatch pairs) "
+            f"instructions_ingredient_mismatches_quarantined="
+            f"{self.instructions_ingredient_mismatches_flagged} "
+            f"({self.instructions_ingredient_mismatch_pairs} category mismatch pairs)"
         )
 
 
@@ -155,17 +177,42 @@ class CorpusImportPipeline:
             # (see title_ingredient_integrity's module docstring), so the
             # recipe is quarantined here rather than written to the main
             # corpus output -- flagged/logged/counted, never a silent drop.
-            mismatches = find_title_ingredient_mismatches(recipe)
-            if mismatches:
+            title_mismatches = find_title_ingredient_mismatches(recipe)
+            if title_mismatches:
                 report.title_ingredient_mismatches_flagged += 1
-                report.title_ingredient_mismatch_pairs += len(mismatches)
-                quarantine_records.append(build_quarantine_record(recipe, mismatches))
+                report.title_ingredient_mismatch_pairs += len(title_mismatches)
+                quarantine_records.append(build_title_quarantine_record(recipe, title_mismatches))
                 if len(report.example_title_ingredient_mismatches) < 10:
                     report.example_title_ingredient_mismatches.append(
                         {
                             "title": recipe.title,
                             "recipe_id": recipe.recipe_id,
-                            "categories": [m.category for m in mismatches],
+                            "categories": [m.category for m in title_mismatches],
+                        }
+                    )
+                continue
+
+            # Instructions/ingredient integrity check (docs/instructions_
+            # integrity_spec.md) -- the sibling defect class where the
+            # INSTRUCTIONS text, not the title, names a safety-relevant food
+            # absent from the ingredient list (e.g. "Chinese Beef and
+            # Broccoli" with zero animal-flesh ingredient rows). Only
+            # Tier A/B mismatches gate a quarantine here -- Tier C
+            # (report-only, e.g. bare "oil"/"sauce") never does, per that
+            # module's decision rule.
+            instructions_mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+            if instructions_mismatches:
+                report.instructions_ingredient_mismatches_flagged += 1
+                report.instructions_ingredient_mismatch_pairs += len(instructions_mismatches)
+                quarantine_records.append(
+                    build_instructions_quarantine_record(recipe, instructions_mismatches)
+                )
+                if len(report.example_instructions_ingredient_mismatches) < 10:
+                    report.example_instructions_ingredient_mismatches.append(
+                        {
+                            "title": recipe.title,
+                            "recipe_id": recipe.recipe_id,
+                            "categories": [m.category for m in instructions_mismatches],
                         }
                     )
                 continue
@@ -213,6 +260,14 @@ class CorpusImportPipeline:
                 "integrity failures during corpus import -- see %s",
                 report.title_ingredient_mismatches_flagged,
                 report.title_ingredient_mismatch_pairs,
+                quarantine_output_path,
+            )
+        if report.instructions_ingredient_mismatches_flagged:
+            logger.info(
+                "quarantined %d recipes (%d category mismatch pairs) for instructions/ingredient "
+                "integrity failures (Tier A/B only) during corpus import -- see %s",
+                report.instructions_ingredient_mismatches_flagged,
+                report.instructions_ingredient_mismatch_pairs,
                 quarantine_output_path,
             )
         logger.info("corpus import complete: %s", report.summary())
