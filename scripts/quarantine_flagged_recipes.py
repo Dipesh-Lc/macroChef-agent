@@ -23,10 +23,21 @@ separate, deferred hygiene task (see this task's report).
 
 Idempotent: re-running against an already-cleaned `imported_recipes.jsonl`
 finds zero new mismatches (nothing left to quarantine) and leaves both
-files unchanged; it will NOT re-add anything already sitting in the
-quarantine sidecar even if `--quarantine-path` points at a fresh location,
-since quarantining is driven entirely by re-running the audit against
-whatever is currently in `--corpus-path`.
+files unchanged.
+
+The quarantine sidecar is a safety AUDIT TRAIL, not a derived/rebuildable
+artifact, so this script never overwrites it wholesale. Every run MERGES
+its newly-flagged records into whatever is already on disk at
+`--quarantine-path`, keyed by recipe id: an id already present keeps its
+EXISTING row and reason untouched (first quarantine decision wins; the
+script prints a note when a run re-flags an id that's already quarantined),
+and only genuinely new ids are appended. The merged result is written
+atomically (temp file + `os.replace`) so a crash mid-write can never
+truncate the sidecar. (A prior version of this script overwrote the sidecar
+by default on every run, which once silently clobbered a 177-row audit
+record down to 9 rows on a later batch -- see git history. This merge
+behavior is the fix; there is no longer an opt-in "append" flag because
+merging is now always the behavior.)
 
 Usage:
     python scripts/quarantine_flagged_recipes.py
@@ -36,8 +47,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -60,12 +74,62 @@ def _write_corpus(path: Path, recipes: list[Recipe]) -> None:
             handle.write("\n")
 
 
-def _write_quarantine(path: Path, records: list[dict], *, append: bool) -> None:
-    mode = "a" if append and path.exists() else "w"
-    with path.open(mode, encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False))
-            handle.write("\n")
+def _load_existing_quarantine(path: Path) -> dict[str, dict]:
+    """Load the existing quarantine sidecar (if any), keyed by recipe id.
+    Returns {} if the file doesn't exist yet -- the fresh-run case."""
+    existing: dict[str, dict] = {}
+    if not path.exists():
+        return existing
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            existing[record["recipe"]["recipe_id"]] = record
+    return existing
+
+
+def _merge_quarantine_records(existing: dict[str, dict], new_records: list[dict]) -> tuple[list[dict], int]:
+    """Merge this run's newly-flagged records into the existing sidecar
+    contents. An id already present in `existing` KEEPS its existing row and
+    reason untouched -- the first quarantine decision wins, per this
+    project's never-silently-lose-safety-audit-data rule. Returns
+    (merged_records_sorted_by_id, count_of_re-flagged_ids_skipped)."""
+    merged = dict(existing)
+    skipped = 0
+    for record in new_records:
+        recipe_id = record["recipe"]["recipe_id"]
+        if recipe_id in merged:
+            skipped += 1
+            print(
+                f"NOTE: recipe id {recipe_id!r} is already in the quarantine sidecar -- "
+                "keeping its existing reason, skipping this run's re-flag."
+            )
+            continue
+        merged[recipe_id] = record
+    ordered = [merged[recipe_id] for recipe_id in sorted(merged)]
+    return ordered, skipped
+
+
+def _write_quarantine_atomic(path: Path, records: list[dict]) -> None:
+    """Write the FULL merged sidecar atomically: build the complete new
+    contents in a temp file in the same directory, then `os.replace()` it
+    over the real path. A crash or interruption mid-write therefore can
+    never leave a truncated/partial sidecar -- the real file is only ever
+    swapped for a complete new one, never edited in place."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False))
+                handle.write("\n")
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(tmp_name)
+        raise
 
 
 def main() -> int:
@@ -76,14 +140,6 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="Report what would be quarantined without writing either file.",
-    )
-    parser.add_argument(
-        "--append-quarantine",
-        action="store_true",
-        help="Append to an existing quarantine sidecar instead of overwriting it "
-        "(overwrite is the default -- this run's audit is a full re-scan of "
-        "--corpus-path, so a fresh full quarantine file, not an accumulating "
-        "append, is idempotent by construction).",
     )
     args = parser.parse_args()
 
@@ -112,13 +168,18 @@ def main() -> int:
         build_quarantine_record(recipe, mismatches_by_id[recipe.recipe_id]) for recipe in quarantined
     ]
 
+    existing_quarantine = _load_existing_quarantine(quarantine_path)
+    merged_records, skipped = _merge_quarantine_records(existing_quarantine, quarantine_records)
+    newly_added = len(quarantine_records) - skipped
+
     _write_corpus(corpus_path, kept)
-    _write_quarantine(quarantine_path, quarantine_records, append=args.append_quarantine)
+    _write_quarantine_atomic(quarantine_path, merged_records)
 
     print(f"\nWrote {len(kept)} recipes to {corpus_path}")
     print(
-        f"Wrote {len(quarantine_records)} quarantined recipes to {quarantine_path} "
-        f"({'appended' if args.append_quarantine and quarantine_path.exists() else 'overwritten'})"
+        f"Wrote {len(merged_records)} total quarantined recipes to {quarantine_path} "
+        f"({newly_added} newly added this run, {skipped} re-flagged id(s) skipped (kept existing reason), "
+        f"{len(existing_quarantine)} carried over from prior runs)"
     )
     print(
         "\nNOTE: quarantined recipe ids remain in the Chroma vector store until the "
