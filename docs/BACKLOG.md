@@ -112,6 +112,83 @@ were pre-registered before anyone saw a result.
   `app/evaluation/benchmark/cases/*.jsonl`); runner denominators were
   always 259/46/60 -- see any benchmark report. Not a renegotiation.]
 
+### Recorded 2026-07-17 (advisor REVISE on b9e663c+14f1cf0: items claimed
+### "backlogged" in those commit messages but never written here; now written)
+
+- **caramel + margarine absent from the dairy alias set**
+  (`app/services/constraint_engine.py`, `_DAIRY` near the top of the
+  file). Causes the hidden_002 ("Baked Caramel Corn" served to a
+  milk-allergic user — its caramel is made FROM margarine) and hidden_004
+  ("Panettone" with a literal `reduced-calorie margarine` row)
+  precautionary benchmark failures; also implicated in hidden_007 (dark
+  chocolate / milkfat). Pre-decided: these are may-contain
+  (precautionary) hazards — margarine commonly contains whey/milk solids
+  but dairy-free margarines exist — so adding them over-blocks some safe
+  recipes; the Worcestershire fail-closed precedent argues for adding
+  anyway. Needs a corpus-evidence pass (how many rows use margarine?)
+  before the FULL TREATMENT engine change. Unmasked (not introduced) by
+  the b9e663c quarantine; both cases were previously served safe recipes
+  by retrieval luck.
+- **Pipeline-side quarantine sidecar can still clobber**:
+  `scripts/quarantine_flagged_recipes.py` was fixed (merge by recipe_id,
+  first-decision-wins, atomic write — commit 1a13108, tests in
+  `tests/test_quarantine_flagged_recipes.py`), but
+  `CorpusImportPipeline._write_quarantine_jsonl`
+  (`app/services/corpus_import/pipeline.py`) still overwrites
+  unconditionally at the same default path
+  `data/processed/quarantined_recipes.jsonl`. A future full corpus
+  re-import would clobber the 186-row audit record exactly the way the
+  script once took it 177 -> 9. Pre-decided: port the same
+  merge/atomic-write helpers (or extract them to a shared module) with
+  the same first-decision-wins semantics.
+- **Stale Chroma embeddings for quarantined recipe ids** — quarantined
+  rows are filtered at `load_corpus()`/retrieval time, so they are
+  unservable, but their embeddings still sit in the Chroma index.
+  Hygiene, not safety. Pre-decided: delete-by-id pass or full reindex at
+  the next scheduled index rebuild; do not rebuild solely for this.
+- **`_LOOKALIKE_EXCLUSIONS` structural invariant test**
+  (`app/services/constraint_engine.py`, table near line 382): a
+  malformed future entry (e.g. a lookalike phrase that does not strictly
+  contain its key term, like `"chestnut": {"chest"}`) would silently
+  suppress ALL matches for that allergen term. Pre-decided (advisor
+  spec): ~10-line test asserting, for every entry, each lookalike phrase
+  strictly contains its key (`term in phrase and phrase != term`) and
+  the key exists in a base alias set. FULL TREATMENT process is the
+  current guard.
+- **`_is_lookalike_match` reverse-direction scope**: it also suppresses
+  `recipe_term in term` matches, which the lookalike rationale doesn't
+  cover. Advisor probed and found no live gap (bare "nut"/"nuts"
+  ingredients still block via other aliases), but scoping to the forward
+  direction only (`term in recipe_term`) would make semantics match the
+  docstring. Same file, same FULL TREATMENT bar.
+- **Lookalike carve-out is phrasing-dependent**: a user allergy typed as
+  bare "nuts" still over-blocks water-chestnut recipes (exclusion is
+  keyed on "chestnut(s)" only). Fail-closed, so cosmetic; note it in the
+  table comment when next touching the file.
+- **`_classify_match_rule` crash guard**
+  (`scripts/run_safety_benchmark.py`): IndexError on a `matched_field`
+  that is neither `title` nor `ingredient:...` — would crash the runner
+  after the markdown report is written but before/while the evidence
+  bundle lands. Defensive guard, one conditional.
+- **Dirty-tree marker in benchmark report headers**: report
+  `20260717T133000Z_derivative_quarantine.md` says "Git commit: b9e663c"
+  but ran on a then-dirty tree. Add a `-dirty` suffix (via
+  `git describe --dirty` or `git status --porcelain`) to the header for
+  provenance honesty.
+- **69c580f (unknown-diet_type fail-open fix) needs its own FULL
+  TREATMENT review**: it decides diet outcomes
+  (`app/services/recipe_discovery_service.py`,
+  `recipe_validation_service.py`) and was never advisor-reviewed — the
+  2026-07-17 worktree review of b9e663c+14f1cf0 explicitly excluded it
+  from its verdict. (Review commissioned same day; remove this entry
+  when the verdict lands.)
+- **Written per-case adjudication of judge flags** — DONE 2026-07-17:
+  `data/evaluation/adjudication_20260717T145539Z.md` (19 inherent + 12
+  precautionary flags, per-case verdict + citable rule, `_KNOWN_RESIDUALS`
+  convention). Kept as a pointer because future runs must repeat the
+  discipline: judge-flagged and adjudicated-true are ALWAYS reported as
+  a pair, and the judge is never modified to close the gap between them.
+
 ## Corpus / nutrition
 
 - **Wikibooks import** — human already cleared CC BY-SA 4.0 for
