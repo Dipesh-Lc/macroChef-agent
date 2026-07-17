@@ -32,6 +32,7 @@ _DAIRY = frozenset(
         "cream",
         "feta",
         "ghee",
+        "grana padano",
         "Greek yogurt",
         "half and half",
         "half-and-half",
@@ -41,7 +42,18 @@ _DAIRY = frozenset(
         "mozzarella",
         "paneer",
         "parmesan",
+        # "parmigiano", "pecorino", "grana padano", and "romano" are hard
+        # cheeses (all definitionally milk products) that were missing from
+        # this set even though "parmesan" (the same cheese, different name)
+        # was already present -- a bare "parmigiano" corpus row was
+        # servable to milk-allergic users before this addition. "romano" has
+        # a same-word lookalike ("romano bean(s)", a legume with no dairy
+        # content at all) handled per-term via _LOOKALIKE_EXCLUSIONS below,
+        # the same mechanism that already guards "chestnut"/"water chestnut".
+        "parmigiano",
+        "pecorino",
         "ricotta",
+        "romano",
         "whey",
         "yogurt",
     }
@@ -161,6 +173,32 @@ _WHEAT = frozenset(
         "filo",
         "flour",
         "graham cracker",
+        # Standard brewed/commercial soy sauce is fermented with wheat, and
+        # wheat is routinely declared on US soy-sauce labels (FALCPA);
+        # tamari and explicitly-labeled gluten-free soy sauce are the
+        # wheat-free exception, not the rule -- and a bare corpus row (just
+        # "soy sauce") cannot prove it's the labeled-GF kind. Same reasoning
+        # class as the Worcestershire/fish over-blocking note above: ambiguity
+        # resolves toward blocking for an anaphylaxis-adjacent, celiac-serious
+        # allergen. Commercial hoisin sauce standardly contains wheat flour
+        # (Lee Kum Kee's declared hoisin sauce ingredients list wheat flour;
+        # celiac-organization gluten-free shopping guidance lists hoisin sauce
+        # as a food that typically contains gluten). Commercial teriyaki sauce
+        # is soy-sauce-based and commonly declares wheat (e.g. Kikkoman
+        # Teriyaki Sauce's ingredient label lists wheat). All three are pinned
+        # as their full two-word/three-word phrase, per the "sea bass"
+        # precedent above -- not the bare "hoisin"/"teriyaki" head noun --
+        # because every corpus occurrence already contains the full phrase
+        # and a bare head noun would needlessly widen the substring-matching
+        # surface. Known, deliberate side effect: SYNONYMS in
+        # app/utils/ingredient_normalizer.py maps "tamari" -> "soy sauce", so
+        # adding "soy sauce" here also makes a bare "tamari" ingredient row
+        # fail closed for wheat/gluten allergies/diet (7 corpus rows as of
+        # this change). That is intentional, not an accident: non-GF-labeled
+        # tamari can still contain wheat, and a bare corpus row cannot prove
+        # otherwise -- the exact same "can't prove the safe variant" logic as
+        # the soy-sauce entry itself.
+        "hoisin sauce",
         "lasagna",
         "linguine",
         "macaroni",
@@ -174,6 +212,8 @@ _WHEAT = frozenset(
         # "cornflour"/"eggplant" substring trade-offs elsewhere in this file.
         "spaghetti",
         "seitan",
+        "soy sauce",
+        "teriyaki sauce",
         "tortilla",
         "wheat",
         "whole wheat pasta",
@@ -213,8 +253,36 @@ _FISH = frozenset(
         "cod",
         "fish",
         "flounder",
+        # Gelatin and isinglass: a documented fail-closed POLICY CHOICE, not a
+        # claim that gelatin is usually fish -- mainstream US retail gelatin
+        # (e.g. Knox, Jell-O) is porcine/bovine, and FALCPA requires the
+        # specific fish species to be declared on labels when gelatin IS
+        # fish-derived. But fish gelatin is a real, non-hypothetical
+        # commercial class: kosher gelatin is frequently fish-derived (fish
+        # is pareve, so it's the common kosher substitute for the
+        # non-kosher-by-default bovine/porcine kind), FARE (Food Allergy
+        # Research & Education) lists gelatin as a hidden source of fish, and
+        # isinglass (fish-bladder collagen, used historically in gelatin and
+        # in fining beer/wine) is fish by definition. A bare "unflavored
+        # gelatin" corpus row cannot rule out the fish-derived kind. This is
+        # an anaphylaxis-class allergen, so ambiguity resolves toward
+        # blocking (same reasoning class as the Worcestershire/amaretto/
+        # nougat notes elsewhere in this file). Over-block cost is measured,
+        # not assumed: 61/4052 recipes (1.5%) become unservable to fish/
+        # seafood-allergic users specifically as a result of this entry.
+        # "gelatin" already lives in MEAT_ALIASES above for the unrelated
+        # vegetarian/vegan diet-type check (standard gelatin is animal-
+        # derived, full stop, regardless of species) -- this is an additive,
+        # independent membership in this allergen table, mirroring the
+        # worcestershire dual-membership pattern documented at that entry
+        # and at MEAT_ALIASES's "worcestershire" line. Deliberately NOT added
+        # to _CRUSTACEAN or _MOLLUSK: gelatin/isinglass are never shellfish-
+        # derived, so adding them there would be an unjustified over-block
+        # with no sourcing behind it, unlike the fish case above.
+        "gelatin",
         "haddock",
         "halibut",
+        "isinglass",
         "salmon",
         "sardine",
         # "sea bass" is pinned as the full two-word term, not bare "bass":
@@ -303,6 +371,13 @@ MEAT_ALIASES = {
     "chicken",
     "chorizo",
     "duck",
+    # "gelatin" now also lives in ALLERGEN_ALIASES["fish"] (see that set's
+    # inline comment for the fish-gelatin/isinglass sourcing and the accepted
+    # over-block cost). This entry here is the pre-existing, independent
+    # vegetarian/vegan diet-type check and is unaffected by that addition --
+    # mirroring the "worcestershire" dual-membership pattern (that term is
+    # independently a member of both this set and ALLERGEN_ALIASES["fish"]
+    # above; see that set's inline comment).
     "gelatin",
     "goose",
     "ham",
@@ -334,12 +409,48 @@ MEAT_ALIASES = {
 }
 HONEY_ALIASES = {"honey"}
 
+# Cheeses whose name is governed by a Protected Designation of Origin (PDO/
+# AOP) standard that mandates animal rennet -- so a *compliant* product sold
+# under that name cannot be vegetarian, regardless of any individual
+# producer's marketing claims. This is a narrower, name-level rule than "all
+# hard cheeses are non-vegetarian" (many hard cheeses use microbial/
+# fermentation-produced chymosin and are genuinely vegetarian):
+#   - Parmigiano-Reggiano PDO: calf rennet mandated by the consortium
+#     production standard.
+#   - Pecorino Romano PDO: lamb rennet mandated by the consortium production
+#     standard.
+#   - Grana Padano PDO: calf rennet mandated by the consortium production
+#     standard.
+# Deliberately REJECTED, not just omitted:
+#   - "gorgonzola", "gruyere": their governing specs were not verified for
+#     this change -- backlogged (docs/BACKLOG.md), not silently assumed.
+#   - "manchego": Manchego PDO explicitly permits non-animal (e.g. microbial)
+#     coagulants, so a compliant vegetarian Manchego genuinely exists -- this
+#     is not the same rule shape as parmigiano/pecorino/grana padano above.
+# Generic "cheese"/"cheddar"/"mozzarella" deliberately stay vegetarian-OK:
+# mainstream vegetarian-rennet versions of those are the norm, not the
+# exception. Compound "X cheese" term shapes (e.g. "parmesan cheese") are
+# deliberately NOT added here: _recipe_contains_any_term's substring matching
+# is bidirectional (`term in recipe_term or recipe_term in term`), so a term
+# like "parmesan cheese" would reverse-match every bare "cheese" ingredient
+# in the corpus (37 bare "cheese" rows) as if it were specifically a
+# rennet-set PDO cheese -- a catastrophic over-block. Only bare cheese-name
+# terms are used, exactly like the existing "parmesan"/"cheddar" entries in
+# _DAIRY above.
+#
+# NOT added to MEAT_ALIASES: MEAT_ALIASES feeds a planned title-integrity
+# extension (app/services/corpus_import/title_ingredient_integrity.py) where
+# cheese words would be semantically wrong (cheese is not meat) and would
+# mis-quarantine unrelated recipes.
+_RENNET_SET_CHEESES = frozenset({"parmesan", "parmigiano", "pecorino", "grana padano", "romano"})
+
 _VEGETARIAN_EXCLUDED_TERMS = (
     MEAT_ALIASES
     | ALLERGEN_ALIASES["fish"]
     | ALLERGEN_ALIASES["shellfish"]
     | ALLERGEN_ALIASES["seafood"]
     | ALLERGEN_ALIASES["crustacean"]
+    | _RENNET_SET_CHEESES
 )
 # Vegan = vegetarian's exclusions plus the animal products vegetarians still
 # eat (dairy, eggs, honey). Dairy/egg terms come from the same ALLERGEN_ALIASES
@@ -382,6 +493,12 @@ DIET_TYPE_EXCLUDED_TERMS = {
 _LOOKALIKE_EXCLUSIONS: dict[str, frozenset[str]] = {
     "chestnut": frozenset({"water chestnut", "water chestnuts"}),
     "chestnuts": frozenset({"water chestnut", "water chestnuts"}),
+    # "romano" is now a dairy/rennet-set-cheese term (see _DAIRY and
+    # _RENNET_SET_CHEESES above), but "romano bean(s)" is an unrelated
+    # legume (Phaseolus vulgaris, the flat Italian green/dry bean) that never
+    # contains cheese or rennet -- same lookalike shape as water chestnut,
+    # wired identically.
+    "romano": frozenset({"romano bean", "romano beans"}),
 }
 
 

@@ -4,7 +4,12 @@ from pydantic import ValidationError
 from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
-from app.services.constraint_engine import ALLERGEN_ALIASES, validate_recipe
+from app.services.constraint_engine import (
+    ALLERGEN_ALIASES,
+    contains_allergen,
+    derive_allergen_labels,
+    validate_recipe,
+)
 
 
 def _profile(**kwargs) -> UserProfile:
@@ -530,3 +535,166 @@ def test_marshmallow_blocks_vegan_and_vegetarian_diet(diet_type: str, ingredient
     result = validate_recipe(recipe, _profile(diet_type=diet_type))
 
     assert not result.is_valid
+
+
+# --- 2026-07-17 advisor-approved additions: soy-sauce family (wheat), ------
+# rennet-set PDO cheeses (vegetarian/vegan/milk), and gelatin/isinglass
+# (fish/seafood) ---------------------------------------------------------
+#
+# See constraint_engine.py's inline comments on _WHEAT ("soy sauce"/"hoisin
+# sauce"/"teriyaki sauce"), _RENNET_SET_CHEESES, _DAIRY, and _FISH
+# ("gelatin"/"isinglass") for the citations behind each addition below.
+
+
+def test_soy_sauce_blocks_wheat_and_gluten_but_still_blocks_soy() -> None:
+    recipe = _recipe(ingredients=["rice", "soy sauce"], allergens=[], diet_tags=[])
+
+    assert not validate_recipe(recipe, _profile(allergies=["wheat"])).is_valid
+    assert not validate_recipe(recipe, _profile(allergies=["gluten"])).is_valid
+    assert not validate_recipe(recipe, _profile(diet_type="gluten-free")).is_valid
+    # Pre-existing soy-allergen behavior must be unaffected by the wheat addition.
+    assert not validate_recipe(recipe, _profile(allergies=["soy"])).is_valid
+
+
+def test_bare_tamari_blocks_wheat_allergy() -> None:
+    # Deliberate, documented fail-closed side effect: app/utils/ingredient_
+    # normalizer.py's SYNONYMS maps "tamari" -> "soy sauce", and "soy sauce"
+    # is now in _WHEAT (non-GF-labeled tamari can contain wheat, and a bare
+    # corpus row cannot prove it's the labeled-GF kind). Pinned here so any
+    # future change to that SYNONYMS mapping or to _WHEAT is caught.
+    recipe = _recipe(ingredients=["rice", "tamari"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(allergies=["wheat"]))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["hoisin sauce", "teriyaki sauce"])
+@pytest.mark.parametrize("allergy", ["wheat", "gluten"])
+def test_hoisin_and_teriyaki_sauce_block_wheat_and_gluten(ingredient: str, allergy: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(allergies=[allergy]))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize(
+    "diet_type,ingredient",
+    [
+        ("vegetarian", "parmesan"),
+        ("vegetarian", "parmigiano"),
+        ("vegetarian", "pecorino"),
+        ("vegetarian", "grana padano"),
+        ("vegetarian", "romano cheese"),
+        ("vegan", "parmesan"),
+        ("vegan", "parmigiano"),
+        ("vegan", "pecorino"),
+        ("vegan", "grana padano"),
+        ("vegan", "romano cheese"),
+    ],
+)
+def test_rennet_set_pdo_cheeses_violate_vegetarian_and_vegan(diet_type: str, ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["cheese", "cheddar"])
+def test_generic_cheese_and_cheddar_do_not_violate_vegetarian(ingredient: str) -> None:
+    # Generic "cheese"/"cheddar" stay vegetarian-OK: mainstream vegetarian-
+    # rennet versions of those are the norm, not the exception -- unlike the
+    # PDO-governed names above.
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert result.is_valid
+
+
+def test_romano_beans_not_blocked_by_vegetarian_diet() -> None:
+    # Lookalike guard: "romano bean(s)" is an unrelated legume, never cheese
+    # or rennet -- wired identically to the water-chestnut lookalike.
+    recipe = _recipe(ingredients=["rice", "romano beans"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert result.is_valid
+
+
+def test_real_romano_cheese_cannot_hide_behind_romano_beans_in_same_recipe() -> None:
+    # Same hiding-attack shape as the chestnut/water-chestnut regression
+    # test: a recipe with BOTH the lookalike ("romano beans") AND the real
+    # rennet-set cheese ("romano cheese") must still be blocked, on the
+    # strength of the real ingredient's own term.
+    recipe = _recipe(ingredients=["romano beans", "romano cheese", "rice"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["parmesan", "parmigiano", "pecorino", "romano cheese"])
+def test_rennet_set_cheeses_block_milk_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["milk"]))
+
+    assert not result.is_valid
+
+
+def test_gelatin_blocks_fish_and_seafood_but_not_shellfish_or_crustacean() -> None:
+    recipe = _recipe(ingredients=["rice", "gelatin"], allergens=[])
+
+    assert not validate_recipe(recipe, _profile(allergies=["fish"])).is_valid
+    assert not validate_recipe(recipe, _profile(allergies=["seafood"])).is_valid
+    assert validate_recipe(recipe, _profile(allergies=["shellfish"])).is_valid
+    assert validate_recipe(recipe, _profile(allergies=["crustacean"])).is_valid
+
+
+@pytest.mark.parametrize("diet_type", ["vegetarian", "vegan"])
+def test_gelatin_still_violates_vegetarian_and_vegan_diet(diet_type: str) -> None:
+    recipe = _recipe(ingredients=["rice", "gelatin"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
+
+    assert not result.is_valid
+
+
+def test_gelatine_spelling_still_blocks_fish_allergy() -> None:
+    # "gelatine" (the British/international spelling) is not a separate set
+    # entry -- substring matching against "gelatin" already covers it -- but
+    # it is pinned directly so a future refactor of the matching mechanism
+    # can't silently drop this spelling.
+    recipe = _recipe(ingredients=["rice", "gelatine"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["fish"]))
+
+    assert not result.is_valid
+
+
+def test_derive_allergen_labels_gelatin_yields_fish_and_seafood() -> None:
+    labels = derive_allergen_labels(["gelatin"])
+
+    assert "fish" in labels
+    assert "seafood" in labels
+
+
+def test_derive_allergen_labels_soy_sauce_yields_wheat_gluten_and_soy() -> None:
+    labels = derive_allergen_labels(["soy sauce"])
+
+    assert "wheat" in labels
+    assert "gluten" in labels
+    assert "soy" in labels
+
+
+def test_water_chestnut_lookalike_tripwire_still_passes_after_romano_addition() -> None:
+    # Safe-control tripwire: confirm the pre-existing water-chestnut
+    # lookalike guard is unaffected by this change's new _LOOKALIKE_EXCLUSIONS
+    # entry ("romano") and new tree-nut/dairy/wheat additions.
+    recipe = _recipe(ingredients=["rice", "water chestnut"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
+
+    assert result.is_valid
+
+
+def test_contains_allergen_soy_sauce_still_true_for_soy_after_wheat_addition() -> None:
+    # Direct contains_allergen() sanity check (not just validate_recipe())
+    # that adding "soy sauce" to _WHEAT did not disturb its pre-existing
+    # membership in _SOY.
+    recipe = _recipe(ingredients=["rice", "soy sauce"], allergens=[])
+
+    assert contains_allergen(recipe, ["soy"])
