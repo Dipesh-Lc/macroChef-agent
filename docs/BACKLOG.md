@@ -71,6 +71,17 @@ were pre-registered before anyone saw a result.
   .violates_diet_type`'s own tag opt-out (including LLM-authored `diet_tags` on
   `ai_generated` candidates). Entry recorded here because commit message is not the
   backlog: per CLAUDE.md, "refine later" means never unless written down.
+- **`/inventory/extract`: add auth + rate limit BEFORE enabling vision** —
+  `app/api/routes_inventory.py`, `POST /inventory/extract`. The route currently
+  takes NO session dependency and has NO rate limit. NOT a live hole: `MACROCHEF_ENABLE_VISION`
+  defaults to `False` (checked at `app/config.py:82`), so the image path returns
+  403 before any paid vision call. The text path uses only `re`, the ingredient
+  normalizer, and the quantity parser — fully deterministic, no LLM. The API is
+  loopback-only in the deployed container. **Trigger — if `MACROCHEF_ENABLE_VISION`
+  is ever enabled, this route instantly becomes an unauthenticated, unlimited,
+  paid-vision-call and disk-write endpoint. Add a session dependency
+  (`Depends(get_session_user)`) and a rate-limit bucket BEFORE enabling vision** —
+  not "revisit later". For reference, discover/recommend are 20/hr and reindex is 2/hr.
 
 ## Safety benchmark (case set is FROZEN at 371; everything downstream deferred)
 
@@ -166,3 +177,28 @@ were pre-registered before anyone saw a result.
 - `app/main.py` uses deprecated `@app.on_event("startup")`.
 - 5 orphaned Chroma HNSW segment dirs (~7.5 MB each) from past rebuilds.
 - Blog post, HF dataset publication, launch drafts (all human gates).
+
+## Post-deploy, non-blocking (from 875f716 pre-deploy review)
+
+- **Promote `_serializer` to a public helper.** `frontend/session_client.py` imports
+  the private `app.dependencies._serializer` to validate tokens locally before use.
+  Advisor judged this CORRECT — the alternative (frontend re-implementing salt +
+  `max_age`) is exactly the silent-drift class this work exists to kill, and the
+  import fails loudly at module load if the name disappears. Follow-up is cosmetic:
+  expose `token_is_locally_valid(token) -> bool` in `app/dependencies.py` so the
+  contract is named rather than borrowed.
+- **`.strip()` the resolved secret.** `app/dependencies.py:87`'s `if secret:` accepts
+  a whitespace-only `SESSION_SECRET=" "` as a real secret. Human-set value only,
+  not reachable by config drift — negligible, but trivially fixable.
+- **Consolidate duplicate tag rendering.** `frontend/components/recommendation_cards.py:43-44`
+  keeps a private `_tags` that duplicates `html_safe.tag_row_html`. Both escape
+  correctly today; this is de-duplication only, not a fix.
+- **Comment `UserProfile.user_id` as inert.** `app/schemas/user.py` — it defaults
+  to "demo_user" and is client-supplied, but is never used for scoping or authorization
+  (verified: `grep -rn "user_profile.user_id\|profile.user_id" app/` returns nothing).
+  Add a comment saying it is NOT a trust boundary, so a future engineer doesn't
+  mistake it for one.
+- **`RateLimiter._hits` never evicts keys.** `app/services/rate_limiter.py` —
+  unbounded slow memory growth across anonymous sessions. Fine for the pinned
+  single-replica topology with restarts; note it alongside the existing single-replica
+  entry in the Deploy / infra section rather than as a separate concern.
