@@ -102,6 +102,12 @@ were pre-registered before anyone saw a result.
 - Stats: k=3 runs, Wilson 95% CI, any-run worst case; pinned model snapshot
   ids; dated tables.
 - Cost sheet -> human gate. CI gate on the MacroChef arm only.
+  [Decided 2026-07-17 by the human (decision 4A): the external-model
+  comparison arms (3 models x {naive, steelman}, k=3, ~$12.21 estimated)
+  are DEFERRED until the adjudicated-zero gate is met — they answer a
+  marketing question, and the roadmap's "0 vs X%" claim is unpublishable
+  before the gate anyway. Re-raise the cost sheet when the MacroChef arm
+  reaches adjudicated-true 0.]
 - **Pre-registered and not to be renegotiated after seeing a score**:
   release-blocking violation rate covers **`inherent` cases only**;
   `precautionary` (46 cases) is a separate non-blocking number. Current
@@ -111,6 +117,16 @@ were pre-registered before anyone saw a result.
   immutable frozen case files (verified by direct count of
   `app/evaluation/benchmark/cases/*.jsonl`); runner denominators were
   always 259/46/60 -- see any benchmark report. Not a renegotiation.]
+  [Gate-semantics amendment, 2026-07-17, decided by the HUMAN (the
+  pre-registration was agent-authored, so agents could not amend it and
+  may not revise this further): the release gate is **zero
+  adjudicated-true inherent violations**. Every judge flag receives a
+  written, advisor-reviewed per-case adjudication (convention:
+  `data/evaluation/adjudication_20260717T145539Z.md`); judge-flagged and
+  adjudicated-true are always published as a pair ("judge-flagged N/259;
+  adjudicated true M/259"); judge FPs stay in the raw number forever; the
+  judge is never modified to close the gap. Full text in CLAUDE.md
+  "Honest scope".]
 
 ### Recorded 2026-07-17 (advisor REVISE on b9e663c+14f1cf0: items claimed
 ### "backlogged" in those commit messages but never written here; now written)
@@ -225,7 +241,22 @@ were pre-registered before anyone saw a result.
   ~20x error).
 - `app/services/corpus_import/adapters.py` docstring still claims Food.com
   embeds units in ingredient text — **false for the entire dataset**; the
-  fixture proves it.
+  fixture proves it. [Fixed 2026-07-17 as part of decision 2A below.]
+- **Units decision — 2026-07-17, decided by the human (option 2A, "scope
+  the claim honestly")**: corpus recipes are discovery/inspiration;
+  quantity-aware features (pantry-match amounts, shopping-list math,
+  Phase 3 cost estimation) are real only for the 25 hand-authored seeds
+  and user-entered pantry items. The false adapters.py docstring is
+  fixed and the limitation is stated in README "Limitations". Rejected:
+  parsing units out of the instructions text (guessy, LLM-ish, feeds
+  nutrition math — wrong units are worse than none) and an immediate
+  corpus swap (Wikibooks already measured at 56/3,790 fully convertible,
+  below its pre-registered import band). Consequence, stated plainly:
+  **Phases 3 (cost estimation) and 4 (planner; its "shopping list
+  quantities reconcile" test gate) remain blocked for the imported
+  corpus** — becoming unblocked requires a unit-bearing corpus decision
+  (re-raise Wikibooks or another CC0 source, license = human gate) as a
+  Phase 3 prerequisite, not a quiet fix.
 - Import parser range bug is fixed in `quantity_parser.py`, but
   already-imported rows keep old shapes until re-import.
 - Regenerate `data/processed/grounding_report.md` end-to-end at the next
@@ -234,6 +265,26 @@ were pre-registered before anyone saw a result.
 
 ## Deploy / infra
 
+- **Auth decision — 2026-07-17, decided by the human (option 3A, "accept
+  and document")**: anonymous signed per-browser sessions ship instead of
+  the roadmap Phase 2 "magic-link/email" exit criterion — an accepted
+  deviation, not an oversight. Isolation is real and tested (forged/
+  tampered/expired/attacker-signed tokens all 401); the tradeoffs
+  (cookie clear or device switch = fresh library; 30-day token expiry
+  orphans the old library) are documented in README "Limitations".
+  Rationale: magic-link adds an email-provider human gate + PII to a
+  hobby demo with no users yet, and reopens the HttpOnly deviation the
+  advisor accepted specifically because scope is anonymous. Honest
+  residual: **Phase 4's retention metrics ("week-2 return rate")
+  genuinely need durable identity** — build magic-link when retention
+  measurement actually starts, not before.
+- **Deploy cost — 2026-07-17, money gate RESOLVED: approved by the human
+  (option 4A)**: `min_replicas=1`/`max_replicas=1` at ~$15–30/month
+  accepted (single-writer embedded Chroma pins the replica count; see
+  docs/DEPLOY.md). Scale-to-zero rejected (3.42GB torch image, 30–60s
+  cold start on a benchmark-led launch); external vector store stays
+  backlogged below. The production deploy itself remains a separate
+  "Public actions" human gate.
 - Alembic (currently `create_all` only — never alters existing tables).
 - Multi-replica / external vector store (embedded Chroma is single-writer
   -> `min_replicas=1`). **The in-memory rate limiter

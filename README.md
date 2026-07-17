@@ -4,10 +4,13 @@
 
 > **Hobby project — not medical advice.** MacroChef is an unpaid personal project,
 > not a certified nutrition or allergy-safety product. Its adversarial safety
-> benchmark (371 cases, see below) has been authored but **has not yet been run**,
-> so no violation-rate claim is made anywhere in this README. **If you have a food
-> allergy, you must independently verify every ingredient before you eat anything
-> this app suggests.**
+> benchmark (371 cases, see below) **has been run**, and the current
+> adjudicated-true inherent violation count is **nonzero** — deployment is
+> blocked until it reaches zero. No violation-rate claim is made anywhere in
+> this README; the release gate is zero adjudicated-true inherent violations,
+> with the raw judge-flagged count always published alongside it. **If you have
+> a food allergy, you must independently verify every ingredient before you eat
+> anything this app suggests.**
 
 **A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
@@ -43,9 +46,13 @@ rank, never to include or exclude on safety grounds.
 
 > A reproducible adversarial safety benchmark (371 cases: allergy-contradiction
 > traps, hidden allergens like "satay sauce" → peanut, diet-type traps, and more)
-> has been authored to publish a violation-rate comparison vs. direct LLM
-> prompting, but **has not yet been run** — no violation-rate number is published
-> anywhere in this README until it has. See `docs/ROADMAP.md`.
+> has been authored and **is now being run against MacroChef**. The current
+> adjudicated-true inherent violation count is **nonzero**, so deployment is
+> blocked and **no violation-rate number is published anywhere in this README**
+> until the release gate (zero adjudicated-true inherent violations, with the
+> raw judge-flagged count always published alongside) is met. The planned
+> comparison vs. direct LLM prompting is deferred until then. See
+> `docs/ROADMAP.md`.
 
 ---
 
@@ -365,14 +372,28 @@ pytest
 ## Limitations
 
 - Not medical advice.
-- Nutrition estimates currently depend on recipe metadata (grounding in a real
-  nutrition database is a planned roadmap item).
+- Nutrition is grounded via USDA FoodData Central for the 25 hand-authored seed
+  recipes; imported-corpus rows remain ungrounded and unit-less (see below).
 - The bundled recipe dataset is intentionally small for an MVP.
 - Vision extraction is deterministic mock by default and is not a real image
   recognizer.
 - Allergy safety depends on accurate recipe metadata and accurate user input.
 - Optional hosted/local model integrations are isolated and disabled by default,
   and are never treated as allergy or nutrition authorities.
+- **Imported corpus quantities have no units.** All but 122 of the ~33,732
+  imported Food.com ingredient rows carry no unit (verified 2026-07-17) — the
+  upstream dataset strips them. Imported recipes are therefore
+  discovery/inspiration; quantity-aware features (pantry-match amounts,
+  shopping-list math, future cost estimation) are real only for the 25
+  hand-authored seed recipes and user-entered pantry items. Allergen detection
+  is name-based and unaffected.
+- **Identity is anonymous and per-browser.** Sessions are signed anonymous
+  tokens — no email, no login (a deliberate scope decision: no PII in a hobby
+  demo). Clearing cookies or switching devices starts a fresh library; tokens
+  expire after 30 days and the old library is then unreachable. Session
+  isolation itself is enforced and tested (tampered/forged/expired tokens get
+  401). Durable cross-device identity (magic-link) is a possible post-launch
+  addition.
 
 ## Roadmap
 

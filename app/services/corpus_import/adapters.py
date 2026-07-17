@@ -143,10 +143,16 @@ def _safe_int(value: str | None) -> int | None:
 def _combine_ingredients(parts: list[str], quantities: list[str]) -> list[str]:
     """Zip Food.com's parallel quantity/name arrays into ingredient strings.
 
-    Food.com keeps units embedded in the ingredient-part text itself (e.g.
-    part="cup all-purpose flour", quantity="1/2"), so concatenating
-    "{quantity} {part}" reconstructs a natural line ("1/2 cup all-purpose
-    flour") that `parse_quantity_string` already knows how to parse.
+    Food.com's ingredient-part text almost never carries a unit: in the
+    imported corpus, only 122 of 33,732 ingredient rows (verified 2026-07-17)
+    parse out any unit at all (all of them "clove") -- the upstream dataset
+    strips units from the part text (e.g. part="all-purpose flour",
+    quantity="1/2" yields the dimensionless "1/2 all-purpose flour").
+    Concatenating "{quantity} {part}" therefore reconstructs what the source
+    actually provides -- a quantity with no unit -- not a full
+    natural-language line. Imported quantities are dimensionless as a
+    result; see README "Limitations" and docs/BACKLOG.md for the scoping
+    decision.
 
     Deliberately does NOT filter out empty/blank parts here: an empty source
     entry becomes an empty-named `Ingredient` that flows through to

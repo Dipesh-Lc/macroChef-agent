@@ -180,6 +180,13 @@ two processes fighting over the same on-disk Chroma segments. Both are
 tracked as a real fix in `docs/BACKLOG.md` ("Multi-replica / external vector
 store").
 
+**Money gate resolved 2026-07-17: APPROVED by the human.** `min_replicas=1`/
+`max_replicas=1` at ~$15–30/month is accepted (decision 4A). The
+external-model comparison arms (~$12.21 estimated) are DEFERRED until the
+safety gate (zero adjudicated-true inherent violations) is met. The
+production deploy itself remains a separate "Public actions" human gate —
+prepare everything; the human pulls the trigger.
+
 ## What could not be tested here
 
 This document and the workflow were written and schema-validated

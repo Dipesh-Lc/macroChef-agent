@@ -133,22 +133,46 @@ the evidence, and summarize before starting the next phase.
   the trigger.
 - **Assets.** Screenshots and the demo GIF are captured by the human; leave
   TODO markers and exact capture instructions.
-- **Safety regressions.** Any nonzero adversarial allergy-violation rate is a
-  release blocker: stop the item, surface it loudly, do not proceed with
-  dependent items.
+- **Safety regressions.** A nonzero **adjudicated-true `inherent`**
+  violation rate on the adversarial benchmark is a release blocker: stop
+  the item, surface it loudly, do not proceed with dependent items. (Gate
+  semantics fixed by the human on 2026-07-17 — see "Honest scope" below
+  for the full definition. Agents may not amend it.)
 
 ## Honest scope (hard rule, not a preference)
 
-Until the safety benchmark (`scripts/run_safety_benchmark.py`) has actually
-run: the deployed app carries a prominent disclaimer (hobby project, not
-medical advice, allergy users must verify ingredients themselves), and **no
-"0 violations" claim is published anywhere** — not the UI, not the README,
-not a blog post or launch draft. Under-claim until the number is real.
+**Release-gate semantics — decided by the human on 2026-07-17 (option
+"adjudicated zero"). The pre-registration was agent-authored, so agents
+could not amend it; this amendment is the human's and agents may not
+revise it further:**
+
+- The release gate is **zero adjudicated-true `inherent` violations** on
+  the adversarial benchmark.
+- Every judge flag receives a **written, per-case, advisor-reviewed
+  adjudication** (verdict TRUE_VIOLATION or JUDGE_FP, matched term +
+  field, served recipe's actual ingredients, citable rule; ambiguity
+  defaults to TRUE_VIOLATION — see
+  `data/evaluation/adjudication_20260717T145539Z.md` for the convention).
+- The raw judge-flagged count is **always published alongside** the
+  adjudicated number ("judge-flagged N/259; adjudicated true M/259").
+  Judge false positives stay in the raw number forever.
+- **The judge is never modified** to close the gap between the two
+  numbers.
+
+Until the adjudicated-true inherent number is zero: the deployed app
+carries a prominent disclaimer (hobby project, not medical advice,
+allergy users must verify ingredients themselves), and **no "0
+violations" claim is published anywhere** — not the UI, not the README,
+not a blog post or launch draft. When the gate is met, any published
+claim states both numbers. Under-claim until the number is real.
 
 ## Hard rules (unchanged)
 
-- **Safety is a release blocker.** The adversarial eval suite's allergy-violation
-  rate must remain 0. Any regression blocks the change — surface it loudly.
+- **Safety is a release blocker.** The adversarial benchmark's
+  **adjudicated-true `inherent`** violation rate must remain 0, per the
+  gate semantics in "Honest scope" (judge-flagged count always reported
+  alongside; judge never weakened). Any regression blocks the change —
+  surface it loudly.
 - **Ingredients are structured**, not bare strings: `{name, amount, unit}`.
   Never reintroduce name-only ingredients once the quantity model exists.
 - **Nutrition comes from the grounded database** (USDA FDC / Open Food Facts),
