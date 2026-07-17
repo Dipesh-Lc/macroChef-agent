@@ -72,7 +72,9 @@ for _key in _FORCED_MOCK_ENV_KEYS:
 # --- Ordinary imports ------------------------------------------------------
 
 import argparse  # noqa: E402
+import json  # noqa: E402
 import math  # noqa: E402
+import re  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -90,7 +92,11 @@ from app.evaluation.benchmark.case_schema import (  # noqa: E402
     BenchmarkCase,
 )
 from app.evaluation.benchmark.loader import load_all_cases  # noqa: E402
-from app.evaluation.benchmark.safety_judge import JudgedRecipe, judge_case  # noqa: E402
+from app.evaluation.benchmark.safety_judge import (  # noqa: E402
+    JudgedRecipe,
+    TermMatch,
+    judge_case,
+)
 from app.graph.builder import run_recommendation_graph  # noqa: E402
 from app.graph.library_builder import run_library_discovery_graph  # noqa: E402
 from app.rag.loaders import load_corpus  # noqa: E402
@@ -113,8 +119,21 @@ class CaseOutcome(BaseModel):
     claim_strength: str | None = None
     violated: bool
     matched_terms: list[str] = Field(default_factory=list)
+    # The full evidence trail behind `matched_terms`/`violated`: every
+    # TermMatch the judge produced (forbidden_term, recipe_id, recipe_title,
+    # matched_field). Additive only -- this does not change `violated` or
+    # `matched_terms`, which are still exactly what the judge returned; it
+    # just stops discarding `verdict.matches` (see this task's spec: the
+    # runner was throwing away the title-vs-ingredient discriminator that
+    # adjudication of the 21 inherent cases needs).
+    matches: list[TermMatch] = Field(default_factory=list)
     served_recipe_ids: list[str] = Field(default_factory=list)
     served_recipe_titles: list[str] = Field(default_factory=list)
+    # Keyed by recipe_id -> that recipe's full ingredient name list, for
+    # every recipe actually served in this case (across every surface run).
+    # Additive: retains evidence (`JudgedRecipe.ingredient_names`) that was
+    # previously consumed by judge_case() and then dropped.
+    served_recipe_ingredients: dict[str, list[str]] = Field(default_factory=dict)
     # True only for safe_control cases where nothing at all was served --
     # see run_case()'s docstring for why this is scoped to safe_control.
     over_blocked: bool = False
@@ -334,6 +353,12 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
     verdict = judge_case(case.forbidden_terms, served)
     over_blocked = case.category == SAFE_CONTROL_CATEGORY and not served
 
+    # Keyed by recipe_id so a recipe served by more than one surface (e.g.
+    # both recommendation_graph and a pinned-recipe direct check) collapses
+    # to one entry -- its ingredient list is identical either way, since it
+    # is the same corpus recipe.
+    served_recipe_ingredients = {recipe.recipe_id: recipe.ingredient_names for recipe in served}
+
     return CaseOutcome(
         case_id=case.case_id,
         category=case.category,
@@ -341,8 +366,10 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
         claim_strength=case.claim_strength,
         violated=verdict.violated,
         matched_terms=verdict.matched_terms,
+        matches=verdict.matches,
         served_recipe_ids=sorted({recipe.recipe_id for recipe in served}),
         served_recipe_titles=sorted({recipe.title for recipe in served}),
+        served_recipe_ingredients=served_recipe_ingredients,
         over_blocked=over_blocked,
         notes=notes,
     )
@@ -502,6 +529,135 @@ def _git_commit_hash() -> str:
     except Exception:  # pragma: no cover - defensive; git absence must not crash the run
         pass
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Evidence bundle (per-case adjudication artifact) -- additive only. This
+# does not change `violated`, `matched_terms`, or any BenchmarkReport number;
+# it exists so a flagged case's evidence (which term matched, which FIELD --
+# title vs a specific ingredient -- of which served recipe, and that
+# recipe's full ingredient list) survives to a machine-readable artifact
+# instead of being discarded once the markdown report is rendered. See this
+# task's spec: `app.evaluation.benchmark.safety_judge` is frozen and is NOT
+# modified here -- `_classify_match_rule` below independently re-derives
+# (never imports) which of the judge's two documented recall-biasing
+# branches fired, purely for reporting on an ALREADY-decided TermMatch.
+# ---------------------------------------------------------------------------
+
+_MATCH_RULE_PUNCTUATION_RE = re.compile(r"[^a-z0-9\s]")
+_MATCH_RULE_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_for_match_rule_only(text: str) -> str:
+    """Deliberately duplicates (does not import) `safety_judge._normalize`'s
+    exact algorithm: lowercase, strip punctuation, collapse whitespace. This
+    runner must never import from `app.evaluation.benchmark.safety_judge`'s
+    matching internals beyond its public `JudgedRecipe`/`TermMatch`/
+    `judge_case` surface -- that module is frozen -- so the normalization
+    step needed to classify an already-produced TermMatch is re-implemented
+    here, not reused. This has no bearing on any score: it only labels
+    evidence for a match the judge already decided."""
+    lowered = text.lower()
+    stripped = _MATCH_RULE_PUNCTUATION_RE.sub(" ", lowered)
+    return _MATCH_RULE_WHITESPACE_RE.sub(" ", stripped).strip()
+
+
+def _classify_match_rule(term: str, matched_field: str, recipe_title: str) -> str:
+    """Classifies which of `safety_judge._term_matches`'s two documented
+    branches fired for one already-produced `TermMatch`:
+    `"bidirectional_substring"` (safety_judge.py's whole-string containment
+    check, either direction) or `"token_subset_fallback"` (the multi-word
+    token-subset fallback). The exact haystack text a TermMatch matched
+    against is recoverable without re-running retrieval: `matched_field`
+    is either `"title"` (haystack is `recipe_title`) or
+    `"ingredient:<name>"` (the ingredient name is embedded in the label
+    itself, exactly as `judge_case` constructed it)."""
+    haystack_text = recipe_title if matched_field == "title" else matched_field.split(":", 1)[1]
+    norm_term = _normalize_for_match_rule_only(term)
+    norm_hay = _normalize_for_match_rule_only(haystack_text)
+    if norm_term and norm_hay and (norm_term in norm_hay or norm_hay in norm_term):
+        return "bidirectional_substring"
+    return "token_subset_fallback"
+
+
+_FLAGGED_CLAIM_STRENGTHS = ("inherent", "precautionary")
+
+
+def build_case_evidence_bundle(
+    cases: list[BenchmarkCase], per_run_outcomes: list[list[CaseOutcome]]
+) -> list[dict]:
+    """Builds the per-case adjudication evidence for every flagged case
+    (`violated=True`, `claim_strength` in {inherent, precautionary} --
+    safe_control over-blocking is a different, non-allergen signal and is
+    out of scope for this bundle). One entry per case_id, unioned across
+    every run that flagged it (the mock provider is deterministic, so in
+    practice this collapses to one run's worth of evidence; the union is
+    defensive, not evidence of nondeterminism). Does not read or affect
+    `BenchmarkReport`/`render_report` in any way.
+    """
+    cases_by_id = {case.case_id: case for case in cases}
+    outcomes_by_case_id: dict[str, list[CaseOutcome]] = {}
+    for outcomes in per_run_outcomes:
+        for outcome in outcomes:
+            if outcome.violated and outcome.claim_strength in _FLAGGED_CLAIM_STRENGTHS:
+                outcomes_by_case_id.setdefault(outcome.case_id, []).append(outcome)
+
+    bundle: list[dict] = []
+    for case_id in sorted(outcomes_by_case_id):
+        case = cases_by_id.get(case_id)
+        outcomes = outcomes_by_case_id[case_id]
+
+        seen_match_keys: set[tuple[str, str, str]] = set()
+        match_entries: list[dict] = []
+        served_ids: set[str] = set()
+        served_titles: set[str] = set()
+        served_ingredients: dict[str, list[str]] = {}
+        for outcome in outcomes:
+            served_ids.update(outcome.served_recipe_ids)
+            served_titles.update(outcome.served_recipe_titles)
+            served_ingredients.update(outcome.served_recipe_ingredients)
+            for match in outcome.matches:
+                key = (match.forbidden_term, match.recipe_id, match.matched_field)
+                if key in seen_match_keys:
+                    continue
+                seen_match_keys.add(key)
+                match_entries.append(
+                    {
+                        "forbidden_term": match.forbidden_term,
+                        "matched_field": match.matched_field,
+                        "match_rule": _classify_match_rule(
+                            match.forbidden_term, match.matched_field, match.recipe_title
+                        ),
+                        "recipe_id": match.recipe_id,
+                        "recipe_title": match.recipe_title,
+                    }
+                )
+
+        bundle.append(
+            {
+                "case_id": case_id,
+                "category": case.category if case is not None else None,
+                "claim_strength": outcomes[0].claim_strength,
+                "forbidden_terms": list(case.forbidden_terms) if case is not None else [],
+                "matches": match_entries,
+                "served_recipe_ids": sorted(served_ids),
+                "served_recipe_titles": sorted(served_titles),
+                "served_recipe_ingredients": served_ingredients,
+            }
+        )
+    return bundle
+
+
+def _default_cases_json_path(report_path: Path) -> Path:
+    """Sibling JSON path next to a given markdown report path, e.g.
+    `safety_benchmark_report_<ts>.md` -> `safety_benchmark_cases_<ts>.json`."""
+    stem = report_path.stem
+    prefix = "safety_benchmark_report_"
+    if stem.startswith(prefix):
+        json_name = f"safety_benchmark_cases_{stem[len(prefix):]}.json"
+    else:
+        json_name = f"{stem}_cases.json"
+    return report_path.with_name(json_name)
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +907,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "data/evaluation/safety_benchmark_report_<timestamp>.md).",
     )
     parser.add_argument(
+        "--cases-json-path",
+        default=None,
+        help="Where to write the machine-readable per-flagged-case evidence "
+        "bundle (default: a sibling of --report-path, "
+        "data/evaluation/safety_benchmark_cases_<timestamp>.json).",
+    )
+    parser.add_argument(
         "--cost-estimate",
         action="store_true",
         help="Print the cost estimate for the money-gated arms and exit without "
@@ -823,8 +986,19 @@ def main(argv: list[str] | None = None) -> int:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(markdown, encoding="utf-8")
 
+    # Additive evidence bundle -- see build_case_evidence_bundle()'s
+    # docstring. Written unconditionally as a sibling JSON; does not change
+    # the markdown report, any BenchmarkReport number, or the exit code.
+    evidence_bundle = build_case_evidence_bundle(cases, per_run_outcomes)
+    cases_json_path = (
+        Path(args.cases_json_path) if args.cases_json_path else _default_cases_json_path(report_path)
+    )
+    cases_json_path.parent.mkdir(parents=True, exist_ok=True)
+    cases_json_path.write_text(json.dumps(evidence_bundle, indent=2), encoding="utf-8")
+
     print(markdown)
     print(f"\nWrote report to {report_path}")
+    print(f"Wrote per-case evidence bundle ({len(evidence_bundle)} flagged cases) to {cases_json_path}")
 
     return 1 if report.inherent.worst_successes > 0 else 0
 

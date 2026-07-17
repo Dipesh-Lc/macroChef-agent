@@ -71,6 +71,60 @@ from app.schemas.recipe import Recipe
 # word level in ways a human title-reader would not read as a nut claim),
 # and bare "shellfish" (never itself a title word in the corpus this was
 # developed against).
+#
+# Also deliberately NOT included (2026-07 derivative-term review -- each
+# rejected on real corpus evidence or established culinary-technique
+# variance, not merely "seemed risky"):
+#   - "custard" for egg (custard already covers dairy above): real corpus
+#     counter-example "Low-Fat Orange Custard Pie" is a legitimate
+#     gelatin/cornstarch-set custard with zero egg -- a recognized eggless
+#     technique, so the bare word does not reliably imply egg.
+#   - "mayonnaise", "aioli" for egg: real corpus counter-examples ("Dutch
+#     Mayonnaise", "Handmade Basic Mayonnaise") are legitimate egg-free
+#     mayonnaise recipes emulsified with mustard powder instead of egg
+#     yolk, each with allergens=[]. Traditional aioli is likewise
+#     classically emulsified without egg (garlic pounded with olive oil);
+#     both names cover genuinely divergent real techniques, not one fixed
+#     recipe.
+#   - "marshmallow" for egg: the overwhelmingly common corpus usage is
+#     shelf-bought/bagged marshmallows used as an ingredient, which are
+#     gelatin-set, not egg-based. Only marshmallow CREME/FLUFF (a
+#     differently-named product) commonly contains dried egg white, so the
+#     bare word would over-flag ordinary gelatin-marshmallow recipes.
+#   - "nougat" for tree_nut: real corpus counter-example "No-Bake Fudge
+#     Nougats" (the only corpus hit) has zero nuts. Nougat has two
+#     divergent traditions -- nut-and-honey nougat (torrone, nougat de
+#     Montélimar) vs. whipped-sugar/egg-white candy-bar nougat (Mars-style),
+#     which is frequently nut-free -- so the bare word doesn't reliably fix
+#     a variant.
+#   - "pesto" for tree_nut: genuinely variable even within this corpus (6
+#     hits including "Sun-Dried Tomato Pesto", "Pacifist Pesto", "Dijon
+#     Pesto Steak" -- clearly non-traditional, and real-world pesto commonly
+#     omits pine nuts/walnuts entirely).
+#   - "caramel" for dairy: real corpus counter-examples ("Caramel Icing":
+#     brown/white sugar + vanilla only; "Caramel Apples": apples + water
+#     only) are dry, dairy-free cooked-sugar caramel -- a real and common
+#     variant distinct from soft cream/butter caramel, so the bare word
+#     doesn't reliably imply dairy.
+#   - "margarine" for dairy: margarine is not reliably dairy at all --
+#     historically and still today it is marketed specifically as a
+#     dairy-free/pareve butter substitute; many commercial margarines
+#     contain zero milk derivatives, so this term would be backwards for a
+#     large share of real formulations rather than merely ambiguous.
+#   - "caesar" for fish: real corpus counter-example "Chicken Caesar Wraps"
+#     is a genuine anchovy-free Caesar-style dressing (sour cream/milk/
+#     parmesan-based, no anchovy or Worcestershire at all), a legitimate,
+#     common home-cook variant -- flagging it would incorrectly quarantine
+#     a correct row.
+#   - "satay" for peanut: real corpus counter-examples ("Chicken Coconut
+#     Satay Skewers", "Tiki Torch Chicken Satays") are legitimate
+#     peanut-free marinades/skewers (coconut milk/soy-sauce/curry-based) --
+#     "satay" names a grilling method as much as a peanut-sauce dish, and
+#     the peanut accompaniment is optional in real recipes.
+#   - "pad thai" for peanut: the corpus's only hit ("Vegetarian Pad Thai")
+#     is a legitimate peanut-free variant substituting cashews for the
+#     traditional peanut garnish, proving the dish name alone doesn't fix a
+#     specific nut in every recipe's actual ingredient list.
 
 TITLE_ALLERGEN_CATEGORIES: dict[str, dict] = {
     "peanut": {
@@ -83,6 +137,34 @@ TITLE_ALLERGEN_CATEGORIES: dict[str, dict] = {
             "cashew", "cashews", "hazelnut", "hazelnuts", "pistachio",
             "pistachios", "macadamia", "macadamias", "brazil nut",
             "brazil nuts", "pine nut", "pine nuts",
+            # "marzipan": almond paste (ground almonds + sugar) -- the entire
+            # product IS almond, no nut-free variant exists under this name.
+            # Verified against the real corpus: "Marzipan Bars" (the only
+            # corpus title match) lists butter/flour/brown sugar/salt as its
+            # full ingredient list -- zero almond, zero tree-nut allergen --
+            # a genuine title/ingredient defect of the exact class this
+            # module exists to catch, not a false positive.
+            "marzipan",
+            # "praline": in American (Southern US/Louisiana) usage always
+            # pecan-based; in classical French usage, almond-based. Either
+            # way, always a tree nut. Verified 7/7 real corpus "praline"
+            # titles literally list pecans in their own ingredients (so this
+            # addition produces zero NEW quarantines here -- it only adds
+            # defense-in-depth for a future row where the pecan happens to
+            # be missing).
+            "praline",
+            # "frangipane": almond cream/frangipane filling (ground almonds +
+            # butter + sugar + egg) used in pastries (Bakewell tart, galette
+            # des rois). No recognized nut-free variant under this name.
+            # Zero corpus hits today; added for future-import defense
+            # (CorpusImportPipeline reuses this same table).
+            "frangipane",
+            # "gianduja": specifically denotes chocolate blended with
+            # hazelnut paste (the Italian confection/spread family Nutella
+            # belongs to) -- the word itself asserts the hazelnut content;
+            # nothing called "gianduja" omits hazelnut. Zero corpus hits
+            # today; added for future-import defense.
+            "gianduja",
         },
         "allergen_labels": {"tree nut", "nuts"},
     },
@@ -91,6 +173,29 @@ TITLE_ALLERGEN_CATEGORIES: dict[str, dict] = {
             "butter", "cheese", "cheddar", "mozzarella", "parmesan", "cream",
             "milk", "yogurt", "yoghurt", "buttermilk", "ghee", "custard",
             "brie", "feta", "ricotta",
+            # "ganache": chocolate emulsified with cream (occasionally
+            # butter) -- no common dairy-free "ganache" exists under the
+            # bare name (vegan versions are explicitly labeled "vegan
+            # ganache" / name their non-dairy cream substitute). Zero corpus
+            # hits today; added for future-import defense.
+            "ganache",
+            # "alfredo": a butter/cream/parmesan sauce by definition.
+            # Verified 9/9 real corpus "alfredo" titles already carry dairy
+            # in their own ingredient list (even the leanest, "Fat-Free
+            # Fettuccine Alfredo," uses fat-free cream cheese) -- this
+            # addition produces zero new quarantines, pure defense-in-depth.
+            "alfredo",
+            # "bechamel": one of the French mother sauces, defined as a
+            # butter+flour+milk roux. Verified both real corpus hits
+            # ("Lasagna Rollups with Bechamel Sauce", "Sauce Bechamel")
+            # already list milk/butter/cheese.
+            "bechamel",
+            # "tzatziki": Greek yogurt-based dip. Verified the corpus's only
+            # hit ("Tzatziki") lists "plain yogurt" directly.
+            "tzatziki",
+            # "raita": Indian yogurt-based condiment. Verified both corpus
+            # hits list "plain yogurt" directly.
+            "raita",
         },
         "allergen_labels": {"dairy", "milk"},
     },
@@ -103,7 +208,44 @@ TITLE_ALLERGEN_CATEGORIES: dict[str, dict] = {
         "allergen_labels": {"wheat", "gluten"},
     },
     "egg": {
-        "terms": {"egg", "eggs"},
+        "terms": {
+            "egg", "eggs",
+            # "meringue": whipped egg whites + sugar -- the defining
+            # ingredient of any meringue, by definition. Verified against
+            # the real corpus: 4 of 8 "meringue" titles ("Meringue Mushrooms
+            # II", "Applesauce Meringue (adopted)", "Chocolate Chip-Studded
+            # Mini Meringues", "Chocolate Cream Meringue Pie") have zero egg
+            # in their ingredient list AND zero egg in their derived
+            # allergens field -- genuine title/ingredient defects of the
+            # exact class this module exists to catch (this is the finding
+            # that prompted this update; the check catches it on its own
+            # merits, not because it was tuned to).
+            "meringue",
+            # "hollandaise": one of the five French mother sauces, defined
+            # as emulsified egg yolk + clarified butter -- no established
+            # egg-free variant under the bare name (the one common
+            # exception, "mock hollandaise", is already caught and
+            # suppressed by the "mock"-prefix rule below, independently of
+            # this addition). Verified against the real corpus: "Processor
+            # Hollandaise Sauce" lists only salt/white pepper/butter -- zero
+            # egg -- a genuine defect this addition newly catches.
+            "hollandaise",
+            # "frittata": an Italian baked/set egg dish (a crustless
+            # quiche); egg is the defining structural ingredient. Verified
+            # against the real corpus: "Baked Zucchini Frittatas" and
+            # "Zucchini Frittatas II" both have zero egg in their ingredient
+            # list and zero egg in their allergens field -- genuine defects
+            # this addition newly catches.
+            "frittata",
+            # "omelet"/"omelette": beaten eggs cooked in a pan; egg is
+            # definitionally required, no established eggless variant exists
+            # under this name. Only one corpus hit ("Asparagus Omelet"), and
+            # it already lists egg directly, so this produces zero new
+            # quarantines here -- pure future-import defense. Both spellings
+            # listed because the word-boundary "s?" pluralization can't
+            # bridge "omelet" into "omelette" (different word, not a plural).
+            "omelet", "omelette",
+        },
         "allergen_labels": {"egg", "eggs"},
     },
     "fish": {
@@ -111,6 +253,22 @@ TITLE_ALLERGEN_CATEGORIES: dict[str, dict] = {
             "salmon", "tuna", "cod", "halibut", "trout", "snapper",
             "anchovy", "anchovies", "sardine", "sardines", "mackerel",
             "herring",
+            # "worcestershire": the traditional formulation (Lea & Perrins'
+            # original and its many home-recipe imitations) is fermented
+            # with anchovies as a defining ingredient; no common fish-free
+            # "Worcestershire" exists under the bare name (vegan/vegetarian
+            # versions are explicitly labeled as such). Zero corpus hits as
+            # a TITLE today, but added because it is also reused to scan
+            # INGREDIENT text -- several real corpus rows (e.g. "Caesar
+            # Salad Dressing II") already list "Worcestershire sauce" as an
+            # ingredient, and this lets that ingredient-side mention count
+            # as the fish allergen being genuinely present.
+            "worcestershire",
+            # "puttanesca": the traditional Neapolitan sauce is defined by
+            # olives + capers + anchovies + tomato. Verified the corpus's
+            # only hit ("Spaghetti Alla Puttanesca") already lists anchovy
+            # fillets directly.
+            "puttanesca",
         },
         "allergen_labels": {"fish", "seafood"},
     },
