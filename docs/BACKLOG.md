@@ -175,13 +175,19 @@ were pre-registered before anyone saw a result.
   but ran on a then-dirty tree. Add a `-dirty` suffix (via
   `git describe --dirty` or `git status --porcelain`) to the header for
   provenance honesty.
-- **69c580f (unknown-diet_type fail-open fix) needs its own FULL
-  TREATMENT review**: it decides diet outcomes
-  (`app/services/recipe_discovery_service.py`,
-  `recipe_validation_service.py`) and was never advisor-reviewed — the
-  2026-07-17 worktree review of b9e663c+14f1cf0 explicitly excluded it
-  from its verdict. (Review commissioned same day; remove this entry
-  when the verdict lands.)
+- **69c580f (unknown-diet_type fail-open fix): FULL TREATMENT review
+  DONE 2026-07-17, VERDICT: APPROVED** (clean worktree at 69c580f).
+  Fail-closed verified on every path — the diet partition is complete
+  with ValueError on anything unrecognized, both services import the
+  schema's sets (one definition, no drift), no caller bypasses, and the
+  relaxation retry re-gates against the original request. Two
+  non-blocking findings kept here: (1) `recipe_validation_node`
+  (`app/graph/library_nodes.py`) lacks `discovery_node`'s try/except, so
+  under llm/external/hybrid source modes an unknown diet_type surfaces
+  as an unhandled exception (HTTP 500) — fail-closed but ungraceful;
+  wrap it to a structured zero-candidate error. (2) Add a test pinning
+  the relaxation path's downstream re-gating (relaxed candidates that
+  violate the original diet must be rejected at validation).
 - **Written per-case adjudication of judge flags** — DONE 2026-07-17:
   `data/evaluation/adjudication_20260717T145539Z.md` (19 inherent + 12
   precautionary flags, per-case verdict + citable rule, `_KNOWN_RESIDUALS`
