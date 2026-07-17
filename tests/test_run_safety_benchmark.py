@@ -356,14 +356,29 @@ def test_check_pinned_recipes_notes_missing_pinned_id_instead_of_crashing() -> N
 
 
 # ---------------------------------------------------------------------------
-# Mutation self-check: a planted fault must make the violation rate nonzero.
+# Mutation self-check: a planted fault must make the violation rate go up.
 #
 # Per docs/BACKLOG.md: "a safety net that never caught a planted fault is
-# unproven." Two variants: a fast one against the pinned-recipe direct-check
-# path (no graph/chroma involved, near-instant), and a slower one that runs
-# the actual `run_all_cases`/`build_report` pipeline end-to-end against a
-# small real-case subset, proving the full reporting pipeline (not just one
-# helper) goes nonzero.
+# unproven." An earlier version of both checks below asserted only that
+# SOME violation existed with the fault planted -- but two of this frozen
+# case set's morphology inherent cases (morphology_005, morphology_024) are
+# REAL, pre-existing bugs (the chestnut/crawfish alias gaps the benchmark's
+# first run found) that violate with NO fault at all. That made both checks
+# vacuous: they passed whether or not the monkeypatch below was even applied
+# (verified by hand while writing this fix -- removing the monkeypatch from
+# the old assertion still left `violated_case_ids`/`worst_successes` nonzero,
+# because of those two real bugs, not because the harness detected anything).
+#
+# The fix is DIFFERENTIAL: compute the violation set with NO fault (the
+# baseline -- includes any real, pre-existing bugs) and compare it to the
+# violation set WITH the fault planted. The assertion is that the fault
+# causes at least one NEW case to be detected as violated beyond whatever
+# the baseline already found, and that the faulted set never loses a
+# baseline detection (admitting everything must never detect FEWER
+# violations than the unfaulted baseline). This is satisfiable only by an
+# actual fault effect, never by a pre-existing bug alone -- if the
+# monkeypatch below is removed, the "faulted" computation becomes identical
+# to the baseline, `newly_caught` is empty, and the test fails.
 # ---------------------------------------------------------------------------
 
 
@@ -374,13 +389,14 @@ def _admit_everything(recipe, profile) -> ValidationResult:  # noqa: ARG001 - fa
 def test_mutation_self_check_pinned_recipe_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fast variant: every morphology `expected_safe=False` case pins a real
     corpus recipe whose ingredients contain its own forbidden terms by
-    construction (that is the entire premise of a morphology case). With
-    `constraint_engine.validate_recipe` faulted to admit everything, the
-    pinned-recipe direct-check path must serve that recipe regardless of
-    the allergy profile, and the independent judge must then detect the
-    forbidden term -- proving this exact call site is load-bearing."""
-    monkeypatch.setattr(runner.constraint_engine, "validate_recipe", _admit_everything)
-
+    construction (that is the entire premise of a morphology case). Computes
+    the violated-case set via the pinned-recipe direct-check path twice --
+    once against the real (unfaulted) `constraint_engine.validate_recipe`
+    (the baseline, which may legitimately be nonempty due to real bugs the
+    benchmark already found), and once with it faulted to admit everything.
+    The fault must cause at least one case NOT in the baseline to newly
+    violate -- proving this exact call site is load-bearing, not just that
+    morphology cases violate for other reasons."""
     cases = load_all_cases()
     morphology_inherent = [
         case for case in cases if case.category == "morphology" and not case.expected_safe
@@ -389,37 +405,50 @@ def test_mutation_self_check_pinned_recipe_path(monkeypatch: pytest.MonkeyPatch)
 
     from app.evaluation.benchmark.safety_judge import judge_case
 
-    violated_case_ids = []
-    for case in morphology_inherent:
-        profile = runner._build_user_profile(case)
-        served, _notes = runner._check_pinned_recipes(case, profile)
-        verdict = judge_case(case.forbidden_terms, served)
-        if verdict.violated:
-            violated_case_ids.append(case.case_id)
+    def _violated_case_ids() -> set[str]:
+        ids: set[str] = set()
+        for case in morphology_inherent:
+            profile = runner._build_user_profile(case)
+            served, _notes = runner._check_pinned_recipes(case, profile)
+            verdict = judge_case(case.forbidden_terms, served)
+            if verdict.violated:
+                ids.add(case.case_id)
+        return ids
 
-    assert violated_case_ids, (
-        "Mutation self-check FAILED: with constraint_engine.validate_recipe faulted to "
-        "admit everything, the pinned-recipe direct-check path reported ZERO violations "
-        "across all morphology inherent cases. The harness did not catch a planted fault "
-        "-- see docs/BACKLOG.md's mutation self-check requirement. STOP; do not trust "
-        "this benchmark's zero-violation reports until this is fixed."
+    baseline_violated = _violated_case_ids()
+
+    monkeypatch.setattr(runner.constraint_engine, "validate_recipe", _admit_everything)
+    faulted_violated = _violated_case_ids()
+
+    newly_caught = faulted_violated - baseline_violated
+    assert newly_caught, (
+        "Mutation self-check FAILED (vacuous): faulting constraint_engine.validate_recipe "
+        "to admit everything did not cause ANY morphology inherent case to newly violate "
+        f"beyond the baseline (baseline, pre-existing real bugs if any: {sorted(baseline_violated)}). "
+        "A differential check must show the fault causes NEW detections, not just rely on "
+        "cases that already violate for real. See docs/BACKLOG.md's mutation self-check "
+        "requirement. STOP; do not trust this benchmark's zero-violation reports until "
+        "this is fixed."
+    )
+    assert faulted_violated >= baseline_violated, (
+        "Faulted violation set must be a superset of the baseline -- admitting everything "
+        "should never cause FEWER detections than the unfaulted baseline."
     )
 
 
 def test_mutation_self_check_full_pipeline_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     """Slower variant: runs the REAL `run_all_cases` -> `build_report`
     pipeline (the same functions `main()` calls) against a small real-case
-    subset, with the fault planted at both call sites the real code path
-    uses (app.graph.nodes.validate_recipe for the recommendation_graph
-    surface, and constraint_engine.validate_recipe for the pinned-recipe
-    direct check), and asserts the resulting report's inherent bucket is
-    nonzero. This is the literal "the benchmark's violation rate goes
-    nonzero" check the task spec asks for, not just a unit test of one
-    helper."""
+    subset, once at baseline (no fault -- may legitimately have a nonzero
+    inherent bucket from real, pre-existing bugs, e.g. morphology_005) and
+    once with the fault planted at both call sites the real code path uses
+    (app.graph.nodes.validate_recipe for the recommendation_graph surface,
+    and constraint_engine.validate_recipe for the pinned-recipe direct
+    check). Asserts the fault causes the reported violated case_ids to
+    STRICTLY grow -- the literal "the benchmark's violation rate goes UP
+    because of the fault" check, not just "is nonzero" (which the
+    pre-existing morphology_005 bug alone would already satisfy)."""
     import app.graph.nodes as nodes
-
-    monkeypatch.setattr(nodes, "validate_recipe", _admit_everything)
-    monkeypatch.setattr(runner.constraint_engine, "validate_recipe", _admit_everything)
 
     cases = load_all_cases()
     morphology_inherent = [
@@ -427,11 +456,25 @@ def test_mutation_self_check_full_pipeline_end_to_end(monkeypatch: pytest.Monkey
     ][:6]
     assert len(morphology_inherent) == 6
 
-    outcomes = runner.run_all_cases(morphology_inherent, run_index=0)
-    report = runner.build_report(morphology_inherent, [outcomes], provider_label="mock")
+    baseline_outcomes = runner.run_all_cases(morphology_inherent, run_index=0)
+    baseline_report = runner.build_report(morphology_inherent, [baseline_outcomes], provider_label="mock")
+    baseline_violated = set(baseline_report.inherent.worst_run_case_ids)
 
-    assert report.inherent.worst_successes > 0, (
-        "Mutation self-check FAILED end-to-end: with the constraint engine faulted to "
-        "admit everything, run_all_cases/build_report still reported ZERO inherent "
-        "violations. The harness did not catch a planted fault."
+    monkeypatch.setattr(nodes, "validate_recipe", _admit_everything)
+    monkeypatch.setattr(runner.constraint_engine, "validate_recipe", _admit_everything)
+
+    faulted_outcomes = runner.run_all_cases(morphology_inherent, run_index=1)
+    faulted_report = runner.build_report(morphology_inherent, [faulted_outcomes], provider_label="mock")
+    faulted_violated = set(faulted_report.inherent.worst_run_case_ids)
+
+    newly_caught = faulted_violated - baseline_violated
+    assert newly_caught, (
+        "Mutation self-check FAILED end-to-end (vacuous): with the constraint engine "
+        "faulted to admit everything, run_all_cases/build_report did not report any "
+        f"NEW inherent violation beyond the baseline (baseline case_ids: {sorted(baseline_violated)}). "
+        "The harness did not catch a planted fault."
+    )
+    assert faulted_violated >= baseline_violated, (
+        "Faulted violation set must be a superset of the baseline -- admitting everything "
+        "should never cause FEWER detections than the unfaulted baseline."
     )

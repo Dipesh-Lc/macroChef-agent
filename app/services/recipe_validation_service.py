@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
+from app.schemas.user import NO_RESTRICTION_DIET_TYPES
 from app.services.constraint_engine import contains_allergen
 from app.services.recipe_image_service import placeholder_image_url
 from app.utils.ingredient_normalizer import ingredient_matches
@@ -129,6 +130,8 @@ class RecipeValidationService:
         self, recipe: Recipe, candidate: RecipeCandidate, diet_type: str
     ) -> bool:
         requested = diet_type.lower()
+        if requested in NO_RESTRICTION_DIET_TYPES:
+            return False
         # dairy-free/gluten-free are routed through contains_allergen -- the
         # same deterministic substring-matching safety authority
         # constraint_engine.violates_diet_type itself uses -- rather than a
@@ -149,4 +152,19 @@ class RecipeValidationService:
         tags = {tag.lower() for tag in candidate.diet_tags}
         if requested in {"vegetarian", "vegan", "high-protein"}:
             return requested not in tags
-        return False
+        # Fail closed: an unrecognized diet_type (e.g. "pescatarian",
+        # "kosher", "halal", a typo) must never fall through to `return
+        # False` here -- False means "does not violate", which `_validate`'s
+        # caller reads as ADMIT. That is exactly the fail-open bug
+        # constraint_engine.violates_diet_type's own comment warns against
+        # ("Returning False would silently claim the recipe is safe for that
+        # diet; fail loudly instead"); mirrored here rather than duplicated
+        # as a second, independently-drifting rule. Confirmed live by the
+        # adversarial safety benchmark's multi_015/multi_025/diet_040 cases
+        # (see docs/BACKLOG.md's "Unknown diet_type fails OPEN" entry).
+        raise ValueError(
+            f"_violates_requested_diet does not enforce diet_type {diet_type!r}. "
+            "Supported: vegetarian, vegan, high-protein (tag-based), "
+            "dairy-free, gluten-free (allergen-based), plus no-restriction "
+            f"aliases {sorted(NO_RESTRICTION_DIET_TYPES)}."
+        )

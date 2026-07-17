@@ -1,3 +1,5 @@
+import pytest
+
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.recipe_validation_service import RecipeValidationService
@@ -200,3 +202,70 @@ def test_high_protein_diet_tag_path_is_unchanged() -> None:
 
     assert result.failed_candidates
     assert not result.valid_candidates
+
+
+# --- Fail-closed fix for unrecognized diet_type (docs/BACKLOG.md's "Unknown
+# diet_type fails OPEN in _violates_requested_diet"; confirmed live by the
+# adversarial safety benchmark's multi_015/multi_025/diet_040 cases, which
+# request diet_type="pescatarian"/"kosher" alongside a real allergy and were
+# over-served shellfish/peanut-containing mock candidates). The old code's
+# final `return False` meant "does not violate" -- i.e. ADMIT -- for any
+# diet_type it didn't recognize. An unrecognized diet_type must now fail
+# loudly instead, mirroring constraint_engine.violates_diet_type's own
+# fail-loud ValueError, so it can never silently result in an unfiltered
+# recommendation.
+
+
+def test_pescatarian_diet_type_fails_closed_not_open() -> None:
+    # Mirrors benchmark case multi_015: shellfish allergy + "pescatarian"
+    # diet_type requested against a shrimp recipe. The bug served it because
+    # "pescatarian" hit the catch-all `return False`.
+    request = RecipeDiscoveryRequest(allergies=["shellfish"], diet_type="pescatarian")
+
+    with pytest.raises(ValueError, match="pescatarian"):
+        RecipeValidationService().validate_candidates(
+            [
+                _candidate(
+                    title="Lemon Garlic Shrimp Pasta",
+                    ingredients=["140 g shrimp", "80 g pasta", "1 lemon"],
+                    allergens=["shellfish"],
+                    diet_tags=[],
+                )
+            ],
+            request,
+        )
+
+
+def test_kosher_diet_type_fails_closed_not_open() -> None:
+    # Mirrors benchmark case diet_040: "kosher" diet_type requested against a
+    # seafood paella containing shrimp/mussels (shellfish is categorically
+    # non-kosher). MacroChef has no kosher enforcement mechanism today --
+    # the correct, safe behavior is to reject the request, not silently
+    # admit the recipe.
+    request = RecipeDiscoveryRequest(diet_type="kosher")
+
+    with pytest.raises(ValueError, match="kosher"):
+        RecipeValidationService().validate_candidates(
+            [
+                _candidate(
+                    title="Seafood Paella",
+                    ingredients=["140 g shrimp", "120 g mussels", "150 g rice"],
+                    allergens=["shellfish"],
+                    diet_tags=[],
+                )
+            ],
+            request,
+        )
+
+
+@pytest.mark.parametrize("alias", ["none", "omnivore", "no restriction", "NONE"])
+def test_no_restriction_diet_type_aliases_do_not_raise(alias: str) -> None:
+    # Regression: the no-restriction sentinel values must keep passing
+    # through as "nothing to enforce on this axis" rather than being
+    # mistaken for an unrecognized diet_type.
+    request = RecipeDiscoveryRequest(diet_type=alias)
+
+    result = RecipeValidationService().validate_candidates([_candidate()], request)
+
+    assert result.valid_candidates
+    assert not result.failed_candidates

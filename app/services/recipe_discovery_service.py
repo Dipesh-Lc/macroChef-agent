@@ -6,10 +6,23 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
+from app.schemas.user import NO_RESTRICTION_DIET_TYPES, SUPPORTED_DIET_TYPES
 from app.services.recipe_generation_service import RecipeGenerationService
 from app.services.recipe_image_service import placeholder_image_url
 from app.services.recipe_import_service import RecipeImportService
 from app.utils.ingredient_normalizer import ingredient_matches
+
+# Diet types this discovery-stage prefilter can enforce via
+# candidate.diet_tags membership -- reused from app.schemas.user rather than
+# duplicated as an independent literal set (a second copy is exactly the
+# drift risk that let this gate and RecipeValidationService's diet check
+# silently diverge before). "high-protein" is a real, additional diet_type
+# RecipeValidationService enforces at the *validation* stage (same
+# tag-based mechanism) but this discovery-stage gate never filtered on it;
+# it is listed in _DISCOVERY_KNOWN_DIET_TYPES purely so the fail-closed
+# guard below does not mistake a legitimate value for an unsupported one
+# (e.g. "pescatarian", "kosher", a typo).
+_DISCOVERY_KNOWN_DIET_TYPES = SUPPORTED_DIET_TYPES | {"high-protein"}
 
 
 @dataclass(frozen=True)
@@ -575,8 +588,30 @@ class RecipeDiscoveryService:
             return False
         if request.diet_type:
             requested = request.diet_type.lower()
+            if (
+                requested not in NO_RESTRICTION_DIET_TYPES
+                and requested not in _DISCOVERY_KNOWN_DIET_TYPES
+            ):
+                # Fail closed: an unrecognized diet_type (e.g. "pescatarian",
+                # "kosher", a typo) must never silently skip diet filtering
+                # -- that previously let every mock candidate through
+                # unfiltered on this axis. Mirrors
+                # constraint_engine.violates_diet_type's fail-loud
+                # ValueError. `discovery_node`
+                # (app/graph/library_nodes.py) already catches any
+                # exception from `discover()` and turns it into a
+                # zero-candidate response with an `errors` entry, so this
+                # surfaces as "nothing served", not a crash. See
+                # docs/BACKLOG.md's "Unknown diet_type fails OPEN" entry and
+                # the adversarial safety benchmark's
+                # multi_015/multi_025/diet_040 cases that demonstrated it.
+                raise ValueError(
+                    f"Recipe discovery does not recognize diet_type {request.diet_type!r}. "
+                    f"Supported: {sorted(_DISCOVERY_KNOWN_DIET_TYPES)} plus "
+                    f"no-restriction aliases {sorted(NO_RESTRICTION_DIET_TYPES)}."
+                )
             tags = {tag.lower() for tag in candidate.diet_tags}
-            if requested not in tags and requested in {"vegetarian", "vegan", "dairy-free", "gluten-free"}:
+            if requested not in tags and requested in SUPPORTED_DIET_TYPES:
                 return False
         return not bool(
             request.max_cook_time_min
