@@ -60,9 +60,100 @@ FLOOR_MIN_ROWS = 10
 
 SAMPLE_AUDIT_N = 40
 SAMPLE_AUDIT_MIN_PER_CATEGORY = 3
-SAMPLE_AUDIT_SEED = 20260717
+# Revision round 1 (2026-07-18 ruling on the 220709Z HALT): spec Sec. 3's
+# on-breach rule requires a FRESH sample on re-run ("fresh sample with seed
+# 20260718, increment per round") -- bumped from the first run's 20260717.
+# The miss-spot-check seed is kept aligned to the same value per that rule.
+SAMPLE_AUDIT_SEED = 20260718
 MISS_SPOT_CHECK_N = 15
-MISS_SPOT_CHECK_SEED = 20260717
+MISS_SPOT_CHECK_SEED = 20260718
+
+# --- Revisions log (spec Sec. 0's pre-registration rule: any post-result
+# vocabulary revision is documented here with before/after counts and a
+# cited real example). Appended to, never edited retroactively, one block
+# per revision round. Per-rule counts below are LEAVE-ONE-OUT ablations
+# against the round's OWN final flagged-recipe count (i.e. "flagged count
+# if this one rule were reverted, all other round-1 rules held active") --
+# they therefore will NOT sum linearly to the baseline-to-current delta,
+# because several rules can independently clear the same recipe (e.g. the
+# "trassi" crustacean satisfier and the "NOTES:" commentary-prefix
+# suppression both independently clear imp_f26d5c5093e25ac7 "Amazing Nasi
+# Goreng"'s crustacean mention, so ablating either ONE alone still leaves
+# the other active for that recipe). This is expected, not an arithmetic
+# error -- restated explicitly so a future reader doesn't "fix" it.
+ROUND_1_REVISIONS_MD = """\
+**Round 1** (2026-07-18, advisor ruling on this round's own 220709Z HALT
+report; docs/instructions_integrity_spec.md remains the frozen base spec).
+Baseline (pre-round-1, 220709Z report): 1197/4045 = 29.59% flagged.
+This round's result (all changes below active together): 1130/4045 = 27.94%
+flagged -- still a HALT (> 12% ceiling); a HUMAN GATE per spec Sec. 3
+("maximum two revision rounds") if round 2 does not clear the ceiling.
+
+Per-rule leave-one-out ablation (flagged-recipe count with ONLY that one
+rule reverted, all others held active, vs. this round's 1130 final count):
+
+- Commentary-prefix step-wide suppression (new; "NOTES:"/"NB:"/"TIPS:"/
+  "VARIATIONS:"/"COLUMN:"/"GARNISHING NOTE:"/"SERVING SUGGESTIONS:"/
+  "SUGGESTED ACCOMPANIMENTS:"): 1138 without it -> 1130 with it (clears 8
+  recipes' worth of quarantine-worthy mismatches).
+- Optional-variation/cross-reference step-wide suppression (new; "as
+  desired"/"if desired"/"if you like"/`\\boptional(?:s|ly)?\\b`/"same
+  quantities as"/"menu featuring"): 1147 without it -> 1130 with it
+  (clears 17).
+- `\\bsubstitutes?\\b` added to the generic whole-step negation phrases:
+  1135 without it -> 1130 with it (clears 5). Deliberately excludes
+  "substituted" (past tense) -- see the module's inline citation.
+- "soymilk" added as a satisfier-only extra for BOTH `soy` and `dairy`:
+  1134 without it -> 1130 with it (clears 4).
+- "roast" (`\\broasts?\\b`, not "roasted") added as a satisfier-only extra
+  for `meat`: 1132 without it -> 1130 with it (clears 2).
+- "trassi" added as a satisfier-only extra for `crustacean`: 1130 without
+  it -> 1130 with it (clears 0 marginally in this leave-one-out ordering --
+  its one cited case, imp_f26d5c5093e25ac7, is already independently
+  cleared by the commentary-prefix rule above for the same step; kept as
+  defense-in-depth per the ruling for any future row that mentions trassi
+  outside a suppressed step).
+- Tier B composite in-recipe-stock satisfier (mollusk-row arm OR
+  water-row+animal-row arm): 1161 without it -> 1130 with it (clears 31 --
+  this round's single largest contributor). Both planted Tier B faults
+  (imp_ece8c7dd17b95468 "Dirty Rice", imp_acd7c3ec0ed35a51 "Rice, Apple and
+  Raisin Dressing") were re-verified to still flag after this change.
+- "sparerib"/"spare rib" added to MEAT_FLESH_TERMS (triggers AND
+  satisfiers): 1128 without it -> 1130 with it -- this is the one rule in
+  this round that INCREASES the flagged count (catches 2 real corpus
+  misses net), rather than suppressing false positives.
+
+**Discovered conflict, flagged rather than silently patched:** the ruling's
+own cited example for the sparerib addition, imp_6f3463afcc2f5d51 "Pork
+Spareribs in Tangy Sauce," does NOT end up in this round's quarantine-worthy
+list despite "sparerib" now correctly firing as a trigger. Its own
+"Worcestershire sauce" ingredient row already satisfies the `meat` category
+via the PRE-EXISTING (spec Sec. 2, not part of this ruling) satisfier
+design -- `meat`'s satisfiers include `FISH_TERMS`, which contains
+"worcestershire" (cited there as a fish-allergen condiment), on the
+documented rationale that "a row already containing ANY animal-flesh OR
+fish/crustacean/mollusk term is already non-vegetarian at serve time." This
+executor pass did NOT alter `meat`'s satisfier composition (out of this
+ruling's literal scope, and a corpus-wide architectural call); the
+sparerib/spare-rib addition is still net positive (+2 other real corpus
+misses caught) despite not fixing its own cited example. See
+`tests/test_instructions_ingredient_integrity.py::
+test_imp_6f3463afcc2f5d51_sparerib_trigger_added_but_worcestershire_row_still_satisfies_meat`
+for the pinned regression and a companion synthetic test isolating the
+trigger's effect without the conflict.
+
+**Rejected candidates (spec ruling item 7 -- recorded, not implemented):**
+- `except` as a negation phrase: corpus evidence (imp_2433f1f7486a57dc,
+  imp_19ce1a09db625d96, imp_180066ee5652529a) shows "except" marks
+  sequencing/exclusion-from-a-later-step, not an absence claim about the
+  recipe's own content.
+- "also a great addition" as a suppression phrase: imp_c846d8efd9895c8d's
+  own step contains a genuine "Add cranberries and nuts" alongside it, so
+  whole-step suppression there would hide a real mismatch.
+- An addition-verb requirement for Tier B stock satisfaction: would rewrite
+  the frozen Tier B semantics and misses "simmer in broth"-shaped
+  in-recipe-stock forms that have no explicit addition verb.
+"""
 
 
 @dataclass
@@ -390,11 +481,7 @@ def render_report(
 
     lines.append("## Revisions")
     lines.append("")
-    lines.append(
-        "(none -- this is the first full-corpus run of this vocabulary. Per spec Sec. 0's "
-        "pre-registration rule, any future vocabulary revision made after seeing a result must "
-        "be documented here with before/after counts and a cited real example.)"
-    )
+    lines.append(ROUND_1_REVISIONS_MD)
     lines.append("")
 
     return "\n".join(lines)

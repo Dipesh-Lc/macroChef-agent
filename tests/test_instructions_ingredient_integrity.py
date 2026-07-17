@@ -860,6 +860,505 @@ def test_synthetic_negation_is_occurrence_local_across_steps() -> None:
     assert "tree_nut" in categories
 
 
+# --- Revision round 1 fixtures (2026-07-18 advisor ruling on the 220709Z
+# HALT report, docs/instructions_integrity_spec.md) -- verbatim from
+# data/processed/imported_recipes.jsonl. -------------------------------
+
+
+def test_imp_a7eb6f7b7e885e67_raised_waffles_variation_prefix_suppressed() -> None:
+    recipe = _recipe(
+        "imp_a7eb6f7b7e885e67",
+        "Raised Waffles",
+        [
+            {"name": "water", "amount": 0.75, "unit": None},
+            {"name": "active dry yeast", "amount": 1.5, "unit": None},
+            {"name": "granulated sugar", "amount": 1.25, "unit": None},
+            {"name": "water", "amount": 2.5, "unit": None},
+            {"name": "butter", "amount": 1.25, "unit": None},
+            {"name": "salt", "amount": 0.75, "unit": None},
+            {"name": "flour", "amount": 1.25, "unit": None},
+            {"name": "eggs", "amount": 3.0, "unit": None},
+            {"name": "baking soda", "amount": 3.0, "unit": None},
+            {"name": "pure maple syrup", "amount": 0.5, "unit": None},
+        ],
+        [
+            "* Flour may be any of or any combination of white, whole wheat, rye, oat, buckwheat, "
+            "yellow cornmeal, or blue cornmeal.",
+            "Put the 3/4 cup water into a large bowl and  sprinkle in the yeast and sugar.  Let "
+            "dissolve for  5 minutes.",
+            "Add the 2 1/2 cups water, the milk, butter, salt,  and flour(s) to the yeast mixture "
+            "and whisk until smooth and blended.",
+            "Cover the  bowl with plastic wrap and let stand overnight at room  temperature. (The  "
+            "batter will rise to double its  original volume.)  Before baking the waffles,  beat "
+            "in the eggs, then add the baking soda and stir until well combined.",
+            "(The  batter will be thin.)  Pour 1/2 to 3/4 cup batter into a very hot waffle iron "
+            "and  bake until golden and crisp.  Serve immediately with the warm syrup.",
+            "Variation:  Top with fresh strawberries and whipped cream or sliced bananas, toasted "
+            "coconut, and sliced roasted almonds.  Dust with confectioner's  sugar.",
+        ],
+        allergens=["dairy", "egg", "eggs", "gluten", "milk", "wheat"],
+    )
+    # The "Variation:" step-prefix suppresses the whole step, so the
+    # otherwise-unlisted "roasted almonds" never contributes a tree_nut flag.
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_0d20dbf56b3b55fa_cantaloupe_melba_menu_featuring_suppressed() -> None:
+    recipe = _recipe(
+        "imp_0d20dbf56b3b55fa",
+        "Cantaloupe Melba",
+        [
+            {"name": "fresh raspberries", "amount": 2.0, "unit": None},
+            {"name": "sugar", "amount": 0.3333333333333333, "unit": None},
+            {"name": "cantaloupe", "amount": 2.0, "unit": None},
+        ],
+        [
+            "In a blender or food processor, whirl raspberries until pureed.",
+            "Pour through a sieve to remove seeds.",
+            "Stir sugar and liqueur (if used) into puree and mix well; cover and chill.",
+            "Halve cantaloupes and remove seeds; peel and cut into thin slices.",
+            "Line each of 8 small dessert bowls or goblets with 3 or 4 melon slices.",
+            "Top melon with a scoop of sherbet and pour 2 tablespoons chilled raspberry sauce "
+            "over sherbet.",
+            "Raspberry sherbet in goblets lined with sliced cantaloupe and topped with Melba "
+            "sauce would make a memorable finale for a menu featuring an egg and cheese dish.",
+        ],
+        allergens=[],
+    )
+    # "menu featuring" suppresses the whole step, so the egg/cheese mention
+    # about a DIFFERENT dish never contributes egg/dairy flags.
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_941617b6247054aa_sweetened_soy_sauce_same_quantities_as_suppressed() -> None:
+    recipe = _recipe(
+        "imp_941617b6247054aa",
+        "Sweetened Soy Sauce",
+        [
+            {"name": "soy sauce", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 0.6666666666666666, "unit": None},
+            {"name": "sake", "amount": 0.5, "unit": None},
+            {"name": "sherry wine", "amount": 1.0, "unit": None},
+            {"name": "onions", "amount": 1.0, "unit": None},
+            {"name": "round onion", "amount": 15.0, "unit": None},
+            {"name": "ginger", "amount": 15.0, "unit": None},
+            {"name": "cinnamon sticks", "amount": None, "unit": None},
+            {"name": "star anise", "amount": None, "unit": None},
+        ],
+        [
+            "Put all ingredients in pan, bring to boil, and simmer over low heat for approximately "
+            "one hour, until liquid has reduced to about 2/3.",
+            "Strain, cool, and store in fridge for up to one month.",
+            "Use in same quantities as Oyster Sauce.",
+        ],
+        allergens=["soy", "soya"],
+    )
+    # "same quantities as" suppresses the whole step, so "Oyster" (a
+    # cross-referenced DIFFERENT sauce, not this recipe's own content) never
+    # contributes a mollusk flag.
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_28766bd14c6c5a24_onion_dip_as_desired_suppressed() -> None:
+    recipe = _recipe(
+        "imp_28766bd14c6c5a24",
+        "Onion Dip, Low Cal",
+        [
+            {"name": "cottage cheese", "amount": 1.0, "unit": None},
+            {"name": "lemon juice", "amount": 1.0, "unit": None},
+            {"name": "plain yogurt", "amount": 0.5, "unit": None},
+            {"name": "green onion", "amount": 0.25, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "pepper", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Base dip.",
+            "Add onion soup mix, parsley, basil, artichoke, dill, shrimp, crab, or curry as desired.",
+            "In blender, process cottage cheese with lemon juice until blended.",
+            "Add other ingredients.",
+            "Process just until mixed.",
+            "Refrigerate four hours, or overnight.",
+        ],
+        allergens=[],
+    )
+    # "as desired" suppresses the whole step, so the optional shrimp/crab
+    # add-in never contributes a crustacean flag.
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_a52ae950e8dd5eb5_sauerbraten_roast_satisfies_meat() -> None:
+    recipe = _recipe(
+        "imp_a52ae950e8dd5eb5",
+        "Sauerbraten & Ginger",
+        [
+            {"name": "rump roast", "amount": 4.0, "unit": None},
+            {"name": "onions", "amount": 2.0, "unit": None},
+            {"name": "peppercorns", "amount": 8.0, "unit": None},
+            {"name": "4 cloves", "amount": 4.0, "unit": "clove"},
+            {"name": "bay leaf", "amount": 1.0, "unit": None},
+            {"name": "white vinegar", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "cider vinegar", "amount": 0.5, "unit": None},
+            {"name": "salt", "amount": 0.25, "unit": None},
+            {"name": "water", "amount": 0.5, "unit": None},
+            {"name": "sour cream", "amount": 2.0, "unit": None},
+            {"name": "unbleached flour", "amount": 10.0, "unit": None},
+        ],
+        [
+            "Place the beef roast in a deep ceramic or glass bowl.",
+            "Add onions, peppercorns, cloves, and bay leaf.",
+            "Pour white vinegar and cider vinegar over the meat; chill, covered, for 4 days.",
+            "Turn meat twice each day.",
+            "Remove the meat from the marinade, dry it well with paper towels, and strain the "
+            "marinade into a bowl.",
+            "Reserve onions and 1 cup marinade.",
+            "In a Dutch oven brown the meat on all sides in hot vegetable oil.",
+            "Sprinkle meat with salt.",
+            "Pour boiling water around the meat. sprinkle in crushed gingersnaps, and simmer "
+            "covered for 1 1/2 hours.",
+            "Turn often.",
+            "Add 1 cup of reserved marinade and cook meat 2 hours or more, until tender.",
+            "Remove the meat and keep it warm.",
+            "Strain the cooking juices into a large saucepan.",
+            "In a small bowl mix sour cream with flour.",
+            "Stir it into the cooking juices and cook, stirring, until sauce is thickened and smooth.",
+            "Slice meat in 1/4 inch slices; add to hot gravy.",
+            "Arrange meat on a heated plater and pour extra sauce over it.",
+        ],
+        allergens=[],
+    )
+    # "rump roast" satisfies the "beef" mention via the new "roast" satisfier.
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "meat" not in categories
+
+
+def test_imp_2391b489ec6459e3_haddock_chowder_water_plus_fish_satisfies_stock() -> None:
+    recipe = _recipe(
+        "imp_2391b489ec6459e3",
+        "Down East Haddock Chowder",
+        [
+            {"name": "haddock fillets", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 4.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "potatoes", "amount": 3.0, "unit": None},
+            {"name": "onion", "amount": 1.0, "unit": None},
+            {"name": "celery", "amount": 1.0, "unit": None},
+            {"name": "pepper", "amount": 1.0, "unit": None},
+            {"name": "evaporated milk", "amount": 1.0, "unit": None},
+            {"name": "butter", "amount": 2.0, "unit": None},
+        ],
+        [
+            "Place fish, water and salt in large saucepan.",
+            "Bring to boil, reduce heat and  simmer gently, uncovered, for 8 to 10 minutes.",
+            "Fish is done when flesh is  opaque. Remove immediately and when cool enough to "
+            "handle, break into  bite-size pieces.",
+            "Reserve until rest of soup is ready.",
+            "Skim  any foam off fish stock.",
+            "Add potatoes, onion, celery and pepper; cover  and bring to boil.",
+            "Reduce heat and simmer until tender.",
+            "Return fish to pan.",
+            "Pour in milk and heat through without boiling.",
+            "Taste and adjust seasoning.",
+            "Swirl in butter.",
+            "Transfer to heated tureen or soup bowls and serve  immediately.",
+        ],
+        allergens=["dairy", "milk"],
+    )
+    # water row + haddock (a FISH_TERMS row) satisfies the Tier B stock
+    # composite -- the "fish stock" mention is no longer treated as hidden.
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" not in categories
+
+
+def test_imp_54fefa2b200d50a7_pancit_water_plus_pork_shrimp_satisfies_stock() -> None:
+    recipe = _recipe(
+        "imp_54fefa2b200d50a7",
+        "Pancit",
+        [
+            {"name": "onion", "amount": 1.0, "unit": None},
+            {"name": "garlic", "amount": 4.0, "unit": None},
+            {"name": "shrimp", "amount": 1.0, "unit": None},
+            {"name": "pork", "amount": 1.0, "unit": None},
+            {"name": "cabbage", "amount": 1.0, "unit": None},
+            {"name": "carrots", "amount": 2.0, "unit": None},
+            {"name": "soy sauce", "amount": 4.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "lemon wedge", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Using a large skillet, lightly saute in a small amount of oil, the onions and garlic.",
+            "Add the pork and shrimp.",
+            "Add cabbage, carrots, soy sauce and 1 cup water.",
+            "Turn heat to medium and simmer for 5 minutes.",
+            "Stir and simmer until carrots are cooked.",
+            "Place noodles on top of mixture and spoon vegetables and broth over the noodles.",
+            "You might have to add a little more water if the noodles have not wilted.",
+            "Cover and allow to steam for about 2 minutes.",
+            "Turn out on a platter and garnish with lemon wedges.",
+            "The recipe can be varied with chicken leftovers,",
+            "bean sprouts or green onions.",
+            "Squeeze the lemon wedges over Pancit before eating.",
+        ],
+        allergens=["crustacean", "seafood", "shellfish", "soy", "soya"],
+    )
+    # water row + pork/shrimp (MEAT_FLESH_TERMS/CRUSTACEAN_TERMS rows)
+    # satisfies the Tier B stock composite -- the "broth" mention is no
+    # longer treated as hidden.
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" not in categories
+
+
+def test_imp_787ec005979550d2_fra_diavolo_mollusk_row_satisfies_stock_but_may_flag_others() -> None:
+    recipe = _recipe(
+        "imp_787ec005979550d2",
+        "Mussels Fra Diavolo",
+        [
+            {"name": "mussels", "amount": 2.0, "unit": None},
+            {"name": "onion", "amount": 2.0, "unit": None},
+            {"name": "green pepper", "amount": 1.0, "unit": None},
+            {"name": "garlic", "amount": 1.0, "unit": None},
+            {"name": "tomatoes", "amount": 1.0, "unit": None},
+            {"name": "dry white wine", "amount": 1.0, "unit": None},
+            {"name": "tomato paste", "amount": 1.0, "unit": None},
+            {"name": "parsley", "amount": 0.3333333333333333, "unit": None},
+            {"name": "salt", "amount": 3.0, "unit": None},
+            {"name": "-3 sugar", "amount": 2.0, "unit": None},
+            {"name": "red pepper flakes", "amount": 1.5, "unit": None},
+            {"name": "basil", "amount": 1.0, "unit": None},
+            {"name": "- 1 oregano", "amount": 0.5, "unit": None},
+            {"name": "linguine", "amount": 0.5, "unit": None},
+        ],
+        [
+            "Scrub the mussels under running cold water making sure they are closed tight and "
+            "remove the beards.",
+            'In a large pot over high heat bring to a boil about 1" of water.',
+            "Reduce the heat to low and add the mussels-cover and cook until the shells open "
+            "about 5 minutes.",
+            "Discard any that do not open.",
+            "Discard the top shell from each mussel; rinse the mussel in the broth left in the "
+            "pot to remove any left over s and.",
+            "Let broth stand awhile to let the sand settle in the bottom of the pot. Pour 3/4 "
+            "cup of the broth into a measuring cup and discard any remaining broth being careful "
+            "not to pour any sand into the cup.",
+            "In a large skillet over med.",
+            "heat, heat the oil and Saute onions, green pepper and garlic until tender but not "
+            "brown.",
+            'Prepare the pasta as directed on the package. Cut the fish into 1" chunks.',
+            "Into the onion mixture, add toma toes with the liquid from the can, all remaining "
+            "ingredients, except mussels- the fish and mussel broth.",
+            "(If you are adding more seafood add it now). Turn the heat to high and bring to a "
+            "boil-when this comes to a boil, reduce heat to low-cover and simmer 5-7 minutes or "
+            "until fish is cooked through.",
+            "Add the mussels on the half shell and heated through.",
+            "To serve, put the pasta onto plates or a large platter, spoon the fish/mussel "
+            "mixture over and top with fresh grated Parmesan cheese.",
+        ],
+        allergens=["gluten", "seafood", "shellfish", "wheat"],
+    )
+    # The mussels row (a mollusk term) satisfies the Tier B stock composite's
+    # arm 1 -- "stock" must be ABSENT from the flagged categories. This is
+    # deliberately an category-absence assertion, NOT an empty-result
+    # assertion: the recipe may still flag OTHER categories (e.g. dairy, via
+    # "Parmesan cheese" with no dairy ingredient row) that this ruling does
+    # not touch.
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" not in categories
+
+
+def test_imp_f26d5c5093e25ac7_nasi_goreng_flags_exactly_egg() -> None:
+    recipe = _recipe(
+        "imp_f26d5c5093e25ac7",
+        "Amazing Nasi Goreng",
+        [
+            {"name": "long grain rice", "amount": 1.25, "unit": None},
+            {"name": "smoked bacon", "amount": 3.0, "unit": None},
+            {"name": "chicken", "amount": 6.0, "unit": None},
+            {"name": "onion", "amount": 1.5, "unit": None},
+            {"name": "garlic cloves", "amount": 1.0, "unit": None},
+            {"name": "carrot", "amount": 2.0, "unit": None},
+            {"name": "cabbage", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 2.0, "unit": None},
+            {"name": "leek", "amount": 4.0, "unit": None},
+            {"name": "trassi oedang", "amount": 1.0, "unit": None},
+            {"name": "ketjap manis", "amount": 1.0, "unit": None},
+            {"name": "cumin", "amount": 1.0, "unit": None},
+            {"name": "curcumae", "amount": 0.25, "unit": None},
+            {"name": "sambal oelek", "amount": 0.25, "unit": None},
+            {"name": "salt", "amount": 0.25, "unit": None},
+        ],
+        [
+            "Boil the rice according to the instructions on the package. Make sure that  the "
+            "rice is fluffy.",
+            "In a wok or large skillet, heat the vegetable oil and fry the smoked bacon and pork "
+            "or chicken until done.",
+            "Add the onion and garlic.",
+            "Turn the heat to medium and simmer for about 5 minutes.",
+            "Meanwhile, in a separate large saucepan, bring the carrot and cabbage to a  boil in "
+            "about 4 cups of water. Boil for 3 minutes; drain.",
+            "Add the leek and trassi oedang to the meat mixture; simmer for 3 minutes.",
+            "Add the cooked cabbage and carrot mixture.",
+            "Keep the entire mixture on low heat and stir in the beaten eggs until they are well "
+            "incorporated.",
+            "Add the ketjap manis, cumin, curcumae, coriander, and sambal oelek if  using.",
+            "Stir well and add the fluffy white rice.",
+            "Mix well and serve warm.",
+            "Serving Ideas:",
+            "May serve with sate (peanut sauce) on the side.",
+            "NOTES : Trassi is a shrimp paste found in Asian grocery stores. If you do  not have "
+            "any, you can either use peeled shrimp mixed in with the other  meat, or leave it "
+            "out all together.",
+        ],
+        allergens=[],
+    )
+    # meat: satisfied (smoked bacon/chicken rows). crustacean: the "NOTES :"
+    # step is suppressed AND "trassi" is now a crustacean satisfier
+    # (trassi oedang row). peanut: "May serve with..." is a serving-cue
+    # step. egg: unsatisfied (no egg ingredient row, no egg allergen) --
+    # the ONE residual genuine flag.
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert categories == {"egg"}
+
+
+def test_imp_b3f19d74632257ba_trifle_flags_tree_nut_not_soy_or_dairy() -> None:
+    recipe = _recipe(
+        "imp_b3f19d74632257ba",
+        "Trifle",
+        [
+            {"name": "egg white substitute", "amount": 3.0, "unit": None},
+            {"name": "granulated sugar", "amount": 0.5, "unit": None},
+            {"name": "soymilk", "amount": 0.25, "unit": None},
+            {"name": "lemon juice", "amount": 2.0, "unit": None},
+            {"name": "whole wheat pastry flour", "amount": 1.0, "unit": None},
+            {"name": "baking powder", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 0.25, "unit": None},
+            {"name": "cornstarch", "amount": 0.3333333333333333, "unit": None},
+            {"name": "granulated sugar", "amount": 0.5, "unit": None},
+            {"name": "soymilk", "amount": 2.0, "unit": None},
+            {"name": "vanilla extract", "amount": 2.0, "unit": None},
+            {"name": "lemon juice", "amount": 2.0, "unit": None},
+            {"name": "sweet sherry", "amount": 0.3333333333333333, "unit": None},
+            {"name": "port wine", "amount": 1.0, "unit": None},
+            {"name": "pear", "amount": 0.25, "unit": None},
+        ],
+        [
+            "Preheat the oven to 350 degrees.",
+            "Beat the egg white substitutes until stiff  with an electric mixer.",
+            "Fold in the sugar, milk, and lemon juice and beat again.",
+            "Combine the flour, baking powder, and salt in a small mixing bowl.",
+            "Sprinkle into  the egg white mixture, a bit at a time, beating in each time with "
+            "the mixer  until velvety smooth.",
+            "Pour into a lightly oiled, 9- by 13-inch baking pan.",
+            "Bake  for 25 minutes, or until the top is golden and a knife inserted into the "
+            "center  tests clean.",
+            "This cake may be made well ahead of time; let it cool completely,  then store in "
+            "an airtight container or proceed with the remaining steps.",
+            "For  the custard, combine the cornstarch and sugar in a heavy saucepan.",
+            "Pour in  enough soy milk to dissolve them.",
+            "Whisk in the remaining milk.",
+            "Place over  moderate heat and bring to a simmer, whisking almost continuously, so "
+            "that the  cornstarch does not lump on the bottom.",
+            "Let the mixture simmer gently, whisking  frequently, until thick.",
+            "Remove from the heat. Stir in the vanilla and lemon  juice. Let the custard cool to "
+            "room temperature.  Before assembling the trifle, cut the cake base into 4 to 6 "
+            "sections, then  carefully split the sections in half through the center so that "
+            "they are half  the thickness.",
+            "Spread the bottom halves with the raspberry preserves , then  cover with the tops.",
+            "Cut the sandwiched cake into approximately 1- by 2-inch  fingers.",
+            "Assemble the trifle in a trifle dish or a IO-inch round, preferably  clear-glass "
+            "casserole dish at least 3 to 4 inches deep: half the cake fingers,  sprinkled with "
+            "half of the sherry or port, half of the custard, the pear s  lices, the remaining "
+            "cake fingers, the remaining sherry or port, the remaining  custard.",
+            "Sprinkle the top with the sliced almonds and decorate with small dots  of raspberry "
+            "jam, either in an irregular or regular pattern.",
+            "Chill thoroughly  before serving.",
+        ],
+        allergens=[],
+    )
+    # "soy milk"/"milk" mentions are satisfied by the "soymilk" ingredient
+    # rows (new satisfier-only extras); "almonds" (sliced almonds, no
+    # almond/nut ingredient row) is the residual genuine tree_nut flag.
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "tree_nut" in categories
+    assert "soy" not in categories
+    assert "dairy" not in categories
+
+
+def test_imp_6f3463afcc2f5d51_sparerib_trigger_added_but_worcestershire_row_still_satisfies_meat() -> None:
+    # CONFLICT, discovered by this test, flagged to the orchestrator/advisor
+    # rather than silently patched (see the executor report's "ASSUMPTIONS /
+    # DEVIATIONS" section): ruling item 6 ("must-flag: imp_6f3463afcc2f5d51
+    # Pork Spareribs -> meat") is satisfied at the TRIGGER level -- "sparerib"
+    # now fires the meat category from "Trim spareribs..." -- but this exact
+    # recipe's own "Worcestershire sauce" ingredient row ALREADY satisfies
+    # the "meat" category via the PRE-EXISTING (spec Sec. 2, not part of
+    # this ruling) satisfier design: meat's satisfiers include FISH_TERMS
+    # (which contains "worcestershire", cited there as a fish-allergen
+    # condiment), on the documented rationale that "a row already containing
+    # ANY animal-flesh OR fish/crustacean/mollusk term is already
+    # non-vegetarian at serve time." That pre-existing, working-as-designed
+    # leniency defeats THIS specific miss fix for THIS specific recipe --
+    # sparerib does trigger, but the category still resolves to
+    # "satisfied," so no Tier A/B mismatch is produced. Ruling item 6 did
+    # not authorize touching meat's satisfier composition (only adding
+    # "sparerib"/"spare rib" to MEAT_FLESH_TERMS), so this executor pass
+    # does not remove "worcestershire" from the satisfier set -- that is an
+    # architectural call for the advisor/orchestrator to make, not a
+    # mechanical vocabulary addition. This test pins the CURRENT, correctly-
+    # implemented-per-the-ruling's-literal-text behavior so a future change
+    # to either vocabulary shows up as an intentional diff, not a silent
+    # regression.
+    recipe = _recipe(
+        "imp_6f3463afcc2f5d51",
+        "Pork Spareribs in Tangy Sauce",
+        [
+            {"name": "tomato sauce", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "brown sugar", "amount": 1.0, "unit": None},
+            {"name": "Worcestershire sauce", "amount": 2.0, "unit": None},
+            {"name": "garlic", "amount": 2.0, "unit": None},
+            {"name": "vinegar", "amount": 1.0, "unit": None},
+            {"name": "lemon juice", "amount": 1.0, "unit": None},
+            {"name": "paprika", "amount": 3.0, "unit": None},
+            {"name": "ginger", "amount": 1.0, "unit": None},
+            {"name": "soy sauce", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Trim spareribs of rind and excess fat, place ribs in a shallow dish.",
+            "Cook on HIGH 14 minutes, turning halfway through cooking time.  Drain fat from "
+            "dish carefully.",
+            "Mix the remaining ingredients together and pour over the ribs; cook on HIGH 3 "
+            "minutes or until hot. Cheers,  Doreen Doreen Randal,  Wanganui.",
+            "New Zealand.",
+        ],
+        allergens=["fish", "seafood", "soy", "soya"],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    assert _categories(mismatches) == set()
+
+
+def test_synthetic_sparerib_trigger_flags_meat_without_a_fish_term_satisfier_present() -> None:
+    # Isolates ruling item 6's actual, verifiable effect from the
+    # imp_6f3463afcc2f5d51 conflict above: with NO Worcestershire/fish-term
+    # ingredient row present, "spareribs" alone now correctly triggers and
+    # flags the meat category (it did not before this revision, since bare
+    # "rib"/"ribs" was deliberately never added to the vocabulary).
+    recipe = _recipe(
+        "syn22",
+        "Synthetic",
+        [
+            {"name": "tomato sauce", "amount": 1.0, "unit": None},
+            {"name": "brown sugar", "amount": 1.0, "unit": None},
+            {"name": "vinegar", "amount": 1.0, "unit": None},
+        ],
+        ["Trim spareribs of rind and excess fat, place ribs in a shallow dish."],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    categories = _categories(mismatches)
+    assert "meat" in categories
+    meat_mismatch = next(m for m in mismatches if m.category == "meat")
+    assert "sparerib" in meat_mismatch.matched_terms
+
+
 # --- Structural tests --------------------------------------------------
 
 
