@@ -42,6 +42,25 @@ merging is now always the behavior.)
 Usage:
     python scripts/quarantine_flagged_recipes.py
     python scripts/quarantine_flagged_recipes.py --dry-run
+
+Manual mode -- quarantining specific recipe ids by explicit id, bypassing the
+`title_ingredient_integrity` audit scan entirely:
+
+    python scripts/quarantine_flagged_recipes.py \\
+        --recipe-ids imp_78c1d567c07b545a --reason "..."
+
+This exists for cases the audit's hand-authored TITLE_ALLERGEN_CATEGORIES
+vocabulary cannot see (e.g. a title word like "beef" or "fish" that is a
+MEAT_ALIASES/species word, not in that vocabulary) but which is proven
+corrupt by other means -- e.g. adjudication of a benchmark case against the
+row's own instructions column. `--recipe-ids` accepts one or more ids;
+`--reason` is a single free-text string applied to all ids given in that
+invocation (run the command once per id if each needs a distinct citation).
+It reuses the exact same merge-by-id / first-decision-wins / atomic-write
+path as the audit-scan mode above -- it only replaces how the SET of
+recipe ids to quarantine is decided, never how they are written. Recipe ids
+not found in the corpus are reported as errors and the run aborts without
+writing anything (all-or-nothing).
 """
 
 from __future__ import annotations
@@ -52,6 +71,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -132,6 +152,65 @@ def _write_quarantine_atomic(path: Path, records: list[dict]) -> None:
         raise
 
 
+def _build_manual_quarantine_record(recipe: Recipe, reason: str) -> dict:
+    """Sidecar record for `--recipe-ids` manual mode: same top-level shape
+    (`recipe` / `quarantine_reason` / `quarantined_at_utc`) as
+    `title_ingredient_integrity.build_quarantine_record`, so every consumer
+    of the sidecar (merge logic, any future reader) sees one consistent
+    record shape regardless of which mode flagged the row. `check` is set to
+    "manual_adjudication" (as opposed to "title_ingredient_integrity") so the
+    provenance of the decision stays visible in the data."""
+    return {
+        "recipe": recipe.model_dump(mode="json"),
+        "quarantine_reason": {
+            "check": "manual_adjudication",
+            "explanation": reason,
+        },
+        "quarantined_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _run_manual_quarantine(
+    corpus_path: Path, quarantine_path: Path, recipe_ids: list[str], reason: str, *, dry_run: bool
+) -> int:
+    corpus = _load_corpus(corpus_path)
+    by_id = {recipe.recipe_id: recipe for recipe in corpus}
+
+    missing = [recipe_id for recipe_id in recipe_ids if recipe_id not in by_id]
+    if missing:
+        print(f"ERROR: recipe id(s) not found in {corpus_path}: {missing}. Aborting -- no files written.")
+        return 1
+
+    requested = set(recipe_ids)
+    kept = [recipe for recipe in corpus if recipe.recipe_id not in requested]
+    quarantined = [by_id[recipe_id] for recipe_id in recipe_ids]
+
+    print(f"Loaded {len(corpus)} recipes from {corpus_path}")
+    print(f"Manually flagged for quarantine: {len(quarantined)} {sorted(requested)}")
+    print(f"Remaining after quarantine: {len(kept)}")
+
+    if dry_run:
+        print("\n--dry-run: no files written.")
+        return 0
+
+    quarantine_records = [_build_manual_quarantine_record(recipe, reason) for recipe in quarantined]
+
+    existing_quarantine = _load_existing_quarantine(quarantine_path)
+    merged_records, skipped = _merge_quarantine_records(existing_quarantine, quarantine_records)
+    newly_added = len(quarantine_records) - skipped
+
+    _write_corpus(corpus_path, kept)
+    _write_quarantine_atomic(quarantine_path, merged_records)
+
+    print(f"\nWrote {len(kept)} recipes to {corpus_path}")
+    print(
+        f"Wrote {len(merged_records)} total quarantined recipes to {quarantine_path} "
+        f"({newly_added} newly added this run, {skipped} re-flagged id(s) skipped (kept existing reason), "
+        f"{len(existing_quarantine)} carried over from prior runs)"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--corpus-path", default=str(DEFAULT_CORPUS_PATH))
@@ -141,10 +220,31 @@ def main() -> int:
         action="store_true",
         help="Report what would be quarantined without writing either file.",
     )
+    parser.add_argument(
+        "--recipe-ids",
+        nargs="+",
+        default=None,
+        help=(
+            "Manual mode: quarantine these exact recipe id(s) directly, bypassing the "
+            "title_ingredient_integrity audit scan. Requires --reason."
+        ),
+    )
+    parser.add_argument(
+        "--reason",
+        default=None,
+        help="Reason text for --recipe-ids manual mode (applied to every id given in this invocation).",
+    )
     args = parser.parse_args()
 
     corpus_path = Path(args.corpus_path)
     quarantine_path = Path(args.quarantine_path)
+
+    if args.recipe_ids is not None:
+        if not args.reason:
+            parser.error("--reason is required when --recipe-ids is given")
+        return _run_manual_quarantine(
+            corpus_path, quarantine_path, args.recipe_ids, args.reason, dry_run=args.dry_run
+        )
 
     corpus = _load_corpus(corpus_path)
     result = audit(corpus)
