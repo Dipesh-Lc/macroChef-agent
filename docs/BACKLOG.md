@@ -21,6 +21,51 @@ were pre-registered before anyone saw a result.
 
 ## Safety-adjacent (frozen pending the adversarial benchmark)
 
+### From the 2026-07-17 vocabulary consult (advisor ADVISE on soy-sauce/
+### rennet-cheese/gelatin; entries required by that verdict)
+
+- **URGENT, allergen-class: bare cheese-name rows invisible to `_DAIRY`.**
+  Corpus rows a milk-allergic user can be served TODAY because no dairy
+  alias substring-matches them: `gorgonzola` (2 rows), `gruyere` (2),
+  `fontina` (1), `colby` (1), `queso fresco` (1). The `parmigiano` slice
+  (1 row) was closed in the 2026-07-17 vocabulary pass (parmigiano/
+  pecorino/grana padano/romano added to `_DAIRY`); the rest need a proper
+  cheese-name audit of the corpus (FULL TREATMENT,
+  `app/services/constraint_engine.py` `_DAIRY`). Zero over-block risk —
+  these names are definitionally milk products.
+- **Gorgonzola / gruyere PDO-verification cluster** (vegetarian
+  exclusions): inclusion test pre-registered by the advisor — a cheese
+  name enters `_RENNET_SET_CHEESES` iff its governing PDO/AOP standard
+  MANDATES animal rennet (compliant product cannot be vegetarian).
+  Gorgonzola DOP (2 corpus rows) and Gruyère AOP (7 rows) are plausible
+  but unverified; manchego was REJECTED on the merits (its PDO permits
+  non-animal coagulants). Verify the disciplinari, then add or reject
+  with citations.
+- **Grana Padano lysozyme → egg question**: the PDO also mandates
+  lysozyme, an egg-derived enzyme. Separate from the rennet/vegetarian
+  question — is "grana padano" an egg-allergen alias? Zero corpus rows
+  today; decide with citations before it matters.
+- **`_SOY` "tamari" substring over-match**: bidirectional matching makes
+  the `tamari` alias wrongly block `tamarillos` (2 rows) and `tamarind
+  pulp` (1 row) for soy-allergic users — water-chestnut-class wrong
+  block (tamarillo is a fruit, tamarind a legume pod unrelated to soy).
+  `_LOOKALIKE_EXCLUSIONS` candidate: `"tamari": {"tamarillo",
+  "tamarillos", "tamarind"}`.
+- **`SYNONYMS["gluten free tamari"] -> "soy sauce"` wart**
+  (`app/utils/ingredient_normalizer.py`): normalization erases the
+  affirmative GF label, so an explicitly gluten-free-labeled tamari row
+  would fail closed under the new soy-sauce→wheat entry. Zero corpus
+  occurrences, no benchmark case; fix only with a benchmark re-run per
+  the frozen-normalizer rule below.
+- **Condiment-wheat audit**: oyster sauce, ponzu, miso varieties — same
+  hidden-wheat class as hoisin (9 rows, added) and teriyaki (0 rows,
+  added). Measure corpus counts first, then decide per-term with
+  citations; rejected as scope creep in the 2026-07-17 pass.
+- **Gelatin-as-fish UX labeling** (non-blocking): "Contains: fish" on a
+  gelatin dessert will confuse users. A label-explanation improvement
+  ("gelatin — possible fish source, fail-closed") when label UX is next
+  touched.
+
 - **`ingredient_matches` raw-substring bug** — `app/utils/ingredient_normalizer.py`.
   `left in right or right in left` plus a fuzzy fallback. Consumers:
   `app/services/recipe_discovery_service.py` (`_allowed`/`_has_conflict`),
