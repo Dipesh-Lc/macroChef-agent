@@ -70,6 +70,33 @@ def main() -> None:
                 f"exceeds the 5% threshold. **"
             )
 
+    # Title/ingredient integrity (app.services.corpus_import.
+    # title_ingredient_integrity): recipes whose own title names an allergen
+    # absent from both their ingredients and derived allergens are already
+    # quarantined by the pipeline (never written to output_path) -- this is
+    # just visibility into how often that happened for THIS import run. A
+    # 1% threshold (lower than the 5% cleaning-collateral threshold above)
+    # because this is a safety-relevant metric, not a cosmetic one: the
+    # 2026-07 finding this check exists to prevent measured at ~4.2% of the
+    # historical Food.com corpus, so anything above 1% here is worth a human
+    # actually reading the quarantine sidecar before trusting this import.
+    considered = report.survivors + report.title_ingredient_mismatches_flagged
+    if considered:
+        pct_quarantined = 100 * report.title_ingredient_mismatches_flagged / considered
+        print(
+            f"\nTitle/ingredient integrity: {report.title_ingredient_mismatches_flagged} recipes "
+            f"({pct_quarantined:.2f}% of {considered} that reached recipe construction) were "
+            f"quarantined -- their own title names an allergen absent from both their "
+            f"ingredients and derived allergens field. See the quarantine sidecar "
+            f"(default: imported_recipes.jsonl's sibling quarantined_recipes.jsonl)."
+        )
+        if pct_quarantined > 1:
+            print(
+                f"** FLAG: title/ingredient integrity quarantine rate {pct_quarantined:.2f}% "
+                f"exceeds the 1% threshold -- review the quarantine sidecar before trusting "
+                f"this import. **"
+            )
+
     examples = getattr(adapter, "example_dropped_below_min", [])
     if examples:
         print(f"\nExample recipes rejected BECAUSE OF cleaning ({len(examples)} shown):")
@@ -79,6 +106,14 @@ def main() -> None:
             for step in example["original_instructions"]:
                 print(f"  - {step}")
             print(f"Cleaned steps (survivors): {example['cleaned_instructions'] or '(none)'}")
+
+    if report.example_title_ingredient_mismatches:
+        print(
+            f"\nExample recipes quarantined for title/ingredient integrity "
+            f"({len(report.example_title_ingredient_mismatches)} shown):"
+        )
+        for example in report.example_title_ingredient_mismatches:
+            print(f"  - {example['title']!r} ({example['recipe_id']}) -- categories: {example['categories']}")
 
     if not args.no_reindex:
         indexed = RecipeIndexingService().rebuild_index_clean(include_base=True, include_user=True)

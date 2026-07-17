@@ -130,6 +130,15 @@ _TREE_NUT = frozenset(
         "pine nut",
         "pine nuts",
         "pistachio",
+        # Chestnut (genus Castanea) is a regulated tree nut per FARE's
+        # Tree Nut allergy page, which names "Chestnut" alongside almond,
+        # walnut, cashew, etc. in its avoid-list. NOTE: the bare noun
+        # "chestnut" also substring-matches "water chestnut" (Eleocharis
+        # dulcis), an unrelated aquatic sedge/corm that is NOT a tree nut --
+        # see _LOOKALIKE_EXCLUSIONS below, which suppresses that specific
+        # false positive without weakening this entry for a real chestnut.
+        "chestnut",
+        "chestnuts",
         # Praline paste (French/Belgian confectionery) is traditionally
         # almond- and/or hazelnut-based; American-style pralines are
         # pecan-based. Either way it is tree-nut derived -- FARE's tree-nut
@@ -182,7 +191,20 @@ _EGG = frozenset({"egg", "egg whites", "eggs", "mayonnaise"})
 # refer to either group, and "crustacean" below explicitly re-adds it (see
 # that composition) so a crustacean-only allergy still catches an
 # ambiguous "shellfish stock" ingredient rather than risk missing it.
-_CRUSTACEAN = frozenset({"crab", "crayfish", "lobster", "prawn", "shrimp"})
+_CRUSTACEAN = frozenset(
+    {
+        "crab",
+        "crayfish",
+        # "Crawfish" is the common US-regional spelling of the same
+        # crustacean as "crayfish" (Cambaridae/Astacidae) -- not a separate
+        # species, just an alternate spelling that "crayfish" does not
+        # substring-match.
+        "crawfish",
+        "lobster",
+        "prawn",
+        "shrimp",
+    }
+)
 _MOLLUSK = frozenset({"clam", "mussel", "oyster", "scallop", "shellfish"})
 
 _FISH = frozenset(
@@ -195,6 +217,12 @@ _FISH = frozenset(
         "halibut",
         "salmon",
         "sardine",
+        # "sea bass" is pinned as the full two-word term, not bare "bass":
+        # bare "bass" would widen the substring-matching surface (e.g.
+        # instruments, other unrelated words) for no corpus benefit, since
+        # every corpus occurrence ("filets of fresh sea bass", "sea bass
+        # fillet") already contains the substring "sea bass".
+        "sea bass",
         "snapper",
         "sole",
         "trout",
@@ -281,6 +309,17 @@ MEAT_ALIASES = {
     "hot dog",
     "lamb",
     "lard",
+    # Standard marshmallows are set with gelatin (animal-derived; see the
+    # "gelatin" entry above), per the Vegetarian Resource Group's Vegetarian
+    # FAQ, which names gelatin as a common hidden non-vegetarian ingredient.
+    # Filed in MEAT_ALIASES (not a separate vegan-only list) so vegetarian
+    # inherits the block too -- marshmallow-set desserts are a genuine
+    # vegetarian violation, not just a vegan one -- via the existing
+    # MEAT_ALIASES -> _VEGETARIAN_EXCLUDED_TERMS -> _VEGAN_EXCLUDED_TERMS
+    # composition below, rather than a hand-copied duplicate entry that
+    # could drift. Corpus variants ("marshmallow creme"/"cream", "mini"/
+    # "miniature marshmallows") all substring-match the bare "marshmallow".
+    "marshmallow",
     "pancetta",
     "pepperoni",
     "pork",
@@ -314,6 +353,58 @@ DIET_TYPE_EXCLUDED_TERMS = {
     "vegetarian": _VEGETARIAN_EXCLUDED_TERMS,
     "vegan": _VEGAN_EXCLUDED_TERMS,
 }
+
+
+# --- Lookalike exclusions ---------------------------------------------------
+#
+# _recipe_contains_any_term matches by substring, which is normally the
+# right call for safety (see the Worcestershire/nougat over-blocking notes
+# above -- ambiguity should resolve toward blocking). But some ingredient
+# names are a different kind of case: a term that is a *literal* substring
+# of an unrelated food, with no real uncertainty about safety at all.
+#
+# "chestnut" is the motivating example: "water chestnut" (Eleocharis dulcis)
+# is an aquatic sedge/corm, botanically and culinarily unrelated to tree
+# nuts (genus Castanea) -- it never contains tree nut, so blocking it isn't
+# an extra-cautious tradeoff, it's simply wrong, and wrong warnings train
+# allergic users to stop trusting the tool. This table exists to carve out
+# exactly that kind of case, without weakening the underlying term.
+#
+# CRITICAL SAFETY SEMANTICS: this exclusion is evaluated per (term,
+# recipe_term) PAIR inside the matching loop below, never at the
+# whole-recipe level. If a recipe has two separate ingredients -- one real
+# ("fresh chestnuts") and one lookalike ("water chestnuts") -- the real
+# ingredient's own term is a different `recipe_term` value and is NOT
+# suppressed; only the lookalike ingredient's own match is. A per-recipe
+# exclusion would let a real allergen hide behind an unrelated lookalike
+# ingredient in the same recipe -- see the "hiding" regression test in
+# test_constraint_engine.py.
+_LOOKALIKE_EXCLUSIONS: dict[str, frozenset[str]] = {
+    "chestnut": frozenset({"water chestnut", "water chestnuts"}),
+    "chestnuts": frozenset({"water chestnut", "water chestnuts"}),
+}
+
+
+def _is_lookalike_match(term: str, recipe_term: str) -> bool:
+    """True if the match between `term` and `recipe_term` is fully explained
+    by a known lookalike phrase for `term` (see _LOOKALIKE_EXCLUSIONS), and
+    should therefore NOT count as a real allergen/diet hit.
+
+    Implementation: remove every occurrence of each known lookalike phrase
+    from `recipe_term`, then re-check whether `term` still appears in what's
+    left. If it doesn't, the original match existed only because of the
+    lookalike phrase, so it's suppressed. If `term` still appears (e.g. a
+    contrived ingredient name containing the real word *and* the lookalike
+    phrase), the match stands -- this function only ever narrows a match
+    down to nothing, never widens it.
+    """
+    lookalikes = _LOOKALIKE_EXCLUSIONS.get(term)
+    if not lookalikes:
+        return False
+    stripped = recipe_term
+    for lookalike in lookalikes:
+        stripped = stripped.replace(lookalike, "")
+    return term not in stripped
 
 
 def _normalized_terms(values: list[str] | set[str] | frozenset[str]) -> set[str]:
@@ -386,6 +477,8 @@ def _recipe_contains_any_term(recipe: Recipe, terms: set[str]) -> bool:
     for term in terms:
         for recipe_term in recipe_terms:
             if term == recipe_term or term in recipe_term or recipe_term in term:
+                if _is_lookalike_match(term, recipe_term):
+                    continue
                 return True
     return False
 

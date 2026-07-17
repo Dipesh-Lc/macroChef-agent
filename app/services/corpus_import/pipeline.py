@@ -15,7 +15,7 @@ whatever source-provided macros survived the adapter, or None.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -23,6 +23,10 @@ from app.rag.loaders import load_recipes
 from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.corpus_import.adapters import DatasetAdapter
+from app.services.corpus_import.title_ingredient_integrity import (
+    build_quarantine_record,
+    find_title_ingredient_mismatches,
+)
 from app.services.recipe_dedup_service import RecipeDedupService
 from app.services.recipe_validation_service import RecipeValidationService
 from app.utils.logging import get_logger
@@ -47,6 +51,16 @@ class ImportReport:
     recipes_with_narrative_steps_dropped: int = 0
     recipes_below_min_instructions_after_cleaning: int = 0
     recipes_rejected_because_of_cleaning: int = 0
+    # Title/ingredient integrity check (app.services.corpus_import.
+    # title_ingredient_integrity) -- catches the exact defect class behind
+    # the 2026-07 corpus safety finding (e.g. "Curried Peanut Shrimp" with no
+    # peanut ingredient) so it can never silently recur in a future import.
+    # A flagged recipe is quarantined (see `quarantine_path` in `run()`), not
+    # written to the main corpus output.
+    title_ingredient_mismatches_flagged: int = 0
+    title_ingredient_mismatch_pairs: int = 0
+    # Capped sample for eyeballing, same idiom as example_dropped_below_min.
+    example_title_ingredient_mismatches: list[dict] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
@@ -60,7 +74,9 @@ class ImportReport:
             f"narrative_steps_dropped={self.narrative_steps_dropped} "
             f"(across {self.recipes_with_narrative_steps_dropped} recipes, "
             f"{self.recipes_below_min_instructions_after_cleaning} pushed below "
-            f"the 2-instruction minimum)"
+            f"the 2-instruction minimum) "
+            f"title_ingredient_mismatches_quarantined={self.title_ingredient_mismatches_flagged} "
+            f"({self.title_ingredient_mismatch_pairs} category mismatch pairs)"
         )
 
 
@@ -82,6 +98,7 @@ class CorpusImportPipeline:
         *,
         limit: int | None = None,
         existing_recipes: list[Recipe] | None = None,
+        quarantine_path: str | Path | None = None,
     ) -> ImportReport:
         report = ImportReport()
         candidates: list[RecipeCandidate] = []
@@ -115,6 +132,7 @@ class CorpusImportPipeline:
         report.duplicates = len(dedup_result.duplicate_candidates)
 
         recipes: list[Recipe] = []
+        quarantine_records: list[dict] = []
         for candidate in dedup_result.unique_candidates:
             recipe_id = _deterministic_import_id(self.adapter.dataset_name, candidate)
             recipe = candidate.to_recipe(
@@ -130,12 +148,47 @@ class CorpusImportPipeline:
             if dropped > 0:
                 report.empty_ingredients_dropped += dropped
                 report.recipes_with_empty_ingredients += 1
+
+            # Title/ingredient integrity check -- this is the only place
+            # title + final ingredients + final allergens coexist. A
+            # mismatch means the ingredient list is provably incomplete
+            # (see title_ingredient_integrity's module docstring), so the
+            # recipe is quarantined here rather than written to the main
+            # corpus output -- flagged/logged/counted, never a silent drop.
+            mismatches = find_title_ingredient_mismatches(recipe)
+            if mismatches:
+                report.title_ingredient_mismatches_flagged += 1
+                report.title_ingredient_mismatch_pairs += len(mismatches)
+                quarantine_records.append(build_quarantine_record(recipe, mismatches))
+                if len(report.example_title_ingredient_mismatches) < 10:
+                    report.example_title_ingredient_mismatches.append(
+                        {
+                            "title": recipe.title,
+                            "recipe_id": recipe.recipe_id,
+                            "categories": [m.category for m in mismatches],
+                        }
+                    )
+                continue
+
             recipes.append(recipe)
 
         # Sort for stable diffs; full rewrite (not append) keeps re-runs idempotent.
         recipes.sort(key=lambda recipe: recipe.recipe_id)
         report.survivors = len(recipes)
         _write_jsonl(Path(output_path), recipes)
+
+        # Full rewrite of the quarantine sidecar too, for the same
+        # idempotency reason as the main corpus file above: re-running this
+        # pipeline against the same source must reproduce the exact same
+        # quarantine file, not accumulate duplicates across runs. This means
+        # a fresh pipeline run intentionally OVERWRITES whatever quarantine
+        # file already exists at this path (e.g. from an earlier one-time
+        # `scripts/quarantine_flagged_recipes.py` cleanup) with only what
+        # THIS run flagged -- see this task's report for the discussion.
+        quarantine_output_path = (
+            Path(quarantine_path) if quarantine_path is not None else Path(output_path).parent / "quarantined_recipes.jsonl"
+        )
+        _write_quarantine_jsonl(quarantine_output_path, quarantine_records)
 
         report.narrative_steps_dropped = getattr(self.adapter, "narrative_steps_dropped", 0)
         report.recipes_with_narrative_steps_dropped = getattr(
@@ -154,6 +207,14 @@ class CorpusImportPipeline:
                 report.empty_ingredients_dropped,
                 report.recipes_with_empty_ingredients,
             )
+        if report.title_ingredient_mismatches_flagged:
+            logger.info(
+                "quarantined %d recipes (%d category mismatch pairs) for title/ingredient "
+                "integrity failures during corpus import -- see %s",
+                report.title_ingredient_mismatches_flagged,
+                report.title_ingredient_mismatch_pairs,
+                quarantine_output_path,
+            )
         logger.info("corpus import complete: %s", report.summary())
         return report
 
@@ -171,4 +232,15 @@ def _write_jsonl(path: Path, recipes: list[Recipe]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for recipe in recipes:
             handle.write(json.dumps(recipe.model_dump(mode="json"), ensure_ascii=False))
+            handle.write("\n")
+
+
+def _write_quarantine_jsonl(path: Path, records: list[dict]) -> None:
+    # Always writes the file (even when `records` is empty), so a clean
+    # import run leaves an empty-but-present quarantine sidecar rather than
+    # a stale one from a previous run with a different source/limit.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False))
             handle.write("\n")

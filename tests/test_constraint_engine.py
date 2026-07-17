@@ -305,6 +305,15 @@ def test_unsupported_diet_type_rejected_at_profile_intake() -> None:
         ("seafood", "worcestershire sauce"),
         ("nuts", "groundnut oil"),
         ("tree nut", "amaretto"),
+        # 2026-07 follow-up: chestnut/crawfish/sea bass gaps (see the
+        # chestnut/water-chestnut lookalike tests below for the trickier
+        # near-miss half of this fix).
+        ("tree nut", "fresh chestnuts"),
+        ("tree nut", "chestnut puree"),
+        ("shellfish", "crawfish tails"),
+        ("shellfish", "crawfish fat"),
+        ("fish", "sea bass fillet"),
+        ("fish", "filets of fresh sea bass"),
     ],
 )
 def test_confirmed_allergen_alias_gaps_now_blocked(allergy: str, ingredient: str) -> None:
@@ -339,6 +348,58 @@ def test_water_chestnut_not_over_blocked_by_tree_nut_additions() -> None:
     result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
 
     assert result.is_valid
+
+
+# --- Chestnut/water-chestnut lookalike exclusion ----------------------------
+#
+# "chestnut" was added to _TREE_NUT (a real, regulated tree nut per FARE),
+# but the bare noun also substring-matches "water chestnut" (Eleocharis
+# dulcis), an unrelated aquatic sedge that is NOT a tree nut. A naive add
+# would fix the real-chestnut gap and simultaneously regress every
+# water-chestnut ingredient into a false positive (the test immediately
+# above, plus safe_009/morphology_006 in the safety benchmark). The
+# _LOOKALIKE_EXCLUSIONS mechanism in constraint_engine.py exists to prevent
+# exactly that regression -- these tests cover every corpus-observed
+# water-chestnut spelling plus the one real attack the mechanism must NOT
+# allow: hiding a real chestnut behind an unrelated water-chestnut
+# ingredient in the same recipe.
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    [
+        "water chestnut",
+        "water chestnuts",
+        "sliced water chestnuts",
+        "water chestnut flour",
+    ],
+)
+def test_water_chestnut_variants_not_blocked_by_tree_nut_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
+
+    assert result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["fresh chestnuts", "chestnut puree"])
+def test_real_chestnut_still_blocked_by_tree_nut_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
+
+    assert not result.is_valid
+
+
+def test_real_chestnut_cannot_hide_behind_water_chestnut_in_same_recipe() -> None:
+    # The exclusion is per-ingredient-term, not per-recipe: a recipe with
+    # BOTH a lookalike ("water chestnuts") AND a real tree nut ("fresh
+    # chestnuts") must still be caught, on the strength of the real
+    # ingredient's own term. A per-recipe exclusion would be a genuine
+    # safety hole -- an attacker (or an unlucky recipe) could hide a real
+    # chestnut behind an unrelated water-chestnut ingredient.
+    recipe = _recipe(ingredients=["water chestnuts", "fresh chestnuts", "rice"], allergens=[])
+    result = validate_recipe(recipe, _profile(allergies=["tree nut"]))
+
+    assert not result.is_valid
 
 
 # --- ALLERGEN_ALIASES composition restructure -------------------------------
@@ -421,5 +482,51 @@ def test_nuts_blocks_plural_peanuts() -> None:
 
     recipe = _recipe(ingredients=["mixed peanuts", "raisins"], allergens=[])
     result = validate_recipe(recipe, _profile(allergies=["nuts"]))
+
+    assert not result.is_valid
+
+
+# --- 2026-07 confirmed gaps: crawfish/sea bass/marshmallow ------------------
+#
+# Three more human-confirmed allergen-alias/diet-trap gaps. "crawfish" is
+# the common US-regional spelling of "crayfish" (already present) and shares
+# no lookalike risk with anything in the corpus. "sea bass" is pinned as the
+# full two-word phrase, not bare "bass" (see _FISH's inline comment). Both
+# are additions to the base sets (_CRUSTACEAN, _FISH) so "seafood" inherits
+# them automatically via composition -- asserted directly below.
+
+
+def test_crawfish_blocks_shellfish_and_seafood_allergy() -> None:
+    tails_recipe = _recipe(ingredients=["crawfish tails", "rice"], allergens=[])
+    fat_recipe = _recipe(ingredients=["crawfish fat", "onion"], allergens=[])
+
+    assert not validate_recipe(tails_recipe, _profile(allergies=["shellfish"])).is_valid
+    assert not validate_recipe(fat_recipe, _profile(allergies=["shellfish"])).is_valid
+    assert not validate_recipe(tails_recipe, _profile(allergies=["seafood"])).is_valid
+    assert "crawfish" in ALLERGEN_ALIASES["seafood"]
+
+
+def test_sea_bass_blocks_fish_and_seafood_allergy() -> None:
+    fillet_recipe = _recipe(ingredients=["sea bass fillet", "lemon"], allergens=[])
+    filets_recipe = _recipe(ingredients=["filets of fresh sea bass", "butter"], allergens=[])
+
+    assert not validate_recipe(fillet_recipe, _profile(allergies=["fish"])).is_valid
+    assert not validate_recipe(filets_recipe, _profile(allergies=["fish"])).is_valid
+    assert not validate_recipe(fillet_recipe, _profile(allergies=["seafood"])).is_valid
+    assert "sea bass" in ALLERGEN_ALIASES["seafood"]
+
+
+@pytest.mark.parametrize("diet_type", ["vegan", "vegetarian"])
+@pytest.mark.parametrize("ingredient", ["marshmallows", "miniature marshmallows"])
+def test_marshmallow_blocks_vegan_and_vegetarian_diet(diet_type: str, ingredient: str) -> None:
+    # Standard marshmallows are gelatin-set (animal-derived): a vegetarian
+    # violation, not just a vegan one. "marshmallow" is filed in
+    # MEAT_ALIASES (not a vegan-only list) precisely so vegetarian inherits
+    # it for free via the existing MEAT_ALIASES -> _VEGETARIAN_EXCLUDED_TERMS
+    # -> _VEGAN_EXCLUDED_TERMS composition -- see
+    # test_worcestershire_still_blocks_vegetarian_diet_after_fish_addition
+    # for the same composition pattern applied to a different term.
+    recipe = _recipe(ingredients=["sweet potato", ingredient, "pecans"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
 
     assert not result.is_valid
