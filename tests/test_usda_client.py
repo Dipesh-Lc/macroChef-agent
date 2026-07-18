@@ -5,8 +5,21 @@ import pytest
 import requests
 
 from app.config import Settings
+from app.schemas.nutrition import FoodMacros
 from app.services.nutrition_cache import FdcCache
-from app.services.usda_client import UsdaClient, _classify_preparation, _is_relevant_match
+from app.services.usda_client import (
+    _BRANDED_DATA_TYPES,
+    _BRANDED_PAGE_SIZE,
+    _FDC_QUERY_ALIASES,
+    _GENERIC_DATA_TYPES,
+    _GENERIC_PAGE_SIZE,
+    UsdaClient,
+    _classify_preparation,
+    _is_relevant_match,
+    _plausibility_reject_reason,
+    _select_branded_match,
+    _tokenize,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -79,6 +92,36 @@ def test_extracts_known_macros_from_chicken_breast_fixture(tmp_path) -> None:
     assert match.macros.carbs_g == 0
     assert match.macros.fat_g == 3.57
     assert match.macros.fiber_g == 0
+
+
+def test_extract_macros_skips_candidate_with_a_negative_nutrient_value(tmp_path) -> None:
+    # Confirmed live: a real FDC record's "Carbohydrate, by difference"
+    # value can come out marginally negative (e.g. -0.428) from that
+    # nutrient's own subtraction-based calculation upstream at USDA. Since
+    # FoodMacros enforces ge=0 on every field, silently passing this through
+    # would crash the whole grounding run on Pydantic validation instead of
+    # degrading to "skip this candidate" -- this must never reach that point.
+    payload = {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": "Widget, raw",
+                "dataType": "Foundation",
+                "foodNutrients": [
+                    {"nutrientNumber": "208", "value": 50},
+                    {"nutrientNumber": "203", "value": 2},
+                    {"nutrientNumber": "204", "value": 1},
+                    {"nutrientNumber": "205", "value": -0.428},
+                ],
+            }
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")  # must not raise
+
+    assert match is None
 
 
 def test_extracts_known_macros_from_rice_fixture(tmp_path) -> None:
@@ -217,7 +260,7 @@ def test_retry_exhausted_failure_is_not_cached_so_next_run_retries(tmp_path) -> 
     assert second_match.macros.calories == 165
 
 
-def test_confirmed_no_match_is_cached_and_skips_future_network_calls(tmp_path) -> None:
+def test_confirmed_empty_payload_is_cached_and_skips_future_network_calls(tmp_path) -> None:
     cache = FdcCache(tmp_path / "cache.json")
     session = FakeSession(payload=_load_fixture("fdc_empty_search.json"))
     first_client = _client(session=session, cache=cache)
@@ -225,11 +268,12 @@ def test_confirmed_no_match_is_cached_and_skips_future_network_calls(tmp_path) -
     first_match = first_client.search_food("nonexistent ingredient xyz")
     assert first_match is None
     assert session.calls == 2  # both tiers queried (generic, then Branded fallback), both empty
-    assert cache.is_confirmed_no_match("nonexistent ingredient xyz")
+    assert cache.get_payload("nonexistent ingredient xyz", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is not None
+    assert cache.get_payload("nonexistent ingredient xyz", _BRANDED_DATA_TYPES, _BRANDED_PAGE_SIZE) is not None
 
-    # A confirmed no-match is a stable fact (the fixture's content is
-    # unchanging) -- re-querying must be served from that confirmation, not
-    # the network, unlike a retry-exhausted transient failure above.
+    # A cached empty-`foods` payload is a stable fact (the fixture's content
+    # is unchanging) -- re-querying must be served from that cached payload,
+    # not the network, unlike a retry-exhausted transient failure above.
     unreachable = FakeSession(exc=AssertionError("should not be called"))
     second_client = _client(session=unreachable, cache=cache)
 
@@ -456,16 +500,22 @@ def test_relevance_check_rejects_avocado_oil_end_to_end(tmp_path) -> None:
     assert match.macros.calories == 167
 
 
-def test_relevance_check_rejects_zucchini_bread_end_to_end(tmp_path) -> None:
-    # Both candidates ultimately fail (the correct one for the disclosed
-    # squash/zucchini naming-divergence reason) -- ungrounded, not a
-    # silent wrong-food match. See the parametrized case above.
+def test_relevance_check_rejects_zucchini_bread_but_alias_resolves_the_real_record_end_to_end(tmp_path) -> None:
+    # "Bread, zucchini" (a derivative product) is still correctly rejected
+    # by the bare relevance check -- but the phase 1.5/P4
+    # `_FDC_QUERY_ALIASES` entry for "zucchini" now lets the genuinely
+    # correct "Squash, summer, green, zucchini, includes skin, raw" record
+    # resolve, instead of leaving this UNGROUNDED as before P4 (see the
+    # parametrized `_is_relevant_match` case above, which is still true for
+    # the UN-aliased bare query -- that check itself didn't change).
     session = FakeSession(payload=_load_fixture("fdc_zucchini_relevance_search.json"))
     client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
 
     match = client.search_food("zucchini")
 
-    assert match is None
+    assert match is not None
+    assert match.description == "Squash, summer, green, zucchini, includes skin, raw"
+    assert match.macros.calories == 17
 
 
 def test_relevance_check_accepts_real_oats_rejects_oat_milk_end_to_end(tmp_path) -> None:
@@ -521,17 +571,19 @@ def test_no_preparation_leaves_search_query_unaugmented(tmp_path) -> None:
 
 
 def test_known_unreliable_query_returns_none_without_any_network_call(tmp_path) -> None:
-    # "shrimp"/"tomato sauce" (wrong-form, no preparation gate applies) and
-    # "chili powder"/"ginger" (0 kcal Branded data defects) are deliberately
-    # excluded (see _KNOWN_UNRELIABLE_QUERIES). Must fail closed before ever
-    # touching the network or cache.
+    # "shrimp"/"tomato sauce" (wrong-form, no preparation gate applies, and
+    # the wrong-form match's macros are plausible-looking enough that the
+    # plausibility gate alone wouldn't catch it) are deliberately excluded
+    # (see _KNOWN_UNRELIABLE_QUERIES). Must fail closed before ever touching
+    # the network or cache. "chili powder"/"ginger" used to be on this list
+    # too but were dropped once the plausibility gate could catch their
+    # specific failure mode (0 kcal data defect) generally -- see
+    # test_plausibility_gate_rejects_zero_kcal_defect below.
     session = FakeSession(exc=AssertionError("must not be called"))
     client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
 
     assert client.search_food("shrimp") is None
     assert client.search_food("tomato sauce") is None
-    assert client.search_food("chili powder") is None
-    assert client.search_food("ginger") is None
     assert session.calls == 0
 
 
@@ -624,3 +676,600 @@ def test_two_tier_fetch_is_deterministic_across_repeated_calls(tmp_path) -> None
 
     assert first.description == second.description == "Yogurt, Greek, plain, nonfat"
     assert first.macros.calories == second.macros.calories == 61
+
+
+# --- Payload cache: caches FDC facts, never a decided match ---
+#
+# The cache generation before this refactor stored the *decided* FoodMatch
+# (or a "no match" sentinel) per ingredient query -- so a rule change in
+# `_best_match` had no effect on an already-cached ingredient until its
+# cache entry was manually busted. These tests prove the replacement: the
+# cache stores the raw FDC payload, and `_best_match` is re-run against it
+# on every call, so a rule change takes effect on the very next call with no
+# cache invalidation and no new network request.
+
+
+def _macro_food(fdc_id: int, description: str, data_type: str, *, calories, protein_g, fat_g, carbs_g) -> dict:
+    return {
+        "fdcId": fdc_id,
+        "description": description,
+        "dataType": data_type,
+        "foodNutrients": [
+            {"nutrientNumber": "208", "value": calories},
+            {"nutrientNumber": "203", "value": protein_g},
+            {"nutrientNumber": "204", "value": fat_g},
+            {"nutrientNumber": "205", "value": carbs_g},
+        ],
+    }
+
+
+def test_payload_cache_reflects_current_matching_rules_not_a_frozen_decision(tmp_path, monkeypatch) -> None:
+    from app.services import usda_client as usda_client_module
+
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, canned", "Branded", calories=200, protein_g=20, fat_g=5, carbs_g=10),
+            _macro_food(2, "Widget, raw", "Foundation", calories=100, protein_g=10, fat_g=2, carbs_g=5),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    cache = FdcCache(tmp_path / "cache.json")
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=cache)
+
+    first = client.search_food("widget")
+    assert first is not None
+    assert first.fdc_id == 2  # Foundation (priority 0) outranks Branded (priority 3) today
+    assert session.calls == 1  # only the generic tier -- it already found a match
+
+    # Simulate a matching-rule change: Branded now outranks Foundation.
+    monkeypatch.setitem(usda_client_module._DATA_TYPE_PRIORITY, "Branded", -1)
+
+    unreachable = FakeSession(exc=AssertionError("must be served from the cached payload, no new request"))
+    second_client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=unreachable, cache=cache)
+    second = second_client.search_food("widget")
+
+    assert unreachable.calls == 0  # served entirely from the cached payload
+    assert second is not None
+    assert second.fdc_id == 1  # new rule takes effect immediately against the same cached payload
+
+
+def test_old_decision_cache_format_is_discarded_not_misinterpreted(tmp_path) -> None:
+    # Simulates a cache file written by the pre-refactor decision-cache
+    # generation (bare "query" -> FoodMatch dict, no schema marker).
+    cache_path = tmp_path / "cache.json"
+    old_format_decision_cache = {
+        "chicken breast": {
+            "fdc_id": 1,
+            "description": "Chicken breast",
+            "data_type": "SR Legacy",
+            "macros": {"calories": 165, "protein_g": 31, "carbs_g": 0, "fat_g": 3.57, "fiber_g": 0},
+            "query": "chicken breast",
+        }
+    }
+    cache_path.write_text(json.dumps(old_format_decision_cache), encoding="utf-8")
+
+    session = FakeSession(payload=_load_fixture("fdc_chicken_breast_search.json"))
+    client = _client(session=session, cache=FdcCache(cache_path))
+
+    match = client.search_food("chicken breast")
+
+    # The old-format entries are a different, incompatible shape -- discarded
+    # wholesale rather than misread as a payload, so this falls through to a
+    # normal fresh fetch.
+    assert match is not None
+    assert match.data_type == "SR Legacy"
+    assert session.calls == 1
+
+
+@pytest.mark.parametrize(
+    ("calories", "protein_g", "fat_g", "carbs_g", "data_type", "expected"),
+    [
+        (165, 31, 3.57, 0, "Foundation", None),  # ordinary chicken breast -- passes
+        # Tier-aware kcal floor (phase 1.5 closeout/P2): the floor only
+        # applies to Branded (or an unrecognized/absent dataType -- fail
+        # closed). A genuine generic-tier near-zero record (salt/water/
+        # baking-soda class) is NOT rejected by the floor -- see the
+        # dedicated fixtures below for the full salt/water/baking-soda and
+        # Branded-all-zero-still-rejected regressions.
+        (0, 0, 0, 0, "Branded", "kcal_too_low_branded"),
+        (4.9, 0, 0, 0, "Branded", "kcal_too_low_branded"),
+        (0, 0, 0, 0, None, "kcal_too_low_branded"),  # unrecognized/absent dataType -- fail closed, floor still applies
+        (0, 0, 0, 0, "Foundation", None),  # genuine generic-tier all-zero record -- now passes (was "kcal_too_low")
+        (4.9, 0, 0, 0, "SR Legacy", None),  # ditto, SR Legacy
+        (951, 0, 0, 0, "Foundation", "kcal_too_high"),  # kcal ceiling applies regardless of tier
+        (884, 0, 100, 0, "Foundation", None),  # pure fat, at the edge -- still passes
+        (500, 50, 40, 40, "Foundation", "mass_over_105g"),  # 130g macro mass in 100g food
+        (920, 10, 2, 20, "Foundation", "atwater_mismatch"),  # kJ-scale-looking defect
+        (18, 0, 0, 0.9, "SR Legacy", None),  # vinegar-like: absolute Atwater escape
+    ],
+)
+def test_plausibility_reject_reason(calories, protein_g, fat_g, carbs_g, data_type, expected) -> None:
+    macros = FoodMacros(calories=calories, protein_g=protein_g, fat_g=fat_g, carbs_g=carbs_g, fiber_g=0)
+    assert _plausibility_reject_reason(macros, data_type) == expected
+
+
+# --- Plausibility gate: reject a relevant, correctly-prepped candidate
+# whose own reported macros are physically implausible ---
+
+
+def test_plausibility_gate_rejects_zero_kcal_defect(tmp_path) -> None:
+    # The exact defect that used to require "chili powder"/"ginger" on
+    # _KNOWN_UNRELIABLE_QUERIES: a real, relevant record reporting 0
+    # kcal/100g (no genuine spice is calorie-free).
+    payload = {
+        "foods": [_macro_food(1, "Ginger, ground", "Branded", calories=0, protein_g=0, fat_g=0, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("ginger")
+
+    assert match is None
+
+
+def test_plausibility_gate_rejects_kj_scale_defect(tmp_path) -> None:
+    # A record whose "calories" value is actually reported on a kJ scale
+    # (roughly 4x a real kcal figure for this macro composition) -- passes
+    # the bare <950 absolute ceiling but fails the Atwater cross-check.
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, raw", "Foundation", calories=920, protein_g=10, fat_g=2, carbs_g=20)
+            # Atwater estimate: 4*10 + 4*20 + 9*2 = 138 kcal. 920 kcal is
+            # neither within [0.5x, 1.7x] of 138 nor within 25 kcal of it.
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_plausibility_gate_rejects_macro_mass_over_105g(tmp_path) -> None:
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, raw", "Foundation", calories=500, protein_g=50, fat_g=40, carbs_g=40)
+            # 50 + 40 + 40 = 130g of macronutrients in 100g of food.
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_plausibility_gate_allows_low_calorie_low_macro_food_via_absolute_escape(tmp_path) -> None:
+    # Vinegar: genuinely low-calorie with near-zero protein/carbs/fat, so its
+    # Atwater estimate is near zero too -- the ratio check alone would reject
+    # it (dividing by ~0), but the absolute <=25 kcal escape lets it through.
+    payload = {
+        "foods": [
+            _macro_food(1, "Vinegar, cider", "SR Legacy", calories=18, protein_g=0, fat_g=0, carbs_g=0.9)
+            # Atwater estimate: 4*0.9 = 3.6 kcal. abs(18 - 3.6) = 14.4 <= 25.
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("vinegar")
+
+    assert match is not None
+    assert match.macros.calories == 18
+
+
+def test_plausibility_gate_falls_through_to_next_ranked_candidate(tmp_path) -> None:
+    # An implausible top-ranked candidate doesn't ground the ingredient to
+    # nothing if a lower-ranked candidate is both relevant and plausible.
+    # The zero-kcal candidate must be Branded here (phase 1.5 closeout/P2):
+    # a generic-tier (Foundation/SR Legacy/Survey) all-zero record is no
+    # longer rejected by the kcal floor at all (see the tier-aware
+    # regression fixtures below) -- this test is specifically about an
+    # implausible candidate still being skipped, so it needs a candidate
+    # the gate still actually rejects.
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, raw", "Branded", calories=0, protein_g=0, fat_g=0, carbs_g=0),
+            _macro_food(2, "Widget, raw", "SR Legacy", calories=50, protein_g=2, fat_g=1, carbs_g=10),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is not None
+    assert match.fdc_id == 2
+    assert match.macros.calories == 50
+
+
+# --- Tier-aware near-zero admission (phase 1.5 closeout/P2) -- pinned
+# regression fixtures. See `_plausibility_reject_reason`'s module comment
+# for the full rationale and the disclosed blind spot. ---
+
+
+@pytest.mark.parametrize(
+    ("query", "description", "data_type"),
+    [
+        ("salt", "Salt, table", "Foundation"),
+        ("water", "Water, tap", "Survey (FNDDS)"),
+        ("baking soda", "Baking soda", "SR Legacy"),
+    ],
+)
+def test_tier_aware_gate_admits_genuine_near_zero_generic_records(
+    tmp_path, query, description, data_type
+) -> None:
+    # Genuine near-zero-kcal, all-zero-macro records from a curated generic
+    # tier (Foundation/SR Legacy/Survey) are internally CONSISTENT (Atwater
+    # estimate is also 0) -- these are real foods, not data defects, and the
+    # tier-aware gate now admits them instead of rejecting them at the old,
+    # tier-blind kcal floor.
+    payload = {
+        "foods": [_macro_food(1, description, data_type, calories=0, protein_g=0, fat_g=0, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food(query)
+
+    assert match is not None
+    assert match.macros.calories == 0
+
+
+def test_tier_aware_gate_still_rejects_branded_all_zero_record(tmp_path) -> None:
+    # The exact defect the floor was originally written for (ginger/chili
+    # powder's real Branded records) -- an all-zero Branded record must
+    # still be rejected even though the tier-aware change lets a
+    # generic-tier all-zero record through.
+    payload = {
+        "foods": [_macro_food(1, "Widget, raw", "Branded", calories=0, protein_g=0, fat_g=0, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_tier_aware_gate_rejects_zero_kcal_nonzero_macros_via_atwater(tmp_path) -> None:
+    # A generic-tier record reporting 0 kcal but nonzero macros is
+    # internally INCONSISTENT -- Atwater estimate is nonzero while the
+    # reported kcal is 0 -- so it's still rejected, just via
+    # `atwater_mismatch` instead of the (now tier-gated) kcal floor. This is
+    # what distinguishes a genuine all-zero food (salt/water/baking soda)
+    # from a defective record even on a trusted generic tier.
+    payload = {
+        # Atwater estimate: 4*5 + 9*5 = 65 kcal; reported 0 kcal is neither
+        # within [0.5x, 1.7x] of 65 nor within 25 kcal of it.
+        "foods": [_macro_food(1, "Widget, raw", "Foundation", calories=0, protein_g=5, fat_g=5, carbs_g=0)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+
+
+def test_water_query_grounds_to_tap_not_tonic(tmp_path) -> None:
+    # Pinned regression for the exact bug this item fixes: BEFORE the
+    # tier-aware gate, "water" rejected the correct 'Water, tap' record
+    # (0 kcal, Survey (FNDDS) -- a genuine, internally-consistent all-zero
+    # record) at the tier-blind kcal floor, and silently fell through to
+    # 'Water, tonic' (34 kcal/100g, Survey (FNDDS)) -- a real FDC record for
+    # a DIFFERENT beverage that happens to pass every relevance/plausibility
+    # check on its own. Payload replicates the actual live FDC response
+    # shape for a "water" search (fdcIds/descriptions/macros confirmed
+    # against the real cached payload during this item's investigation).
+    payload = {
+        "foods": [
+            _macro_food(2710707, "Water, tap", "Survey (FNDDS)", calories=0, protein_g=0, fat_g=0, carbs_g=0),
+            _macro_food(
+                2708178, "Crackers, water", "Survey (FNDDS)", calories=384, protein_g=7.14, fat_g=7.14, carbs_g=72.81
+            ),
+            _macro_food(2710538, "Water, tonic", "Survey (FNDDS)", calories=34, protein_g=0, fat_g=0, carbs_g=8.8),
+            _macro_food(
+                2710656, "Whiskey and water", "Survey (FNDDS)", calories=59, protein_g=0, fat_g=0, carbs_g=0
+            ),
+            _macro_food(2710669, "Vodka and water", "Survey (FNDDS)", calories=59, protein_g=0, fat_g=0, carbs_g=0),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("water")
+
+    assert match is not None
+    assert match.fdc_id == 2710707
+    assert match.description == "Water, tap"
+    assert match.macros.calories == 0
+
+
+# --- Undeclared-preparation handling: processed-state modifier blocklist
+# (a gate, preparation=None only) and within-tier state preference
+# (a tie-break, preparation=None only) ---
+
+
+def test_undeclared_preparation_rejects_pickled_record(tmp_path) -> None:
+    # The exact failure mode disclosed in _KNOWN_RESIDUALS for zucchini --
+    # a bare "zucchini" query landing on a Branded "Zucchini, pickled"
+    # record. Reproduced here with a synthetic payload so the fix is
+    # provable independent of FDC's real zucchini/squash naming quirk.
+    payload = {"foods": [_macro_food(1, "Zucchini, pickled", "Branded", calories=35, protein_g=1, fat_g=0, carbs_g=6)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("zucchini")
+
+    assert match is None
+
+
+def test_undeclared_preparation_prefers_raw_over_cooked_at_same_tier(tmp_path) -> None:
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, cooked", "SR Legacy", calories=50, protein_g=2, fat_g=1, carbs_g=8),
+            _macro_food(2, "Widget, raw", "SR Legacy", calories=100, protein_g=4, fat_g=2, carbs_g=15),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is not None
+    assert match.fdc_id == 2
+    assert match.description == "Widget, raw"
+
+
+def test_undeclared_preparation_still_respects_data_type_priority_over_state(tmp_path) -> None:
+    # State preference is a same-tier tie-break, never a rank override --
+    # a higher-priority dataType (Foundation) wins over a lower-priority one
+    # even if the lower-priority candidate is raw and the higher-priority
+    # one is cooked.
+    payload = {
+        "foods": [
+            _macro_food(1, "Widget, cooked", "Foundation", calories=50, protein_g=2, fat_g=1, carbs_g=8),
+            _macro_food(2, "Widget, raw", "SR Legacy", calories=100, protein_g=4, fat_g=2, carbs_g=15),
+        ]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is not None
+    assert match.fdc_id == 1
+    assert match.description == "Widget, cooked"
+
+
+def test_declared_preparation_disables_the_modifier_blocklist(tmp_path) -> None:
+    # The processed-state modifier blocklist only applies when `preparation`
+    # is undeclared -- a declared-canned search must still be free to match
+    # a record whose non-head segment includes wording like "drained" that
+    # the blocklist gate doesn't even consult here, because it's off
+    # entirely once a preparation is declared.
+    payload = {
+        "foods": [_macro_food(1, "Beans, black, canned, drained", "SR Legacy", calories=90, protein_g=6, fat_g=0.5, carbs_g=16)]
+    }
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("black beans", preparation="canned")
+
+    assert match is not None
+    assert match.description == "Beans, black, canned, drained"
+
+
+def test_payload_cache_key_distinguishes_page_size(tmp_path) -> None:
+    cache = FdcCache(tmp_path / "cache.json")
+    cache.set_payload("widget", ["Branded"], 5, {"foods": ["five"]})
+    cache.set_payload("widget", ["Branded"], 25, {"foods": ["twenty-five"]})
+
+    assert cache.get_payload("widget", ["Branded"], 5) == {"foods": ["five"]}
+    assert cache.get_payload("widget", ["Branded"], 25) == {"foods": ["twenty-five"]}
+    assert cache.get_payload("widget", ["Branded"], 10) is None
+
+
+# --- _FDC_QUERY_ALIASES: FDC-vocabulary aliases for a normalized query ---
+
+
+@pytest.mark.parametrize("original,alias", sorted(_FDC_QUERY_ALIASES.items()))
+def test_alias_invariant_original_tokens_are_a_subset_of_alias_tokens(original, alias) -> None:
+    # The structural safety property: the queried food's own identity
+    # token(s) must literally appear in the alias, so an alias can only
+    # supply vocabulary FDC files the SAME food under -- never bridge to a
+    # different food (see _FDC_QUERY_ALIASES's module comment).
+    assert _tokenize(original) <= _tokenize(alias)
+
+
+def test_alias_search_query_is_sent_to_fdc_and_used_for_relevance(tmp_path) -> None:
+    # "cumin" alone would never match "Spices, cumin seed" (head is
+    # "Spices", not a cumin token) -- this only passes if the alias is used
+    # for BOTH the string sent to FDC and the relevance/head-noun check.
+    payload = {"foods": [_macro_food(170923, "Spices, cumin seed", "SR Legacy", calories=375, protein_g=18, fat_g=22, carbs_g=44)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("cumin")
+
+    assert session.last_params["query"] == "spices cumin seed"
+    assert match is not None
+    assert match.fdc_id == 170923
+    assert match.query == "spices cumin seed"
+
+
+def test_alias_is_keyed_by_the_normalized_query_not_free_form_text(tmp_path) -> None:
+    # normalize_ingredient runs before the alias lookup -- a free-form
+    # variant of an aliased ingredient still resolves through it.
+    payload = {"foods": [_macro_food(170926, "Spices, ginger, ground", "SR Legacy", calories=335, protein_g=9, fat_g=5, carbs_g=71)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("Fresh Ginger")
+
+    assert match is not None
+    assert match.fdc_id == 170926
+
+
+# Pinned fixture tests (payload -> expected fdc_id) for the top 10
+# `_FDC_QUERY_ALIASES` entries, live-verified against real FDC records
+# during the phase 1.5/P4 curation pass (fdc_id/description/approximate
+# calories are the real live values; protein/fat/carbs are plausible
+# stand-ins sized to clear the plausibility gate, not necessarily FDC's
+# exact reported values).
+@pytest.mark.parametrize(
+    ("original", "alias", "fdc_id", "description", "calories"),
+    [
+        ("coriander", "spices coriander seed", 170922, "Spices, coriander seed", 298),
+        ("cumin", "spices cumin seed", 170923, "Spices, cumin seed", 375),
+        ("oregano", "spices oregano dried", 171328, "Spices, oregano, dried", 265),
+        ("nutmeg", "spices nutmeg ground", 171326, "Spices, nutmeg, ground", 525),
+        ("paprika", "spices paprika", 171329, "Spices, paprika", 282),
+        ("black pepper", "spices pepper black", 170931, "Spices, pepper, black", 251),
+        ("ginger", "spices ginger ground", 170926, "Spices, ginger, ground", 335),
+        ("garlic powder", "spices garlic powder", 171325, "Spices, garlic powder", 331),
+        ("turmeric", "spices turmeric ground", 172231, "Spices, turmeric, ground", 312),
+        ("cardamom", "spices cardamom", 170919, "Spices, cardamom", 311),
+    ],
+)
+def test_pinned_alias_fixtures_resolve_to_the_real_fdc_record(
+    tmp_path, original, alias, fdc_id, description, calories
+) -> None:
+    assert _FDC_QUERY_ALIASES[original] == alias
+
+    payload = {"foods": [_macro_food(fdc_id, description, "SR Legacy", calories=calories, protein_g=10, fat_g=10, carbs_g=50)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food(original)
+
+    assert match is not None
+    assert match.fdc_id == fdc_id
+    assert match.description == description
+    assert match.macros.calories == calories
+
+
+def test_known_unreliable_query_still_excluded_even_though_not_aliased(tmp_path) -> None:
+    # "chili powder" has no verified alias (see grounding_job._KNOWN_RESIDUALS)
+    # and stays on _KNOWN_UNRELIABLE_QUERIES -- confirm it's not accidentally
+    # present in _FDC_QUERY_ALIASES (which would be dead code, since the
+    # exclusion check runs first and returns before the alias lookup).
+    assert "chili powder" not in _FDC_QUERY_ALIASES
+    assert "shrimp" not in _FDC_QUERY_ALIASES
+    assert "tomato sauce" not in _FDC_QUERY_ALIASES
+
+
+# --- Branded-tier selection: median-calorie agreement, not first-ranked ---
+
+
+def _branded_food(fdc_id: int, calories: float, *, description: str = "Widget") -> dict:
+    # Pure-fat macros (protein/carbs=0) so calories = 9*fat_g exactly --
+    # trivially clears the plausibility gate's Atwater check for any
+    # `calories` value used across these tests, regardless of magnitude.
+    return _macro_food(fdc_id, description, "Branded", calories=calories, protein_g=0, fat_g=calories / 9, carbs_g=0)
+
+
+def test_select_branded_match_returns_none_when_no_candidate_is_eligible() -> None:
+    payload = {"foods": [{"fdcId": 1, "description": "Unrelated Thing", "dataType": "Branded", "foodNutrients": []}]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is None
+    assert outcome.dispersion is None
+
+
+def test_select_branded_match_picks_true_median_for_odd_candidate_count() -> None:
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 300), _branded_food(3, 200)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 3  # 200 is the true median of [100, 200, 300]
+    assert outcome.match.macros.calories == 200
+    assert outcome.dispersion is None
+
+
+def test_select_branded_match_picks_lower_of_two_middle_for_even_candidate_count() -> None:
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 200), _branded_food(3, 250), _branded_food(4, 300)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    # sorted calories: [100, 200, 250, 300] -- two middles are 200 and 250;
+    # the LOWER of the two (200, fdc_id=2) is selected, not an average.
+    assert outcome.match.fdc_id == 2
+    assert outcome.match.macros.calories == 200
+
+
+def test_select_branded_match_ties_broken_by_ascending_fdc_id() -> None:
+    # Two candidates share the same (median) calorie value -- deterministic
+    # tie-break picks the lower fdc_id, not payload order.
+    payload = {
+        "foods": [_branded_food(30, 200), _branded_food(10, 200), _branded_food(20, 100), _branded_food(40, 300)]
+    }
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 10  # lower of the two fdc_ids tied at the median calorie value
+
+
+def test_select_branded_match_rejects_high_dispersion_with_three_plus_candidates() -> None:
+    # max/min = 500/100 = 5.0x > 3.0x -- disagreement is too large to trust
+    # any single candidate; ungrounded with the range recorded for the report.
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 200), _branded_food(3, 500)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is None
+    assert outcome.dispersion == (100, 500, 3)
+    assert "branded_high_dispersion" in outcome.rejections
+
+
+def test_select_branded_match_allows_high_dispersion_with_fewer_than_three_candidates() -> None:
+    # Same 5x ratio, but only 2 candidates -- the >=3 threshold means this
+    # isn't treated as a corroborated disagreement, just picks the median
+    # (lower of the two, per the even-count rule).
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 500)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 1
+    assert outcome.dispersion is None
+
+
+def test_select_branded_match_allows_within_bound_dispersion() -> None:
+    # max/min = 250/100 = 2.5x <= 3.0x -- within bound, proceeds to median
+    # selection instead of rejecting.
+    payload = {"foods": [_branded_food(1, 100), _branded_food(2, 150), _branded_food(3, 250)]}
+    outcome = _select_branded_match(payload, "widget", None)
+    assert outcome.match is not None
+    assert outcome.match.fdc_id == 2
+    assert outcome.dispersion is None
+
+
+def test_branded_tier_fetch_uses_page_size_25(tmp_path) -> None:
+    session = FakeSession(payload={"foods": []})
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    client.search_food("nonexistent widget xyz")
+
+    # Two calls: generic tier, then Branded fallback -- the Branded one must
+    # request pageSize=25.
+    assert session.calls == 2
+    assert session.last_params["pageSize"] == 25
+    assert session.last_params["dataType"] == ["Branded"]
+
+
+def test_branded_dispersion_event_recorded_on_client_end_to_end(tmp_path) -> None:
+    # TieredFakeSession (not plain FakeSession) so the generic tier
+    # genuinely returns nothing, forcing the Branded fallback -- a plain
+    # FakeSession would serve the same dispersed payload to BOTH tiers and
+    # let the generic-tier `_best_match` (which doesn't restrict by
+    # dataType) resolve it first-ranked before ever reaching the Branded
+    # selection logic under test.
+    branded_payload = {"foods": [_branded_food(1, 100), _branded_food(2, 200), _branded_food(3, 500)]}
+    session = TieredFakeSession(
+        {
+            ("Foundation", "SR Legacy", "Survey (FNDDS)"): {"foods": []},
+            ("Branded",): branded_payload,
+        }
+    )
+    client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food("widget")
+
+    assert match is None
+    assert client.branded_dispersion_events == [("widget", 100, 500, 3)]

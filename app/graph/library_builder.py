@@ -89,21 +89,30 @@ def build_library_save_graph():
     return graph.compile()
 
 
-def discovery_request_to_state(request: RecipeDiscoveryRequest) -> RecipeLibraryBuilderState:
-    return RecipeLibraryBuilderState(**request.model_dump())
+def discovery_request_to_state(
+    request: RecipeDiscoveryRequest, user_id: str
+) -> RecipeLibraryBuilderState:
+    # `user_id` always comes from the verified session token (see
+    # app.dependencies.get_session_user), never from `request` -- the wire
+    # schema has no user_id field to begin with.
+    return RecipeLibraryBuilderState(user_id=user_id, **request.model_dump())
 
 
-def save_request_to_state(request: SaveRecipeCandidatesRequest) -> RecipeLibraryBuilderState:
+def save_request_to_state(
+    request: SaveRecipeCandidatesRequest, user_id: str
+) -> RecipeLibraryBuilderState:
     return RecipeLibraryBuilderState(
-        user_id=request.user_id,
+        user_id=user_id,
         selected_candidates=request.selected_candidates,
         count=len(request.selected_candidates),
     )
 
 
-def run_library_discovery_graph(request: RecipeDiscoveryRequest) -> RecipeDiscoveryResponse:
+def run_library_discovery_graph(
+    request: RecipeDiscoveryRequest, user_id: str
+) -> RecipeDiscoveryResponse:
     graph = build_library_discovery_graph()
-    state = discovery_request_to_state(request)
+    state = discovery_request_to_state(request, user_id)
     result = graph.invoke(state.model_dump())
     final_state = ensure_library_state(result)
     return RecipeDiscoveryResponse(
@@ -114,9 +123,11 @@ def run_library_discovery_graph(request: RecipeDiscoveryRequest) -> RecipeDiscov
     )
 
 
-def run_library_save_graph(request: SaveRecipeCandidatesRequest) -> SaveRecipeCandidatesResponse:
+def run_library_save_graph(
+    request: SaveRecipeCandidatesRequest, user_id: str
+) -> SaveRecipeCandidatesResponse:
     graph = build_library_save_graph()
-    state = save_request_to_state(request)
+    state = save_request_to_state(request, user_id)
     result = graph.invoke(state.model_dump())
     final_state = ensure_library_state(result)
     return SaveRecipeCandidatesResponse(

@@ -18,8 +18,9 @@ def _trace(state: RecipeLibraryBuilderState, message: str) -> list[str]:
 
 
 def _request_from_state(state: RecipeLibraryBuilderState) -> RecipeDiscoveryRequest:
+    # RecipeDiscoveryRequest has no user_id field (see app/schemas/library.py);
+    # state.user_id is threaded separately wherever a downstream call needs it.
     return RecipeDiscoveryRequest(
-        user_id=state.user_id,
         cuisines=state.cuisines,
         meal_type=state.meal_type,
         diet_type=state.diet_type,
@@ -39,7 +40,7 @@ def discovery_node(state: RecipeLibraryBuilderState | dict):
     request = _request_from_state(current)
     service = RecipeDiscoveryService()
     try:
-        candidates = service.discover(request)
+        candidates = service.discover(request, current.user_id)
     except Exception as exc:
         return library_state_update(
             current,

@@ -4,12 +4,37 @@ from typing import Any
 from app.config import get_settings
 from app.data.recipe_library_repository import RecipeLibraryRepository
 from app.rag.chroma_client import collection_count, query_collection
-from app.rag.loaders import attach_grounding, load_recipes, recipes_by_id
+from app.rag.loaders import load_corpus, recipes_by_id
 from app.schemas.recipe import Recipe
 from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def build_metadata_filter(
+    cuisine_preference: str | None, meal_type: str | None
+) -> dict[str, Any] | None:
+    """Chroma `where` clause for exact cuisine/meal_type metadata filtering.
+
+    Module-level (not just RecipeRetriever._build_metadata_filter) so
+    callers that query Chroma directly -- e.g. the retrieval eval in
+    app.evaluation.eval_retrieval, which measures the semantic path in
+    isolation from the keyword-fallback mixing in .retrieve() -- can still
+    apply the same metadata pre-filter production actually uses, rather than
+    an unfiltered pure-embedding search that understates real semantic
+    quality on cuisine/meal_type queries.
+    """
+    clauses: list[dict[str, str]] = []
+    if cuisine_preference:
+        clauses.append({"cuisine": cuisine_preference})
+    if meal_type:
+        clauses.append({"meal_type": meal_type})
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
 
 
 class RecipeRetriever:
@@ -20,7 +45,12 @@ class RecipeRetriever:
     ):
         self.settings = get_settings()
         self.recipe_path = recipe_path or str(self.settings.recipe_path)
-        self._base_recipes = attach_grounding(load_recipes(self.recipe_path))
+        # Seed (hand-curated) recipes union the imported Food.com corpus, deduped
+        # by recipe_id with seeds winning -- see app.rag.loaders.load_corpus.
+        # Previously this loaded ONLY the 25 seed recipes via load_recipes(), so
+        # the ~4,238 imported recipes embedded in Chroma were filtered out of
+        # retrieve() because recipes_by_id was built from _base_recipes alone.
+        self._base_recipes = load_corpus(seed_path=self.recipe_path)
         self.library_repository = library_repository or RecipeLibraryRepository()
 
     def retrieve(
@@ -161,16 +191,7 @@ class RecipeRetriever:
     def _build_metadata_filter(
         self, cuisine_preference: str | None, meal_type: str | None
     ) -> dict[str, Any] | None:
-        clauses: list[dict[str, str]] = []
-        if cuisine_preference:
-            clauses.append({"cuisine": cuisine_preference})
-        if meal_type:
-            clauses.append({"meal_type": meal_type})
-        if not clauses:
-            return None
-        if len(clauses) == 1:
-            return clauses[0]
-        return {"$and": clauses}
+        return build_metadata_filter(cuisine_preference, meal_type)
 
 
 def get_recipe_by_id(recipe_id: str) -> Recipe | None:

@@ -9,9 +9,14 @@ class FeedbackRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def add_feedback(self, request: FeedbackRequest) -> Feedback:
+    def add_feedback(self, user_id: str, request: FeedbackRequest) -> Feedback:
+        # `user_id` is passed explicitly (never read off `request`) because
+        # FeedbackRequest deliberately carries no user_id field -- identity
+        # comes solely from the verified session token. See
+        # app.schemas.recommendation.FeedbackRequest and
+        # app.api.routes_feedback.post_feedback.
         feedback = Feedback(
-            user_id=request.user_id,
+            user_id=user_id,
             recipe_id=request.recipe_id,
             feedback_type=request.feedback_type,
             notes=request.notes,

@@ -3,6 +3,26 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: >-
+          Deploy to Azure Container Apps after tests pass. Only takes effect
+          on the default branch — this is the manual "pull the trigger" step
+          for production promotion (see docs/DEPLOY.md).
+        type: boolean
+        default: true
+
+# Azure resource naming — change here to repoint the whole pipeline.
+# ACR_NAME must be globally unique across all of Azure (5-50 alphanumeric
+# chars). If `acrmacrochef01` is taken, `az acr create` fails loudly with a
+# name-conflict error (not silently) — pick a new suffix and re-run.
+env:
+  AZURE_REGION: westeurope
+  RESOURCE_GROUP: rg-macrochef
+  ACA_ENV_NAME: cae-macrochef
+  ACA_APP_NAME: ca-macrochef
+  ACR_NAME: acrmacrochef01
 
 jobs:
   test:
@@ -27,3 +47,191 @@ jobs:
         env:
           EMBEDDING_PROVIDER: hash
         run: pytest -v --tb=short
+
+      - name: Diet-leak safety gate
+        run: python scripts/audit_diet_leaks.py
+
+  # ---------------------------------------------------------------------
+  # Everything below this line only runs for a manual workflow_dispatch on
+  # the default branch. Ordinary pushes and PRs stop at the `test` job.
+  # Production promotion is a deliberate human action (CLAUDE.md "Human
+  # gates: Public actions" — deploy pushes are pulled, not automatic).
+  # ---------------------------------------------------------------------
+
+  preflight:
+    name: Azure permission preflight
+    needs: test
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Fail fast if AZURE_CREDENTIALS lacks Contributor
+        run: |
+          set -euo pipefail
+          CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')
+          SUB_ID=$(az account show --query id -o tsv)
+          echo "Checking role assignments for service principal $CLIENT_ID on subscription $SUB_ID ..."
+          ROLES=$(az role assignment list \
+            --assignee "$CLIENT_ID" \
+            --scope "/subscriptions/$SUB_ID" \
+            --query "[].roleDefinitionName" -o tsv || true)
+          if ! echo "$ROLES" | grep -Eq "Contributor|Owner"; then
+            echo "::error::AZURE_CREDENTIALS (clientId=$CLIENT_ID) does not have Contributor or Owner on subscription $SUB_ID."
+            echo "::error::Role assignments found: ${ROLES:-none}"
+            echo "::error::FIX: In the Azure Portal (or az role assignment create), grant this service"
+            echo "::error::principal the 'Contributor' role at subscription scope, or at minimum on"
+            echo "::error::resource group '$RESOURCE_GROUP' (create the empty RG yourself first if you"
+            echo "::error::want to scope access narrowly). Re-run this workflow once granted."
+            exit 1
+          fi
+          echo "Preflight OK — service principal has: $ROLES"
+
+      - name: Register required resource providers (idempotent)
+        run: |
+          set -euo pipefail
+          for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.OperationalInsights; do
+            az provider register --namespace "$ns" --wait
+          done
+
+      - name: Create resource group (if absent)
+        run: |
+          set -euo pipefail
+          az group show --name "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az group create --name "$RESOURCE_GROUP" --location "$AZURE_REGION"
+
+      - name: Create ACR (if absent)
+        run: |
+          set -euo pipefail
+          az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az acr create \
+              --name "$ACR_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --sku Basic \
+              --admin-enabled false
+
+  build-and-push:
+    name: Build and push image to ACR
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Set image tag
+        id: image
+        run: |
+          IMAGE="$ACR_NAME.azurecr.io/macrochef-api:${{ github.sha }}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: docker build -t "${{ steps.image.outputs.image }}" -t "$ACR_NAME.azurecr.io/macrochef-api:latest" .
+
+      - name: Push image
+        run: |
+          docker push "${{ steps.image.outputs.image }}"
+          docker push "$ACR_NAME.azurecr.io/macrochef-api:latest"
+
+  deploy:
+    name: Create/update Container Apps environment and revision
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install containerapp extension
+        run: az extension add --name containerapp --upgrade -y
+
+      - name: Create Container Apps environment (if absent)
+        run: |
+          set -euo pipefail
+          az containerapp env show \
+            --name "$ACA_ENV_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az containerapp env create \
+              --name "$ACA_ENV_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --location "$AZURE_REGION"
+
+      - name: Create Container App (if absent)
+        run: |
+          set -euo pipefail
+          # --target-port 8501 must match the port Streamlit binds inside the
+          # container (docker-entrypoint.sh), NOT the FastAPI/uvicorn port.
+          # The API binds 127.0.0.1:8000 only -- internal, unreachable from
+          # outside the container -- so ACA's public ingress has to point at
+          # Streamlit or there would be no usable public URL, just a bare
+          # JSON API.
+          az containerapp show \
+            --name "$ACA_APP_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az containerapp create \
+              --name "$ACA_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --environment "$ACA_ENV_NAME" \
+              --image "${{ needs.build-and-push.outputs.image }}" \
+              --target-port 8501 \
+              --ingress external \
+              --registry-server "$ACR_NAME.azurecr.io" \
+              --registry-identity system \
+              --min-replicas 1 \
+              --max-replicas 1
+
+      - name: Update revision — image, secrets, env vars
+        run: |
+          set -euo pipefail
+          az containerapp secret set \
+            --name "$ACA_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --secrets \
+              database-url="${{ secrets.DATABASE_URL }}" \
+              session-secret="${{ secrets.SESSION_SECRET }}" \
+              gemini-api-key="${{ secrets.GEMINI_API_KEY }}" \
+              posthog-api-key="${{ secrets.POSTHOG_API_KEY }}"
+
+          # min-replicas=1 / max-replicas=1 is intentional, not a placeholder:
+          # embedded Chroma (data/chroma) is a single-writer store. A second
+          # concurrent replica (from either autoscale-up or a rolling deploy
+          # with 2 revisions briefly active) risks corrupting the index. Do
+          # NOT raise max-replicas above 1 without moving to an external
+          # vector store first (tracked in docs/BACKLOG.md).
+          az containerapp update \
+            --name "$ACA_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${{ needs.build-and-push.outputs.image }}" \
+            --min-replicas 1 \
+            --max-replicas 1 \
+            --set-env-vars \
+              DATABASE_URL=secretref:database-url \
+              SESSION_SECRET=secretref:session-secret \
+              GEMINI_API_KEY=secretref:gemini-api-key \
+              POSTHOG_API_KEY=secretref:posthog-api-key \
+              MODEL_PROVIDER=gemini \
+              MODEL_PROVIDER_FALLBACKS=mock \
+              EMBEDDING_PROVIDER=local \
+              PORT=8501
+
+      - name: Print live URL
+        run: |
+          FQDN=$(az containerapp show \
+            --name "$ACA_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "## Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://$FQDN" >> "$GITHUB_STEP_SUMMARY"

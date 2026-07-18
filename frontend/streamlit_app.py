@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import requests
 import streamlit as st
@@ -6,10 +7,51 @@ from components.debug_panel import render_debug_panel
 from components.inventory_input import render_inventory_input
 from components.profile_form import render_profile_sidebar
 from components.recommendation_cards import render_recommendations
+from components.shopping_list import render_shopping_list
+from session_client import request_with_session
+
+from app.services.analytics import get_analytics
 
 API_URL = os.getenv("MACROCHEF_API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="MacroChef Agent", page_icon="MC", layout="wide")
+
+
+def _track_return_visit() -> None:
+    """Fire a "return visit" analytics event using an anonymous cookie.
+
+    Best-effort and non-critical: any failure here (e.g. no request
+    context, cookie blocked) is swallowed so it can never break the page.
+    Guarded by session_state so it runs at most once per browser session,
+    not on every widget-triggered rerun.
+    """
+    if st.session_state.get("_analytics_return_visit_checked"):
+        return
+    st.session_state["_analytics_return_visit_checked"] = True
+    try:
+        cookie_name = "mc_anon_id"
+        existing_id = st.context.cookies.get(cookie_name)
+        analytics = get_analytics()
+        if existing_id:
+            analytics.capture(existing_id, "return visit", {})
+            return
+        new_id = str(uuid.uuid4())
+        st.components.v1.html(
+            f"""
+            <script>
+            try {{
+                window.parent.document.cookie =
+                    "{cookie_name}={new_id}; path=/; max-age=31536000; SameSite=Lax";
+            }} catch (e) {{}}
+            </script>
+            """,
+            height=0,
+        )
+    except Exception:
+        pass
+
+
+_track_return_visit()
 
 st.markdown(
     """
@@ -271,6 +313,14 @@ st.markdown(
 
 profile_bundle = render_profile_sidebar()
 
+st.warning(
+    "**Hobby project — not medical advice.** MacroChef is an unpaid personal "
+    "project, not a certified nutrition or allergy-safety product. Its adversarial "
+    "safety benchmark has not yet been run, so no violation-rate claim is made. "
+    "**If you have a food allergy, you must independently verify every "
+    "ingredient before you eat anything suggested here.**"
+)
+
 st.markdown(
     """
     <div class="app-header">
@@ -305,7 +355,10 @@ with planner_tab:
         profile = profile_bundle["profile"]
         profile["preferred_cuisines"] = [] if cuisine_preference is None else [cuisine_preference]
         payload = {
-            "user_id": "demo_user",
+            # No user_id here, deliberately -- /recipes/recommend derives
+            # identity from the verified session token sent by
+            # request_with_session below, never from the request body (see
+            # app.schemas.recommendation.RecommendationRequest).
             "input_type": input_type,
             "typed_ingredients": typed_ingredients,
             "confirmed_inventory": confirmed_inventory or None,
@@ -314,9 +367,17 @@ with planner_tab:
             "meal_type": meal_type,
         }
         try:
-            response = requests.post(f"{API_URL}/recipes/recommend", json=payload, timeout=90)
-            response.raise_for_status()
-            st.session_state["recommendation_response"] = response.json()
+            # /recipes/recommend now requires a verified session (it drives
+            # LLM calls and is rate-limited per session) -- see
+            # app.dependencies.require_recommend_rate_limit.
+            response = request_with_session(
+                "POST", f"{API_URL}/recipes/recommend", json=payload, timeout=90
+            )
+            if response.status_code == 429:
+                st.warning("You're sending requests too quickly. Please wait a bit and try again.")
+            else:
+                response.raise_for_status()
+                st.session_state["recommendation_response"] = response.json()
         except requests.RequestException as exc:
             st.error(f"Could not reach MacroChef API at {API_URL}: {exc}")
 
@@ -327,14 +388,7 @@ with planner_tab:
             st.warning(" ".join(errors))
 
         shopping = response_json.get("shopping_list", [])
-        if shopping:
-            st.markdown('<div class="results-title">Shopping list</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="tag-row">'
-                + "".join(f'<span class="missing-tag">{item["name"]}</span>' for item in shopping)
-                + "</div>",
-                unsafe_allow_html=True,
-            )
+        render_shopping_list(shopping)
 
         render_recommendations(API_URL, response_json.get("recommendations", []))
 

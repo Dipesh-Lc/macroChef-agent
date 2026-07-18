@@ -3,14 +3,34 @@ from sqlalchemy.orm import Session
 from app.data.db import SessionLocal, init_db
 from app.data.repositories import FeedbackRepository, SessionMemoryRepository
 from app.schemas.recommendation import FeedbackRequest, MealRecommendation
+from app.services.analytics import get_analytics
+
+# feedback_type values that map onto a thumbs up/down analytics signal.
+# "cooked"/"skipped" are other feedback types this endpoint accepts but are
+# not thumbs up/down, so they are not captured here.
+_THUMBS_EVENT_BY_FEEDBACK_TYPE = {"liked": "thumbs_up", "disliked": "thumbs_down"}
 
 
-def save_feedback(request: FeedbackRequest, db: Session | None = None) -> dict[str, str]:
+def save_feedback(
+    user_id: str, request: FeedbackRequest, db: Session | None = None
+) -> dict[str, str]:
+    # `user_id` is the verified session identity (see
+    # app.dependencies.get_session_user), passed in by the caller --
+    # `FeedbackRequest` carries no user_id field to fall back to, so both the
+    # persisted row and the analytics event below use only this value, never
+    # anything from `request`.
     init_db()
     owns_session = db is None
     session = db or SessionLocal()
     try:
-        FeedbackRepository(session).add_feedback(request)
+        FeedbackRepository(session).add_feedback(user_id, request)
+        thumbs_event = _THUMBS_EVENT_BY_FEEDBACK_TYPE.get(request.feedback_type)
+        if thumbs_event:
+            get_analytics().capture(
+                user_id,
+                "thumbs up/down",
+                {"direction": thumbs_event, "recipe_id": request.recipe_id},
+            )
         return {"status": "ok", "message": "Feedback saved"}
     finally:
         if owns_session:

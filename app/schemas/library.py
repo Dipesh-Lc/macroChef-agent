@@ -9,7 +9,14 @@ SourceMode = Literal["mock", "llm", "external", "hybrid"]
 
 
 class RecipeDiscoveryRequest(BaseModel):
-    user_id: str
+    """The `/library/discover` request body.
+
+    Deliberately has no `user_id` field: the caller's identity comes only
+    from the verified session token (see app.dependencies.get_session_user),
+    never from client-supplied request data. Route handlers thread the
+    verified user id into the graph separately.
+    """
+
     cuisines: list[str] = Field(default_factory=list)
     meal_type: str | None = None
     diet_type: str | None = None
@@ -31,7 +38,9 @@ class RecipeDiscoveryResponse(BaseModel):
 
 
 class SaveRecipeCandidatesRequest(BaseModel):
-    user_id: str
+    """The `/library/save` request body. No `user_id` field -- see
+    `RecipeDiscoveryRequest`'s docstring."""
+
     selected_candidates: list[RecipeCandidate] = Field(default_factory=list)
 
 

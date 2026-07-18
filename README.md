@@ -2,6 +2,16 @@
 
 ![CI](https://github.com/Dipesh-Lc/macroChef-agent/actions/workflows/ci.yml/badge.svg)
 
+> **Hobby project — not medical advice.** MacroChef is an unpaid personal project,
+> not a certified nutrition or allergy-safety product. Its adversarial safety
+> benchmark (371 cases, see below) **has been run**, and the current
+> adjudicated-true inherent violation count is **nonzero** — deployment is
+> blocked until it reaches zero. No violation-rate claim is made anywhere in
+> this README; the release gate is zero adjudicated-true inherent violations,
+> with the raw judge-flagged count always published alongside it. **If you have
+> a food allergy, you must independently verify every ingredient before you eat
+> anything this app suggests.**
+
 **A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
 > **The LLM never enforces your allergies and never computes your macros.
@@ -34,9 +44,14 @@ deterministically by the scorer. The LLM cannot override a safety decision — b
 construction, not by prompt. Macro targets are *soft* constraints used only to
 rank, never to include or exclude on safety grounds.
 
-> A reproducible adversarial safety benchmark (allergy-contradiction traps, hidden
-> allergens like "satay sauce" → peanut, diet-type traps) is planned for a future
-> release to publish a violation-rate comparison vs. direct LLM prompting. See
+> A reproducible adversarial safety benchmark (371 cases: allergy-contradiction
+> traps, hidden allergens like "satay sauce" → peanut, diet-type traps, and more)
+> has been authored and **is now being run against MacroChef**. The current
+> adjudicated-true inherent violation count is **nonzero**, so deployment is
+> blocked and **no violation-rate number is published anywhere in this README**
+> until the release gate (zero adjudicated-true inherent violations, with the
+> raw judge-flagged count always published alongside) is met. The planned
+> comparison vs. direct LLM prompting is deferred until then. See
 > `docs/ROADMAP.md`.
 
 ---
@@ -58,7 +73,8 @@ pip install -r requirements.txt
 # 3. Configure (mock mode — no API keys needed)
 cp .env.example .env
 
-# 4. Build the recipe index (bundled 25-recipe corpus)
+# 4. Build the recipe index (full grounded corpus: 25 curated seeds +
+#    imported Food.com recipes, ~4,200+ recipes)
 python scripts/ingest_recipes.py
 
 # 5. Run the API and the UI (two terminals)
@@ -81,6 +97,9 @@ docker compose up --build
 
 - API: http://localhost:8000  (health check: `GET /health`)
 - UI:  http://localhost:8501
+
+Deploying the API to Azure Container Apps is automated (CI/CD, manual
+production trigger) — see `docs/DEPLOY.md`.
 
 ---
 
@@ -142,10 +161,12 @@ LangGraph workflow
 
 ### RAG design
 
-`scripts/ingest_recipes.py` loads `data/processed/sample_recipes.jsonl`, builds a
-rich recipe document per recipe, stores recipe metadata, and persists the Chroma
-collection in `data/chroma`. Local sentence-transformers embeddings are attempted
-first; a deterministic hashing-embedding fallback keeps offline demos runnable.
+`scripts/ingest_recipes.py` does a clean rebuild of the full recipe corpus
+(`data/processed/sample_recipes.jsonl` + `data/processed/imported_recipes.jsonl`,
+grounded against USDA FoodData Central), builds a rich recipe document per
+recipe, stores recipe metadata, and persists the Chroma collection in
+`data/chroma`. Local sentence-transformers embeddings are attempted first; a
+deterministic hashing-embedding fallback keeps offline demos runnable.
 
 Beyond the 25 hand-curated seed recipes, the corpus also includes recipes
 imported via `scripts/import_corpus.py` into `data/processed/imported_recipes.jsonl`
@@ -320,9 +341,10 @@ Invoke-RestMethod -Uri "http://localhost:8000/recipes/recommend" -Method Post -C
 
 ## Evaluation
 
-Deterministic metrics computed over a demo set:
+Deterministic metrics computed over a small internal demo set (not the
+adversarial safety benchmark — see the disclaimer at the top of this README):
 
-- Allergy violation rate (must be 0)
+- Allergy violation rate (release-blocking gate: must be 0 on this demo set)
 - Pantry utilization rate
 - Macro deviation
 - Missing ingredient count
@@ -350,14 +372,28 @@ pytest
 ## Limitations
 
 - Not medical advice.
-- Nutrition estimates currently depend on recipe metadata (grounding in a real
-  nutrition database is a planned roadmap item).
+- Nutrition is grounded via USDA FoodData Central for the 25 hand-authored seed
+  recipes; imported-corpus rows remain ungrounded and unit-less (see below).
 - The bundled recipe dataset is intentionally small for an MVP.
 - Vision extraction is deterministic mock by default and is not a real image
   recognizer.
 - Allergy safety depends on accurate recipe metadata and accurate user input.
 - Optional hosted/local model integrations are isolated and disabled by default,
   and are never treated as allergy or nutrition authorities.
+- **Imported corpus quantities have no units.** All but 122 of the ~33,732
+  imported Food.com ingredient rows carry no unit (verified 2026-07-17) — the
+  upstream dataset strips them. Imported recipes are therefore
+  discovery/inspiration; quantity-aware features (pantry-match amounts,
+  shopping-list math, future cost estimation) are real only for the 25
+  hand-authored seed recipes and user-entered pantry items. Allergen detection
+  is name-based and unaffected.
+- **Identity is anonymous and per-browser.** Sessions are signed anonymous
+  tokens — no email, no login (a deliberate scope decision: no PII in a hobby
+  demo). Clearing cookies or switching devices starts a fresh library; tokens
+  expire after 30 days and the old library is then unreachable. Session
+  isolation itself is enforced and tested (tampered/forged/expired tokens get
+  401). Durable cross-device identity (magic-link) is a possible post-launch
+  addition.
 
 ## Roadmap
 

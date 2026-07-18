@@ -19,6 +19,7 @@ from app.graph.nodes import (
 )
 from app.graph.state import MacroChefState, ensure_state
 from app.schemas.recommendation import RecommendationRequest, RecommendationResponse
+from app.services.analytics import get_analytics
 
 
 class SequentialMacroChefGraph:
@@ -105,9 +106,14 @@ def build_macrochef_graph():
         return SequentialMacroChefGraph()
 
 
-def request_to_state(request: RecommendationRequest) -> MacroChefState:
+def request_to_state(request: RecommendationRequest, user_id: str) -> MacroChefState:
+    # `user_id` always comes from the verified session token (see
+    # app.dependencies.get_session_user, via
+    # app.api.routes_recommendations.recommend_recipes), never from
+    # `request` -- the wire schema has no user_id field to begin with. This
+    # mirrors app.graph.library_builder.discovery_request_to_state.
     return MacroChefState(
-        user_id=request.user_id,
+        user_id=user_id,
         input_type=request.input_type,
         image_path=request.image_path,
         typed_ingredients=request.typed_ingredients,
@@ -118,12 +124,12 @@ def request_to_state(request: RecommendationRequest) -> MacroChefState:
     )
 
 
-def run_recommendation_graph(request: RecommendationRequest) -> RecommendationResponse:
+def run_recommendation_graph(request: RecommendationRequest, user_id: str) -> RecommendationResponse:
     graph = build_macrochef_graph()
-    state = request_to_state(request)
+    state = request_to_state(request, user_id)
     result = graph.invoke(state.model_dump())
     final_state = ensure_state(result)
-    return RecommendationResponse(
+    response = RecommendationResponse(
         recommendations=final_state.final_recommendations,
         shopping_list=final_state.shopping_list,
         rejected_recipes=final_state.rejected_recipes,
@@ -131,3 +137,17 @@ def run_recommendation_graph(request: RecommendationRequest) -> RecommendationRe
         debug_trace=final_state.debug_trace,
         errors=final_state.errors,
     )
+
+    analytics = get_analytics()
+    analytics.capture(
+        user_id,
+        "request completed",
+        {"had_errors": bool(response.errors), "recommendation_count": len(response.recommendations)},
+    )
+    if response.recommendations:
+        analytics.capture(
+            user_id,
+            "plan generated",
+            {"recommendation_count": len(response.recommendations)},
+        )
+    return response

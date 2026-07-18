@@ -65,10 +65,31 @@ _UNICODE_FRACTIONS: dict[str, float] = {
     "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875,
 }
 
-# Leading amount: mixed number ("1 1/2"), fraction ("1/2"), decimal, integer, or
-# a single unicode fraction glyph.
+# Range dashes accepted between two leading numbers: ASCII hyphen, en dash,
+# em dash. The hyphen is listed first in every character class below so it is
+# read as a literal, not a range operator.
+_RANGE_DASH_CHARS = "-–—"
+
+# Leading amount, longest/most-specific alternative first (regex alternation
+# takes the first branch that matches, not the longest overall match, so order
+# here is load-bearing):
+#   1. numeric range: "2-4" / "2–4" / "2—4" (ASCII hyphen, en dash, em dash)
+#   2. mixed unicode fraction, glued or spaced: "1½" / "1 ½"
+#   3. mixed digit fraction: "1 1/2"
+#   4. simple fraction: "1/2"
+#   5. decimal or integer: "1.5" / "150"
+#   6. bare decimal: ".5"
+#   7. bare unicode fraction: "½"
 _LEADING_AMOUNT = re.compile(
-    r"^\s*(?P<num>\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?|\.\d+|[½¼¾⅓⅔⅛⅜⅝⅞])"
+    r"^\s*(?P<num>"
+    rf"\d+(?:\.\d+)?\s*[{_RANGE_DASH_CHARS}]\s*\d+(?:\.\d+)?"
+    r"|\d+\s*[½¼¾⅓⅔⅛⅜⅝⅞]"
+    r"|\d+\s+\d+/\d+"
+    r"|\d+/\d+"
+    r"|\d+(?:\.\d+)?"
+    r"|\.\d+"
+    r"|[½¼¾⅓⅔⅛⅜⅝⅞]"
+    r")"
 )
 
 
@@ -78,10 +99,41 @@ def _fraction_to_float(token: str) -> float:
     return float(numerator) / denom if denom else 0.0
 
 
+def _split_range(token: str) -> tuple[str, str] | None:
+    """Split a numeric-range token on its first ASCII hyphen/en dash/em dash."""
+    for dash in _RANGE_DASH_CHARS:
+        if dash in token:
+            low, _, high = token.partition(dash)
+            return low, high
+    return None
+
+
 def _amount_to_float(token: str) -> float | None:
     token = token.strip()
+
+    # Numeric range ("2-4", "2–4 tbsp", "2—4 tbsp"): take the deterministic
+    # MIDPOINT ("2–4" -> 3.0). This is a documented convention, not a measured
+    # value -- see the parse_quantity_string docstring. It is safe from a safety
+    # standpoint because allergen matching is name-based and quantity-independent
+    # (see app.services.constraint_engine._recipe_safety_terms); the midpoint only
+    # affects nutrition/procurement math, where it minimizes expected error.
+    range_parts = _split_range(token)
+    if range_parts is not None:
+        low = _amount_to_float(range_parts[0])
+        high = _amount_to_float(range_parts[1])
+        if low is None or high is None:
+            return None
+        return (low + high) / 2
+
     if token in _UNICODE_FRACTIONS:
         return _UNICODE_FRACTIONS[token]
+
+    # Mixed unicode fraction, glued ("1½") or spaced ("1 ½"): strip internal
+    # whitespace and check for <digits><fraction glyph>.
+    glued = token.replace(" ", "")
+    if len(glued) >= 2 and glued[-1] in _UNICODE_FRACTIONS and glued[:-1].isdigit():
+        return float(glued[:-1]) + _UNICODE_FRACTIONS[glued[-1]]
+
     if " " in token:  # mixed number like "1 1/2"
         whole, frac = token.split(None, 1)
         return float(whole) + _fraction_to_float(frac)
@@ -102,8 +154,20 @@ def parse_quantity_string(raw: str) -> dict[str, object]:
         "2 cups rice"          -> {"name": "rice",           "amount": 2.0,   "unit": "cup"}
         "1 medium egg"         -> {"name": "medium egg",     "amount": 1.0,   "unit": None}
         "chicken breast"       -> {"name": "chicken breast", "amount": None,  "unit": None}
+        "1½ cup heavy whipping cream" -> {"name": "heavy whipping cream", "amount": 1.5, "unit": "cup"}
+        "1 ½ cups sugar"       -> {"name": "sugar", "amount": 1.5, "unit": "cup"}
+        "2–4 tbsp milk"        -> {"name": "milk", "amount": 3.0, "unit": "tbsp"}
 
     `name` is never empty: unparseable input falls back to the original text.
+
+    Numeric ranges ("2-4", "2–4", "2—4" -- ASCII hyphen, en dash, and em dash
+    are all accepted) collapse to their arithmetic MIDPOINT as a single,
+    documented, deterministic convention (e.g. "2–4 tbsp" -> amount=3.0). This
+    is a modeling choice for downstream nutrition/procurement math, not a
+    measured quantity -- callers consuming `amount` for shopping-list
+    quantities should treat it as an estimate, not an exact figure. It carries
+    no safety weight: allergen matching (app.services.constraint_engine) is
+    keyed on `name` only and is quantity-independent by design.
     """
     text = (raw or "").strip()
     if not text:

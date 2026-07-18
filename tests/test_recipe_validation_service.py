@@ -1,3 +1,5 @@
+import pytest
+
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.recipe_validation_service import RecipeValidationService
@@ -43,7 +45,7 @@ def test_too_few_ingredients_fails() -> None:
 
 
 def test_allergy_conflict_fails() -> None:
-    request = RecipeDiscoveryRequest(user_id="u", allergies=["soy"])
+    request = RecipeDiscoveryRequest(allergies=["soy"])
     result = RecipeValidationService().validate_candidates(
         [_candidate(allergens=["soy"])],
         request,
@@ -65,3 +67,240 @@ def test_missing_macros_warn_but_do_not_fail() -> None:
 
     assert result.valid_candidates
     assert result.valid_candidates[0].validation_warnings
+
+
+# --- 2026-07 diet-leak fix parity ---------------------------------------
+#
+# recipe_validation_service._violates_requested_diet used to decide
+# dairy-free/gluten-free by reading the candidate's stored `allergens`
+# labels (populated by derive_allergen_labels' exact-set matching, which
+# misses compound ingredient names) instead of routing through
+# constraint_engine.contains_allergen's substring matching -- the same gap
+# commit 6c89292 already closed for constraint_engine.violates_diet_type.
+# Both recipes below are real corpus entries (imp_00d7e68543255f34,
+# imp_022adbbb8dbb56c9) that have allergens=[] in the imported data
+# precisely because derive_allergen_labels missed their compound dairy /
+# gluten ingredient names. See tests/test_constraint_engine.py's matching
+# regression block for the constraint_engine-side version of this fix.
+
+
+def test_dairy_free_catches_compound_cream_cheese_despite_empty_stored_allergens() -> None:
+    # Real corpus recipe imp_022adbbb8dbb56c9 ("Crab Dip"): allergens=[] in
+    # the imported data, but "cream cheese" is a dairy ingredient that
+    # derive_allergen_labels' exact-set matching misses (it isn't literally
+    # "dairy" or "cream" or "cheese").
+    request = RecipeDiscoveryRequest(diet_type="dairy-free")
+    result = RecipeValidationService().validate_candidates(
+        [
+            _candidate(
+                candidate_id="imp_022adbbb8dbb56c9",
+                title="Crab Dip",
+                ingredients=["1 cream cheese", "2 green onions", "0.5 sherry wine", "1 salt"],
+                allergens=[],
+                diet_tags=[],
+            )
+        ],
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+    assert "diet type" in result.failed_candidates[0]["errors"][0].lower()
+
+
+def test_gluten_free_catches_compound_all_purpose_flour_despite_empty_stored_allergens() -> None:
+    # Real corpus recipe imp_00d7e68543255f34 ("Dill Buttermilk Bread"):
+    # allergens=[] in the imported data, but "all-purpose flour" and
+    # "buttermilk" are gluten/dairy ingredients that derive_allergen_labels'
+    # exact-set matching misses.
+    request = RecipeDiscoveryRequest(diet_type="gluten-free")
+    result = RecipeValidationService().validate_candidates(
+        [
+            _candidate(
+                candidate_id="imp_00d7e68543255f34",
+                title="Dill Buttermilk Bread",
+                ingredients=[
+                    "3 cups all-purpose flour",
+                    "1 tsp baking powder",
+                    "1.5 cups buttermilk",
+                ],
+                allergens=[],
+                diet_tags=[],
+            )
+        ],
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+
+
+def test_dairy_free_still_rejects_when_stored_allergen_label_is_correct() -> None:
+    # Regression: the previous stored-label path must keep working where the
+    # label IS correct (e.g. a literal "milk" ingredient, which
+    # derive_allergen_labels does catch) -- this fix must not trade one gap
+    # for another.
+    request = RecipeDiscoveryRequest(diet_type="dairy-free")
+    result = RecipeValidationService().validate_candidates(
+        [
+            _candidate(
+                ingredients=["200 g milk", "150 g rice", "80 g broccoli"],
+                allergens=["dairy"],
+                diet_tags=[],
+            )
+        ],
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+
+
+def test_gluten_free_passes_recipe_with_no_gluten_ingredients() -> None:
+    # Regression: a genuinely gluten-free recipe must not be caught by the
+    # new contains_allergen path.
+    request = RecipeDiscoveryRequest(diet_type="gluten-free")
+    result = RecipeValidationService().validate_candidates(
+        [_candidate(diet_tags=["high-protein", "dairy-free"])],
+        request,
+    )
+
+    assert result.valid_candidates
+    assert not result.failed_candidates
+
+
+def test_vegetarian_diet_tag_path_is_unchanged() -> None:
+    # vegetarian/vegan/high-protein check candidate.diet_tags, a separate
+    # mechanism out of scope for this fix -- confirm it still works.
+    request = RecipeDiscoveryRequest(diet_type="vegetarian")
+    result = RecipeValidationService().validate_candidates(
+        [_candidate(diet_tags=["high-protein", "dairy-free"])],  # no "vegetarian" tag
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+
+
+# --- diet_014 remediation: vegan/vegetarian are no longer tag-only ---------
+#
+# (adjudication_20260718T090522Z.md). `_violates_requested_diet` used to
+# admit a vegan/vegetarian-tagged candidate purely on tag membership. That
+# was proven unsafe (constraint_engine's diet_014 finding: a recipe can be
+# falsely tagged). The tag is now a TIGHTENING on top of
+# constraint_engine.violates_diet_type's deterministic scan, not the sole
+# check.
+
+
+def test_vegan_diet_tag_alone_no_longer_admits_a_dirty_recipe() -> None:
+    # THE FLIP: before this fix, a candidate tagged "vegan" was admitted on
+    # tag presence alone, even carrying the default chicken-breast fixture
+    # rows (not vegan). This same input must now be REJECTED -- the old
+    # `test_vegan_diet_tag_path_is_unchanged` assertion (`valid_candidates`
+    # truthy) is deliberately NOT preserved here; it pinned the hole this
+    # remediation closes.
+    request = RecipeDiscoveryRequest(diet_type="vegan")
+    result = RecipeValidationService().validate_candidates(
+        [_candidate(diet_tags=["vegan", "high-protein"])],  # default rows include chicken breast
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+
+
+def test_vegan_diet_tag_plus_clean_ingredients_still_admits() -> None:
+    # Tagged AND ingredient-clean (tofu/rice/broccoli -- no meat, dairy, egg,
+    # or honey) must still be admitted: the tag requirement is a
+    # tightening, not a replacement, of the engine scan.
+    request = RecipeDiscoveryRequest(diet_type="vegan")
+    result = RecipeValidationService().validate_candidates(
+        [
+            _candidate(
+                ingredients=["150 g tofu", "150 g rice", "80 g broccoli"],
+                diet_tags=["vegan", "high-protein"],
+            )
+        ],
+        request,
+    )
+
+    assert result.valid_candidates
+    assert not result.failed_candidates
+
+
+def test_high_protein_diet_tag_path_is_unchanged() -> None:
+    request = RecipeDiscoveryRequest(diet_type="high-protein")
+    result = RecipeValidationService().validate_candidates(
+        [_candidate(diet_tags=["dairy-free"])],  # no "high-protein" tag
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+
+
+# --- Fail-closed fix for unrecognized diet_type (docs/BACKLOG.md's "Unknown
+# diet_type fails OPEN in _violates_requested_diet"; confirmed live by the
+# adversarial safety benchmark's multi_015/multi_025/diet_040 cases, which
+# request diet_type="pescatarian"/"kosher" alongside a real allergy and were
+# over-served shellfish/peanut-containing mock candidates). The old code's
+# final `return False` meant "does not violate" -- i.e. ADMIT -- for any
+# diet_type it didn't recognize. An unrecognized diet_type must now fail
+# loudly instead, mirroring constraint_engine.violates_diet_type's own
+# fail-loud ValueError, so it can never silently result in an unfiltered
+# recommendation.
+
+
+def test_pescatarian_diet_type_fails_closed_not_open() -> None:
+    # Mirrors benchmark case multi_015: shellfish allergy + "pescatarian"
+    # diet_type requested against a shrimp recipe. The bug served it because
+    # "pescatarian" hit the catch-all `return False`.
+    request = RecipeDiscoveryRequest(allergies=["shellfish"], diet_type="pescatarian")
+
+    with pytest.raises(ValueError, match="pescatarian"):
+        RecipeValidationService().validate_candidates(
+            [
+                _candidate(
+                    title="Lemon Garlic Shrimp Pasta",
+                    ingredients=["140 g shrimp", "80 g pasta", "1 lemon"],
+                    allergens=["shellfish"],
+                    diet_tags=[],
+                )
+            ],
+            request,
+        )
+
+
+def test_kosher_diet_type_fails_closed_not_open() -> None:
+    # Mirrors benchmark case diet_040: "kosher" diet_type requested against a
+    # seafood paella containing shrimp/mussels (shellfish is categorically
+    # non-kosher). MacroChef has no kosher enforcement mechanism today --
+    # the correct, safe behavior is to reject the request, not silently
+    # admit the recipe.
+    request = RecipeDiscoveryRequest(diet_type="kosher")
+
+    with pytest.raises(ValueError, match="kosher"):
+        RecipeValidationService().validate_candidates(
+            [
+                _candidate(
+                    title="Seafood Paella",
+                    ingredients=["140 g shrimp", "120 g mussels", "150 g rice"],
+                    allergens=["shellfish"],
+                    diet_tags=[],
+                )
+            ],
+            request,
+        )
+
+
+@pytest.mark.parametrize("alias", ["none", "omnivore", "no restriction", "NONE"])
+def test_no_restriction_diet_type_aliases_do_not_raise(alias: str) -> None:
+    # Regression: the no-restriction sentinel values must keep passing
+    # through as "nothing to enforce on this axis" rather than being
+    # mistaken for an unrecognized diet_type.
+    request = RecipeDiscoveryRequest(diet_type=alias)
+
+    result = RecipeValidationService().validate_candidates([_candidate()], request)
+
+    assert result.valid_candidates
+    assert not result.failed_candidates

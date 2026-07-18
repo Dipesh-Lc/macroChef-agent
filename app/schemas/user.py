@@ -1,4 +1,12 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Diet types app.services.constraint_engine.violates_diet_type actually
+# enforces deterministically. A diet_type outside this set (e.g. "keto",
+# "paleo", "halal") must be rejected at intake rather than silently accepted:
+# violates_diet_type would return False for every recipe, which reads as a
+# safety guarantee ("your halal request was honored") the app isn't making.
+SUPPORTED_DIET_TYPES = {"vegetarian", "vegan", "gluten-free", "dairy-free"}
+NO_RESTRICTION_DIET_TYPES = {"none", "omnivore", "no restriction"}
 
 
 class MacroTargets(BaseModel):
@@ -17,3 +25,17 @@ class UserProfile(BaseModel):
     preferred_cuisines: list[str] = Field(default_factory=list)
     macro_targets: MacroTargets = Field(default_factory=MacroTargets)
     max_cook_time_min: int | None = Field(default=None, ge=1)
+
+    @field_validator("diet_type")
+    @classmethod
+    def _validate_diet_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized in NO_RESTRICTION_DIET_TYPES or normalized in SUPPORTED_DIET_TYPES:
+            return value
+        raise ValueError(
+            f"Unsupported diet_type {value!r}. MacroChef only enforces "
+            f"{sorted(SUPPORTED_DIET_TYPES)} today; unrecognized diet types "
+            "are rejected instead of silently passing every recipe as safe."
+        )

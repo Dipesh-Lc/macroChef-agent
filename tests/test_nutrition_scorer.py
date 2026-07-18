@@ -83,6 +83,20 @@ def test_macro_fit_neutral_when_partial() -> None:
     assert macro_fit_score(recipe, targets) == 0.5
 
 
+def test_macro_fit_neutral_when_grounded_but_flagged() -> None:
+    # A trust-demoting flag (see grounding_job.DEMOTING_FLAG_IMPLAUSIBLE_KCAL)
+    # must demote scoring to neutral even when status is GROUNDED -- an
+    # implausible computed value is not more trustworthy just because every
+    # ingredient happened to ground. Tag macros are a perfect match for
+    # targets to prove the scorer isn't accidentally falling back to them.
+    flagged = _grounded(calories=500, protein_g=40, carbs_g=50, fat_g=15, fiber_g=8)
+    flagged.flags.append("implausible_kcal_per_serving")
+    recipe = _recipe(calories=500, protein_g=40, carbs_g=50, fat_g=15, fiber_g=8, nutrition=flagged)
+    targets = MacroTargets(calories=500, protein_g=40, carbs_g=50, fat_g=15, fiber_g=8)
+
+    assert macro_fit_score(recipe, targets) == 0.5
+
+
 def test_calculates_pantry_match_correctly() -> None:
     recipe = _recipe()
     inventory = [

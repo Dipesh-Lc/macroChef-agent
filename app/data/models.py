@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.data.db import Base
@@ -32,9 +32,17 @@ class SessionMemory(Base):
 
 class UserSavedRecipe(Base):
     __tablename__ = "user_saved_recipes"
+    # recipe_id is unique per user, NOT globally unique -- a global unique
+    # constraint here previously meant a second user saving a recipe_id
+    # already claimed by another user silently reassigned (stole) that row
+    # (see RecipeLibraryRepository.save_recipe). Two different users are now
+    # free to each have their own row for the "same" recipe_id.
+    __table_args__ = (
+        UniqueConstraint("user_id", "recipe_id", name="uq_user_saved_recipes_user_recipe"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    recipe_id: Mapped[str] = mapped_column(String(128), index=True, unique=True)
+    recipe_id: Mapped[str] = mapped_column(String(128), index=True)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
     title: Mapped[str] = mapped_column(String(256), index=True)
     cuisine: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
