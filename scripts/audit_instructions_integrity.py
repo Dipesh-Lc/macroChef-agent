@@ -64,9 +64,15 @@ SAMPLE_AUDIT_MIN_PER_CATEGORY = 3
 # on-breach rule requires a FRESH sample on re-run ("fresh sample with seed
 # 20260718, increment per round") -- bumped from the first run's 20260717.
 # The miss-spot-check seed is kept aligned to the same value per that rule.
-SAMPLE_AUDIT_SEED = 20260718
+#
+# Revision round 2 (2026-07-18 ruling item 14, on the 231309Z HALT --
+# round 1's own sample audit): both seeds bumped again to 20260719, same
+# increment-per-round rule (round 1's 20260718 sample/miss-check breached
+# both bars -- 9/40 FP > 2 and 2/15 misses > 0 -- so this is round 2's
+# fresh, not-yet-adjudicated sample).
+SAMPLE_AUDIT_SEED = 20260719
 MISS_SPOT_CHECK_N = 15
-MISS_SPOT_CHECK_SEED = 20260718
+MISS_SPOT_CHECK_SEED = 20260719
 
 # --- Revisions log (spec Sec. 0's pre-registration rule: any post-result
 # vocabulary revision is documented here with before/after counts and a
@@ -142,6 +148,13 @@ test_imp_6f3463afcc2f5d51_sparerib_trigger_added_but_worcestershire_row_still_sa
 for the pinned regression and a companion synthetic test isolating the
 trigger's effect without the conflict.
 
+**Resolved in round 2** (see below, ruling item 12): the architectural call
+this conflict was flagging for was made -- "worcestershire"/"puttanesca"
+removed from `meat`'s satisfiers. The pinned regression test was rewritten
+(renamed to `test_imp_6f3463afcc2f5d51_sparerib_trigger_now_flags_meat_
+after_worcestershire_satisfier_removed`) to assert the FLIPPED, now-correct
+behavior.
+
 **Rejected candidates (spec ruling item 7 -- recorded, not implemented):**
 - `except` as a negation phrase: corpus evidence (imp_2433f1f7486a57dc,
   imp_19ce1a09db625d96, imp_180066ee5652529a) shows "except" marks
@@ -153,6 +166,147 @@ trigger's effect without the conflict.
 - An addition-verb requirement for Tier B stock satisfaction: would rewrite
   the frozen Tier B semantics and misses "simmer in broth"-shaped
   in-recipe-stock forms that have no explicit addition verb.
+"""
+
+# Round 2 (2026-07-18 advisor ruling on the 231309Z HALT report --
+# round 1's own sample audit: 31 CQ / 9 FP, breach of the <=2/40 bar;
+# miss spot-check 2 misses found, breach of the 0 bar; both breaches
+# invoke spec Sec. 3's on-breach path). Same leave-one-out convention as
+# round 1: each count is "flagged-recipe count with ONLY that one rule
+# reverted, all others (including all of round 1's) held active," so these
+# will NOT sum linearly to the round-1-to-round-2 delta for the same
+# multi-rule-overlap reason stated in ROUND_1_REVISIONS_MD's header above.
+#
+# Correction: the round's own task spec flagged one id ambiguity to guard
+# against -- the correct id for the "can add" Buttermilk Jalapeno Cornbread
+# case is `imp_3233766015ca524d` (ends "...ca524d", not a "...ca524c"
+# near-miss); verified against data/processed/imported_recipes.jsonl and
+# used consistently in the module, tests, and this report.
+ROUND_2_REVISIONS_MD = """\
+**Round 2** (2026-07-18, advisor ruling on round 1's own 231309Z HALT
+report's sample audit and miss spot-check; docs/instructions_integrity_
+spec.md remains the frozen base spec -- every round-2 rule below is a
+per-item ruling on top of it, not a spec amendment).
+Baseline (round 1 final, 231309Z report): 1130/4045 = 27.94% flagged.
+This round's result (all changes below active together): 1156/4045 = 28.58%
+flagged -- still a HALT (> 12% ceiling), a slight RISE from round 1
+(misses fixed -- rules 10, 11, 12 -- outweigh the false positives cleared
+by rules 1-5, 7, 8, 9). Per spec Sec. 3 ("maximum two revision rounds"),
+this is round 2 of 2: the outcome is the pre-registered HUMAN GATE on the
+corpus itself -- reported without alarm, exactly as pre-registered.
+
+Per-rule leave-one-out ablation (flagged-recipe count with ONLY that one
+rule reverted, all others -- round 1's and round 2's -- held active, vs.
+this round's 1156 final count):
+
+- Item 1, commentary-prefix marker generalized from step-initial to
+  ANYWHERE-in-step: 1160 without it (reverted to step-initial-only) -> 1156
+  with it (clears 4). Cite imp_2380cadece955cc7 "Alfredo Sauce with Pasta"
+  (mid-step "Variation:" marker the round-1 anchor missed).
+- Item 2, "can add"/"can be added" added to the optional-variation
+  step-wide suppression phrases: 1158 without it -> 1156 with it (clears
+  2). Cite imp_3233766015ca524d "Buttermilk Jalapeno Cornbread".
+- Item 3, "if serving" added to the serving-cue phrases: 1157 without it ->
+  1156 with it (clears 1). Cite imp_9b2c1d45a9f55ef1 "Alfredo Sauce".
+- Item 4, whole-step suppression on `^\\s*serve\\b`: 1179 without it -> 1156
+  with it (clears 23 -- this round's single largest FP-clearing
+  contributor). Cite imp_748b6422ecbb5c7d "Polish Sausage and Peppers".
+  Counter-case imp_fbf6565762c0590d "Mabo Dofu" (non-initial "serve")
+  re-verified to still flag sesame.
+- Item 5, whole-step suppression on `^\\s*dip\\b` AND NOT `\\bin(?:to)?\\b`:
+  1157 without it -> 1156 with it (clears 1). Cite imp_e7fb53c18ced5dc0
+  "Beer Batter". Counter-case imp_a22b3c09a6b25bb5 "Crispy Baked Fish &
+  Herbs" (contains "in") re-verified to still flag fish.
+- Item 7, "cheese cloth"/"cheese-cloth" exact-phrase suppression (->
+  "cheese"): 1158 without it -> 1156 with it (clears 2). Cite
+  imp_13e739367b505085 "Spiced Pear Butter".
+- Item 8, "ketjap manis"/"kecap manis"/"ketjap"/"kecap" satisfier-only
+  extras for BOTH `soy` and `wheat_gluten`: 1158 without it -> 1156 with it
+  (clears 2). Cite imp_d287af8d742e5d44 "Katjang Sauce: Peanut Sauce".
+- Item 9, Tier B pot-liquor arm 3 (occurrence-level addition-verb/
+  purchased-word evidence filter, applied only when >=1 animal row is
+  present): 1172 without it -> 1156 with it (clears 16 -- this round's
+  second-largest FP-clearing contributor). Cite imp_a76aa35639d85deb
+  "Borscht II". All five pinned arm-3 cases (Borscht cleared; Lasagna
+  Rollups, Escalope of Salmon, Dirty Rice, Beef Stroganoff kept) re-
+  verified.
+- Item 10, bare "rib" TRIGGER-ONLY extra for `meat` (with the celery/
+  "rib of celery"/"seeds and ribs" guards): 1149 without it -> 1156 with it
+  -- INCREASES the flagged count by 7 (a genuine-miss fix, not an FP
+  suppression). Cite imp_635b6cd0fbd557ad "Hutspot". Guard re-verified:
+  imp_41bfceea6ba65b47 "Corn Chowder"'s `-3 celery ribs` ingredient row
+  does not flag meat.
+- Item 11, `crust`/`pie shell`/`crepe` added as wheat_gluten triggers (with
+  the crust-verb-use following-token guard, the "crepe pan" exact-phrase
+  guard, and the crust/pie-shell cookie-like and crust-only nut/coconut
+  composite satisfiers): 1099 without it -> 1156 with it -- INCREASES the
+  flagged count by 57, this round's single largest miss-fixing contributor
+  (matches the miss spot-check's MISS 2 CLASS finding, which was one
+  vocabulary gap spanning many corpus rows, not an isolated case). Cite
+  imp_15fe9cc27b96537b "Pumpkin-Pecan Pie" (pie shell), imp_d63bae35bb3a55bb
+  "Austrian Sweet Cheese Crepes" (crepe); composite satisfier verified NOT
+  to over-suppress via imp_fe5e997cb47c553c "Chocolate-Caramel-Pecan
+  Cheesecake" (graham cracker crumbs row satisfies crust) while still
+  catching imp_15fe9cc27b96537b's pecan-only row set (pecans do NOT satisfy
+  "pie shell" -- only the `crust` term gets the nut/coconut composite arm).
+- Item 12, "worcestershire"/"puttanesca" removed from `meat`'s satisfiers:
+  1141 without it -> 1156 with it -- INCREASES the flagged count by 15 (the
+  round-1-discovered conflict's resolution). Cite imp_6f3463afcc2f5d51
+  "Pork Spareribs in Tangy Sauce" (now correctly flags meat). Accepted
+  residual FP this creates: imp_712db6319e3957c7 "Apricot Basting Sauce"
+  ("Use sauce over chicken, pork, and lamb" -- a legitimate serving-target
+  mention for a sauce recipe, not a hidden-meat claim; deliberately NOT
+  patched with a `^use` rule per the ruling, pinned as an accepted-residual
+  test instead).
+
+**Rejected candidates (recorded, not implemented):**
+- Item 6, named variation-block header suppression (e.g. "San Francisco:")
+  for imp_ab6b542e34555631 "The Bottomless Chicken Soup Pot": REJECTED.
+  Rationale (per the ruling): any generic header-line suppression rule
+  (a capitalized word/phrase followed by a colon, step-initial or not)
+  would also swallow genuine sub-component headers this same corpus uses
+  constantly -- "CINNAMON WHIPPED CREAM:", "For the Meringue:", "Cooking
+  the steak:", the MasterCook praline block header -- each of which
+  introduces REAL recipe content, not an optional variation. No safe,
+  general distinguishing rule between the two header shapes was found;
+  imp_ab6b542e34555631 remains a documented residual FP (see RESIDUALS
+  below), not a suppressed one.
+- Bare "bones" as a meat trigger (considered alongside item 10's "rib"):
+  REJECTED. Redundant for imp_635b6cd0fbd557ad "Hutspot" ("rib" already
+  catches it) and over-triggers on the harmless "Flake fish, discarding
+  skin and bones" (imp_d3a91c593c3d55b2 "Green and Gold Chowder" --
+  already a genuine fish miss via its own "fish" trigger, not a bones one).
+
+## Residuals (documented, not fixed this round)
+
+Three known false-positive/leniency classes, recorded here with enough
+detail to act on later (per this repo's "Default to backlog" convention)
+rather than patched with an overfit, single-case rule:
+
+1. **imp_ab6b542e34555631 "The Bottomless Chicken Soup Pot" (item 6,
+   rejected above).** Its "San Francisco: ... 2 tablespoons soy sauce ..."
+   named-variation-block header is not suppressed and remains a
+   quarantine-worthy soy/wheat_gluten flag on this recipe, even though the
+   base chicken-soup dish itself is complete. Any future fix needs a
+   distinguishing signal between an optional-regional-variant header and a
+   genuine recipe-component sub-header ("For the Meringue:") that this
+   round did not find.
+2. **imp_3aee17154e8c59e9 "Apple Raisin Cobbler Pie" (item 11).** Will NOT
+   flag wheat_gluten for its own "Spoon into crust" mention, despite being
+   the SAME miss-spot-check MISS 2 class as imp_15fe9cc27b96537b/
+   imp_d63bae35bb3a55bb above -- its own "all-purpose flour" ingredient row
+   satisfies the wheat_gluten category under the PRE-EXISTING, category-
+   wide core leniency (any WHEAT_GLUTEN_TERMS-matching row satisfies ANY
+   wheat_gluten trigger in the same recipe, not just the specific one that
+   fired) before the new per-term crust/pie-shell composite filter is even
+   reached. Not a bug in the new rule -- a pre-existing design property
+   surfaced by it. No action taken (working as designed for every OTHER
+   wheat_gluten trigger too).
+3. **imp_712db6319e3957c7 "Apricot Basting Sauce" (item 12).** Accepted
+   residual FP -- see item 12's own entry above. Pinned as
+   `test_imp_712db6319e3957c7_apricot_basting_sauce_accepted_residual_fp_
+   flags_meat` so it shows up as an intentional, documented diff rather
+   than a silent surprise on any future vocabulary change.
 """
 
 
@@ -482,6 +636,8 @@ def render_report(
     lines.append("## Revisions")
     lines.append("")
     lines.append(ROUND_1_REVISIONS_MD)
+    lines.append("")
+    lines.append(ROUND_2_REVISIONS_MD)
     lines.append("")
 
     return "\n".join(lines)

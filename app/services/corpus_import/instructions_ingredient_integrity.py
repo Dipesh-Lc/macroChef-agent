@@ -159,6 +159,17 @@ DAIRY_SATISFIER_EXTRAS: frozenset[str] = frozenset({"margarine", "shortening", "
 # explicit literal terms (not a general `(ed|ing)?` suffix, which would
 # create "fished"/"creamed" homograph problems -- spec Sec. 2 morphology
 # note).
+#
+# Revision round 2 (2026-07-18 advisor ruling on the 231309Z HALT report,
+# item 11): "crust", "pie shell", "crepe" added -- MISS 2 class from the
+# miss spot-check (imp_15fe9cc27b96537b "Pumpkin-Pecan Pie": "Pour into the
+# unbaked pie shell"; imp_3aee17154e8c59e9 "Apple Raisin Cobbler Pie":
+# "Spoon into crust"; imp_d63bae35bb3a55bb "Austrian Sweet Cheese Crepes":
+# "spread ... filling on each crepe" -- none of `crust`/`pie shell`/`crepe`
+# was a trigger, a genuine undisclosed-wheat-carrier miss, same hazard
+# class as the round-1 "pastry"/"bread" triggers). Bare `shell` is
+# deliberately REJECTED (too polysemous -- "shellfish", "egg shell",
+# "seashell" homograph risk with no cited real-corpus benefit).
 WHEAT_GLUTEN_TERMS: frozenset[str] = frozenset(
     {
         "bread", "flour", "pasta", "spaghetti", "macaroni", "linguine",
@@ -167,6 +178,7 @@ WHEAT_GLUTEN_TERMS: frozenset[str] = frozenset(
         "semolina", "phyllo", "filo", "pita", "bagel", "bran", "barley",
         "rye", "malt", "seitan", "breaded", "floured",
         "soy sauce",
+        "crust", "pie shell", "crepe",
     }
 )
 # Satisfier-only extras (spec Sec. 2): "dough" and "mix" (e.g. "cake mix"
@@ -174,6 +186,37 @@ WHEAT_GLUTEN_TERMS: frozenset[str] = frozenset(
 # themselves triggers (too polysemous as triggers -- that generic-residue
 # role is filled by the separate Tier C "dough"/"batter" categories below).
 WHEAT_GLUTEN_SATISFIER_EXTRAS: frozenset[str] = frozenset({"dough", "mix"})
+
+# Category-specific composite satisfiers for the NEW `crust`/`pie shell`
+# triggers only (revision round 2, ruling item 11) -- deliberately NOT
+# added to the general `WHEAT_GLUTEN_SATISFIER_EXTRAS` above (which would
+# let a cookie-crumb or nut row silently satisfy an unrelated "bread"/
+# "flour" mention elsewhere in the same recipe); wired instead through
+# `_wheat_gluten_term_composite_satisfied` below, keyed on the SPECIFIC
+# matched term, mirroring `_stock_composite_satisfied`'s per-category (here
+# per-term) design.
+#
+# (a) both `crust` and `pie shell` are satisfied by any row naming a
+# cookie/cracker-crumb-style base -- imp_fe5e997cb47c553c
+# "Chocolate-Caramel-Pecan Cheesecake" lists "graham cracker crumbs" and
+# says "Pour over graham cracker crust" (also independently satisfied via
+# the pre-existing bare "cracker" satisfier, kept here as the documented,
+# generalizable rule for crumb-crust bases without a literal "cracker" row).
+_WHEAT_GLUTEN_CRUST_COOKIE_LIKE_SATISFIERS: frozenset[str] = frozenset(
+    {"cookie", "wafer", "crumb", "graham", "oreo", "gingersnap", "pretzel"}
+)
+# (b) `crust` ONLY (not `pie shell`) is additionally satisfied by any
+# TREE_NUT_TERMS or `coconut` row -- a nut/coconut press-in crust is a
+# plausible composite of an already-listed nut/coconut row, live in
+# imp_21d303d861785454 "Cocoa-Nut Meringue Cheesecake": "Combine coconut,
+# pecans, and margarine, press onto bottom of 9-inch springform pan" /
+# "...pour over crust" -- no flour, cracker, or cookie row at all, the
+# crust IS the listed coconut+pecans. `pie shell` is excluded from this arm
+# because a "pie shell" (unlike a press-in crumb crust) conventionally
+# implies a pastry-dough shell, not a nut composite -- the pinned
+# imp_15fe9cc27b96537b "Pumpkin-Pecan Pie" test asserts pecan rows must NOT
+# satisfy its own "pie shell" mention.
+_WHEAT_GLUTEN_CRUST_NUT_OR_COCONUT_SATISFIERS: frozenset[str] = TREE_NUT_TERMS | frozenset({"coconut"})
 
 # Egg (spec Sec. 2 "egg"): `\begg\b` correctly matches "egg-yolks"/"egg
 # wash", correctly ignores "eggplant" (no word boundary inside it) --
@@ -220,6 +263,21 @@ SOY_TERMS: frozenset[str] = frozenset({"soy", "soya", "tofu", "edamame", "miso",
 # Gratin" (same ingredient-row spelling).
 SOY_SATISFIER_EXTRAS: frozenset[str] = frozenset({"soymilk"})
 
+# Satisfier-only extras, shared by BOTH `soy` and `wheat_gluten` (revision
+# round 2, 2026-07-18 ruling item 8): "ketjap manis"/"kecap manis"/
+# "ketjap"/"kecap" -- imp_d287af8d742e5d44 "Katjang Sauce: Peanut Sauce"
+# lists "ketjap manis" as an ingredient row, and its own NOTES-adjacent step
+# says "*Ketjap manis is a sweet Indonesian soy sauce..." -- the "soy sauce"
+# phrase there dual-fires wheat_gluten AND soy (per `_DUAL_CATEGORY_TERMS`),
+# but the recipe's own "ketjap manis" row already IS that soy sauce; the
+# satisfier gap (not a suppression gap -- the NOTES-prefix rule only clears
+# the LEADING "NOTES :" step, not this separate, non-prefixed step) is what
+# needs fixing, not the step's wording. Never a trigger (a recipe never
+# implies a spice-glossary footnote just because it lists ketjap manis).
+_KETJAP_SATISFIER_EXTRAS: frozenset[str] = frozenset(
+    {"ketjap manis", "kecap manis", "ketjap", "kecap"}
+)
+
 # Meat (spec Sec. 2 "meat", NEW): flesh words ONLY. Deliberately EXCLUDES
 # gelatin/marshmallow/worcestershire/suet/lard -- different hazard classes;
 # gelatin+worcestershire are fish-side allergen terms, and bare "meat" is the
@@ -236,8 +294,9 @@ SOY_SATISFIER_EXTRAS: frozenset[str] = frozenset({"soymilk"})
 # rib" added -- imp_6f3463afcc2f5d51 "Pork Spareribs in Tangy Sauce" has
 # zero flesh-word rows in its ingredient list and its instructions say only
 # "Trim spareribs..."/"...pour over the ribs", a genuine miss the bare
-# vocabulary didn't catch. Deliberately NOT adding bare "rib"/"ribs" (too
-# polysemous, e.g. "rib of celery").
+# vocabulary didn't catch. Deliberately NOT adding bare "rib"/"ribs" here
+# (too polysemous, e.g. "rib of celery") -- see `_MEAT_TRIGGER_ONLY_EXTRAS`
+# below for round 2's narrower, guarded way of catching it.
 MEAT_FLESH_TERMS: frozenset[str] = frozenset(
     {
         "bacon", "beef", "chicken", "chorizo", "duck", "goose", "ham",
@@ -253,6 +312,26 @@ MEAT_FLESH_TERMS: frozenset[str] = frozenset(
 # throughout; a roast IS a cut of animal flesh, so its own listed roast
 # already satisfies the hidden meat mention.
 MEAT_SATISFIER_EXTRAS: frozenset[str] = frozenset({"roast"})
+
+# TRIGGER-ONLY extra, NOT in MEAT_FLESH_TERMS, NOT a satisfier (revision
+# round 2, 2026-07-18 ruling item 10, MISS 1 from the miss spot-check):
+# bare "rib" -- imp_635b6cd0fbd557ad "Hutspot" has a vegetarian-looking row
+# set (carrots/onions/potatoes/water only) whose own instructions say "Add
+# ribs, carrots and onions" -- the round-1 vocabulary deliberately omitted
+# bare "rib"/"ribs" over the "rib of celery" homograph risk, but that risk
+# is now handled by the guards below (preceding-token "celery" suppression,
+# plus the exact-phrase "rib of celery"/"ribs of celery"/"seeds and ribs"
+# suppressions) rather than by omitting the word outright. Kept OUT of
+# MEAT_FLESH_TERMS itself (not just out of the satisfier set) specifically
+# so it can never be picked up by `_ANIMAL_FLESH_OR_SEAFOOD_TERMS` below --
+# imp_41bfceea6ba65b47 "Corn Chowder"'s own `-3 celery ribs` ingredient row
+# must never count as "an animal row" for the Tier B stock composite arms.
+_MEAT_TRIGGER_ONLY_EXTRAS: frozenset[str] = frozenset({"rib"})
+# REJECTED (recorded, not implemented): bare "bones" -- redundant for
+# Hutspot (rib already catches it) and over-triggers on the unrelated,
+# harmless "Flake fish, discarding skin and bones" (imp_d3a91c593c3d55b2
+# "Green and Gold Chowder", already a genuine fish miss via the "fish"
+# trigger on its own, not a bones one).
 
 # Tier B (spec Sec. 1 "Tier B"): undisclosed standalone stock. Triggers are
 # exactly these three words -- word-boundary-safe with one suppression
@@ -302,7 +381,10 @@ CATEGORIES: dict[str, dict] = {
     "wheat_gluten": {
         "tier": "A",
         "triggers": WHEAT_GLUTEN_TERMS,
-        "satisfiers": WHEAT_GLUTEN_TERMS | WHEAT_GLUTEN_SATISFIER_EXTRAS,
+        # Revision round 2 (ruling item 8): `_KETJAP_SATISFIER_EXTRAS` added
+        # here (also added to `soy` below) -- see that constant's own
+        # citation comment.
+        "satisfiers": WHEAT_GLUTEN_TERMS | WHEAT_GLUTEN_SATISFIER_EXTRAS | _KETJAP_SATISFIER_EXTRAS,
         "allergen_labels": frozenset({"wheat", "gluten"}),
     },
     "egg": {
@@ -344,7 +426,7 @@ CATEGORIES: dict[str, dict] = {
     "soy": {
         "tier": "A",
         "triggers": SOY_TERMS,
-        "satisfiers": SOY_TERMS | SOY_SATISFIER_EXTRAS,
+        "satisfiers": SOY_TERMS | SOY_SATISFIER_EXTRAS | _KETJAP_SATISFIER_EXTRAS,
         "allergen_labels": frozenset({"soy", "soya"}),
     },
     "meat": {
@@ -354,8 +436,45 @@ CATEGORIES: dict[str, dict] = {
         # non-vegetarian at serve time, so an additional hidden meat adds no
         # incremental engine-visible hazard -- only rows with NO
         # animal-flesh-or-seafood rows at all flag.
-        "triggers": MEAT_FLESH_TERMS,
-        "satisfiers": MEAT_FLESH_TERMS | FISH_TERMS | CRUSTACEAN_TERMS | MOLLUSK_TERMS | MEAT_SATISFIER_EXTRAS,
+        #
+        # Revision round 2 (ruling item 10): triggers also include
+        # `_MEAT_TRIGGER_ONLY_EXTRAS` ("rib") -- trigger-only, deliberately
+        # NOT added to the satisfier side (a "celery ribs" ingredient row
+        # must never satisfy a hidden meat mention elsewhere in the same
+        # recipe).
+        "triggers": MEAT_FLESH_TERMS | _MEAT_TRIGGER_ONLY_EXTRAS,
+        # Revision round 2 (ruling item 12): "worcestershire"/"puttanesca"
+        # REMOVED from this category's satisfiers (previously included
+        # wholesale via `FISH_TERMS`). Honest counter-argument, stated
+        # rather than hidden: `constraint_engine.MEAT_ALIASES` already
+        # carries "worcestershire" as its own condiment-hazard entry, so a
+        # recipe listing a Worcestershire-sauce row is ALREADY blocked for
+        # a vegetarian/fish-allergic user at serve time regardless of
+        # whether this check also flags it -- removing it here does not
+        # change what the constraint engine actually blocks. The reason to
+        # remove it anyway is the quarantine's OWN stated purpose: an
+        # ingredient-row set that omits its own dish's actual meat (the
+        # "Filet Mignon without the filet" class, e.g.
+        # imp_6f3463afcc2f5d51 "Pork Spareribs in Tangy Sauce," whose rows
+        # are all condiments) is untrustworthy independent of whether the
+        # ONE hidden hazard it names happens to be redundant with a
+        # different already-listed hazard -- see
+        # `tests/test_instructions_ingredient_integrity.py::
+        # test_imp_6f3463afcc2f5d51_sparerib_trigger_now_flags_meat_after_
+        # worcestershire_satisfier_removed` for the flipped pinned
+        # regression, and the accepted residual FP this creates
+        # (imp_712db6319e3957c7 "Apricot Basting Sauce": "Use sauce over
+        # chicken, pork, and lamb" -- a legitimate serving-target mention
+        # for a sauce recipe, not a hidden-meat claim about the sauce
+        # itself; deliberately NOT patched with a `^use` rule, recorded as
+        # an accepted residual instead per the ruling).
+        "satisfiers": (
+            MEAT_FLESH_TERMS
+            | (FISH_TERMS - {"worcestershire", "puttanesca"})
+            | CRUSTACEAN_TERMS
+            | MOLLUSK_TERMS
+            | MEAT_SATISFIER_EXTRAS
+        ),
         # Not an allergen -- a diet-type (vegetarian) hazard only, so there
         # is no `recipe.allergens` OR-arm for it (empty set is a no-op in
         # `_category_satisfied`).
@@ -466,32 +585,67 @@ _SERVING_CUE_PHRASES: tuple[str, ...] = (
     "use as", "use it as", "use to", "use on",
     "when you cook", "when cooking", "when grilling", "when serving",
     "goes well with", "great with", "delicious with",
+    # Revision round 2 (2026-07-18 ruling item 3): "if serving" --
+    # imp_9b2c1d45a9f55ef1 "Alfredo Sauce": "(If serving with shrimp, you
+    # might not need much salt.)" -- a conditional serving note about an
+    # optional add-in, not a claim the sauce itself contains shrimp.
+    "if serving",
 )
 _SERVING_CUE_PATTERNS = [re.compile(rf"\b{re.escape(phrase)}\b") for phrase in _SERVING_CUE_PHRASES]
 
-# Commentary/attribution step-prefix markers (step-wide suppression, revision
-# round 1, 2026-07-18 ruling on the 220709Z HALT report): a step that OPENS
-# with an editorial-aside label -- a "Notes:"/"Tip:"/"Variation:" aside, a
-# syndicated-column attribution, a garnish/serving-suggestion callout -- is
-# commentary ABOUT the recipe, not a step describing what this recipe itself
-# contains, so every match in that step is suppressed. The colon is REQUIRED
-# so a step that merely uses the word "note"/"tip" mid-sentence (not as a
-# leading label) is untouched -- matches the ruling's exact anchor:
-# `^\s*(?:nb|notes?|tips?|variations?|column|garnishing note|serving
-# suggestions?|suggested accompaniments?)\s*:`. Per-alternative citations:
+# Commentary/attribution markers (revision round 1, 2026-07-18 ruling on the
+# 220709Z HALT report; GENERALIZED in revision round 2, 2026-07-18 ruling
+# item 1, on the 231309Z HALT report): a marker label -- a "Notes:"/"Tip:"/
+# "Variation:" aside, a syndicated-column attribution, a garnish/serving-
+# suggestion callout -- introduces commentary ABOUT the recipe, not a
+# description of what this recipe itself contains.
+#
+# Round 1 anchored the marker to the STEP-INITIAL position only
+# (`^\s*(?:...)\s*:`) and suppressed the WHOLE step on a match. Round 2
+# generalizes this to the marker's EARLIEST occurrence ANYWHERE in the step
+# (`_truncate_at_commentary_marker` below): only the text BEFORE the marker
+# is evaluated for anything (terms, negation, serving cues); marker-to-end
+# is dropped entirely. Round 1's step-initial cases still work identically
+# under this rule (the prefix before a step-initial marker is empty, same
+# net effect as the old whole-step suppression) -- the generalization is
+# needed because a MID-step marker was proven to slip through the old
+# anchor: imp_2380cadece955cc7 "Alfredo Sauce with Pasta": "Sprinkle with
+# remaining cheese. Variation: Add cooked shrimp, crab or mushrooms." --
+# the marker is the SECOND sentence of the step, not its start.
+#
+# The colon is still REQUIRED so a step that merely uses the word
+# "note"/"tip" mid-sentence (not as a label) is untouched. Per-alternative
+# citations (unchanged from round 1, still valid under the generalized
+# anchor since all were step-initial to begin with):
 #   notes                    -- imp_f26d5c5093e25ac7 "NOTES : Trassi is a..."
 #   nb                       -- imp_3e5cbefd62c05ed8 "NB: if you like..."
 #   tips                     -- imp_4b158d76b28e594d "TIPS: * if using..."
-#   variations               -- imp_a7eb6f7b7e885e67 "Variation:  Top with..."
+#   variations               -- imp_a7eb6f7b7e885e67 "Variation:  Top with...";
+#                                imp_2380cadece955cc7 (round 2, MID-step)
 #   column                   -- imp_ce64651a221b54d3 "Column: 'Sausages...'"
 #   garnishing note          -- imp_bca827b64d08523e "Garnishing note: ..."
 #   serving suggestions      -- imp_72746bdecd895fb1 / imp_c39c91fead915027
 #   suggested accompaniments -- imp_6404a96a38aa5c12 "Suggested accompaniments:"
 _COMMENTARY_PREFIX_PATTERN = re.compile(
-    r"^\s*(?:nb|notes?|tips?|variations?|column|garnishing note|"
+    r"\b(?:nb|notes?|tips?|variations?|column|garnishing note|"
     r"serving suggestions?|suggested accompaniments?)\s*:",
     re.IGNORECASE,
 )
+
+
+def _truncate_at_commentary_marker(step_lower: str) -> str:
+    """Revision round 2 (ruling item 1): returns the text BEFORE the
+    earliest `_COMMENTARY_PREFIX_PATTERN` occurrence in the step (marker-
+    to-end is dropped from ALL downstream evaluation -- terms, negation,
+    serving cues, everything), or the step unchanged if no marker is
+    present. See the pattern's own citation comment above for the full
+    rationale and the mid-step case (imp_2380cadece955cc7) this generalizes
+    for."""
+    match = _COMMENTARY_PREFIX_PATTERN.search(step_lower)
+    if not match:
+        return step_lower
+    return step_lower[: match.start()]
+
 
 # Optional-variation / cross-reference phrases (step-wide suppression, same
 # semantics as the serving-cue list above, revision round 1, 2026-07-18
@@ -505,8 +659,52 @@ _OPTIONAL_VARIATION_PHRASES: tuple[str, ...] = (
     r"optional(?:s|ly)?",  # imp_0539d1b8b65e58ae
     "same quantities as",  # imp_941617b6247054aa "same quantities as Oyster Sauce"
     "menu featuring",  # imp_0d20dbf56b3b55fa "a menu featuring an egg and cheese dish"
+    # Revision round 2 (2026-07-18 ruling item 2): "can add"/"can be added"
+    # -- imp_3233766015ca524d "Buttermilk Jalapeno Cornbread": "Can add
+    # drained corn, bacon, ... etc. for a different taste" -- an optional,
+    # user-initiated addition, not this recipe's own asserted content.
+    "can add",
+    "can be added",
 )
 _OPTIONAL_VARIATION_PATTERNS = [re.compile(rf"\b{phrase}\b") for phrase in _OPTIONAL_VARIATION_PHRASES]
+
+# Whole-step suppressions anchored to the STEP'S OWN START (revision round
+# 2, 2026-07-18 ruling items 4 and 5).
+#
+# Item 4: a step beginning with "serve" is a serving-vehicle/pairing
+# description, not a content assertion -- imp_748b6422ecbb5c7d "Polish
+# Sausage and Peppers": "Serve the sausage and peppers and onions on French
+# bread." The existing serving-cue phrase list ("serve with"/"serve on"/...)
+# requires an exact multi-word match and missed this (no "serve on" -- it's
+# "serve ... on", with intervening words). Counter-example that must NOT be
+# swept up by this same rule: imp_fbf6565762c0590d "Mabo Dofu": "Turn out
+# into serving dish, sprinkle with the sesame oil and serve hot." -- "serve"
+# is NOT step-initial there (the step starts with "Turn"), so this rule
+# correctly leaves it alone and the sesame mention still flags.
+_SERVE_INITIAL_PATTERN = re.compile(r"^\s*serve\b", re.IGNORECASE)
+
+# Item 5: a step beginning with "dip" naming a dippable-food ALTERNATIVE
+# list (not asserting this recipe contains all of them) is suppressed
+# UNLESS the step also contains a bare "in"/"into" -- which signals a
+# concrete usage ("dip X in Y") rather than a "here's what you could dip"
+# list. Suppressed case: imp_e7fb53c18ced5dc0 "Beer Batter": "Dip fresh
+# shrimp, mushrooms or veggies." (no "in"/"into" at all -- the batter's own
+# rows are complete; the dippable is user-supplied, same class as "Fish
+# Marinade"). Kept case: imp_a22b3c09a6b25bb5 "Crispy Baked Fish & Herbs":
+# "Dip fish in egg white, then roll in crumbs." (contains "in" twice --
+# this step asserts an actual action on THIS recipe's own fish, egg, and
+# crumbs, so it must still flag "fish").
+_DIP_INITIAL_PATTERN = re.compile(r"^\s*dip\b", re.IGNORECASE)
+_CONTAINS_IN_WORD_PATTERN = re.compile(r"\bin(?:to)?\b")
+
+
+def _step_has_serve_initial_suppression(step_lower: str) -> bool:
+    return bool(_SERVE_INITIAL_PATTERN.search(step_lower))
+
+
+def _step_has_dip_initial_suppression(step_lower: str) -> bool:
+    return bool(_DIP_INITIAL_PATTERN.search(step_lower)) and not _CONTAINS_IN_WORD_PATTERN.search(step_lower)
+
 
 # Preceding-token suppressions (span-local, immediately-preceding word only
 # -- deliberately NOT the title module's whole-text BUTTER_COMPOUND_
@@ -527,12 +725,34 @@ _FLOUR_PRECEDING_SUPPRESSORS: frozenset[str] = frozenset(
     {"corn", "rice", "potato", "tapioca", "almond", "coconut", "chickpea", "soy", "oat", "quinoa"}
 )
 _CHESTNUT_PRECEDING_SUPPRESSORS: frozenset[str] = frozenset({"water"})
+# Revision round 2 (2026-07-18 ruling item 10): "rib" preceded by "celery"
+# -- the ubiquitous ingredient-listing idiom "celery ribs"/"rib of celery"
+# is a vegetable, not animal flesh; this guards any future INSTRUCTIONS-side
+# occurrence of that idiom (imp_41bfceea6ba65b47 "Corn Chowder"'s own
+# `-3 celery ribs` is an INGREDIENT row, never scanned as a trigger anyway,
+# but this suppressor is the defense-in-depth for a step that phrases it
+# the same way, e.g. "Add the celery ribs").
+_RIB_PRECEDING_SUPPRESSORS: frozenset[str] = frozenset({"celery"})
 
 _PRECEDING_TOKEN_SUPPRESSIONS: dict[str, frozenset[str]] = {
     "butter": _BUTTER_PRECEDING_SUPPRESSORS,
     "milk": _MILK_PRECEDING_SUPPRESSORS,
     "flour": _FLOUR_PRECEDING_SUPPRESSORS,
     "chestnut": _CHESTNUT_PRECEDING_SUPPRESSORS,
+    "rib": _RIB_PRECEDING_SUPPRESSORS,
+}
+
+# Following-token suppressions (span-local, immediately-FOLLOWING word only
+# -- the mirror image of the preceding-token table above; revision round 2,
+# 2026-07-18 ruling item 11). Keyed by the exact trigger term text.
+# "crust" followed by "the"/"each"/"both"/"it"/"them" is the VERB sense
+# ("to crust [something] with...") not the noun (pastry base) sense --
+# imp_06f98881ebf05a75 "Roasted Pork Loin with Bacon and Onion Spaetzle":
+# "Remove from pan and crust the loin with cracked black pepper."
+_CRUST_FOLLOWING_SUPPRESSORS: frozenset[str] = frozenset({"the", "each", "both", "it", "them"})
+
+_FOLLOWING_TOKEN_SUPPRESSIONS: dict[str, frozenset[str]] = {
+    "crust": _CRUST_FOLLOWING_SUPPRESSORS,
 }
 
 # Exact-phrase suppressions (tool/brand/idiom, each individually cited in
@@ -577,6 +797,29 @@ EXACT_PHRASE_SUPPRESSIONS: dict[str, str] = {
     # and "plant" (unlike unhyphenated "eggplant", which \begg\b already
     # correctly ignores) -- needs the explicit suppression.
     "egg-plant": "egg",
+    # Revision round 2 (2026-07-18 ruling item 7): "cheese cloth"/
+    # "cheese-cloth" (the fabric, cheesecloth) is not dairy -- both
+    # spellings suppress "cheese" only. Live in imp_13e739367b505085
+    # "Spiced Pear Butter": "Tie broken cinnamon spices, gingerroot,
+    # allspice and cloves in a piece of cheese cloth" (a recipe with zero
+    # dairy ingredients or content otherwise).
+    "cheese cloth": "cheese",
+    "cheese-cloth": "cheese",
+    # Revision round 2 (2026-07-18 ruling item 10): "rib of celery"/
+    # "ribs of celery" (reversed word order from the ingredient-listing
+    # idiom) and "seeds and ribs" (a tomato/pepper's internal membrane, not
+    # animal flesh) -- live in imp_0ea6e8bb1fd85633 "Pickled Tomato
+    # Parcels": "With a melon baller remove seeds and ribs, leaving outer
+    # wall intact."
+    "rib of celery": "rib",
+    "ribs of celery": "rib",
+    "seeds and ribs": "rib",
+    # Revision round 2 (2026-07-18 ruling item 11): "crepe pan" (the
+    # utensil/pan shape) is not a "crepe" ingredient-carrier mention --
+    # live in imp_968a7fa664885493 "Emerald Fried Rice": "Heat 1 tablespoon
+    # of oil in a frying-pan or crepe pan." (a recipe with no crepe/flour
+    # content at all -- an omelette-style fried rice).
+    "crepe pan": "crepe",
 }
 
 
@@ -598,13 +841,6 @@ def _step_has_generic_negation(step_lower: str) -> bool:
 
 def _step_has_serving_cue(step_lower: str) -> bool:
     return any(pattern.search(step_lower) for pattern in _SERVING_CUE_PATTERNS)
-
-
-def _step_has_commentary_prefix(step_lower: str) -> bool:
-    """Revision round 1 (2026-07-18 ruling): whole-step suppression for a
-    leading editorial-commentary label (see `_COMMENTARY_PREFIX_PATTERN`'s
-    definition above for the full per-alternative citation list)."""
-    return bool(_COMMENTARY_PREFIX_PATTERN.search(step_lower))
 
 
 def _step_has_optional_variation(step_lower: str) -> bool:
@@ -655,6 +891,23 @@ def _is_preceding_token_suppressed(step_lower: str, span: tuple[int, int], term:
     return _preceding_word(step_lower, span[0]) in suppressors
 
 
+def _following_word(text: str, end: int) -> str:
+    """The alphabetic word immediately following index `end` in `text`
+    (mirror of `_preceding_word` above, revision round 2 ruling item 11),
+    or "" if the span is at the end of the step or followed by
+    punctuation/digits."""
+    after = text[end:]
+    match = re.match(r"[\s-]*([a-z]+)", after)
+    return match.group(1) if match else ""
+
+
+def _is_following_token_suppressed(step_lower: str, span: tuple[int, int], term: str) -> bool:
+    suppressors = _FOLLOWING_TOKEN_SUPPRESSIONS.get(term)
+    if not suppressors:
+        return False
+    return _following_word(step_lower, span[1]) in suppressors
+
+
 def _scan_step_for_categories(step: str) -> dict[str, list[str]]:
     """Returns {category: [matched terms]} for ONE instruction step, across
     every tier. Longest terms are matched first and claim their span so a
@@ -674,16 +927,29 @@ def _scan_step_for_categories(step: str) -> dict[str, list[str]]:
     if re.search(r"\bmock\b", step_lower):
         return {}
 
-    # Step-wide suppressions (spec Sec. 2, plus revision round 1's two new
+    # Whole-step suppressions anchored to the step's OWN START (revision
+    # round 2 ruling items 4 and 5) -- checked against the ORIGINAL,
+    # untruncated step text, since both anchors care only about how the
+    # step itself begins, never about text after a later commentary marker.
+    if _step_has_serve_initial_suppression(step_lower) or _step_has_dip_initial_suppression(step_lower):
+        return {}
+
+    # Revision round 2 (ruling item 1): truncate at the earliest commentary
+    # marker anywhere in the step (generalized from round 1's step-initial-
+    # only anchor) -- see `_truncate_at_commentary_marker`'s own docstring.
+    # EVERYTHING downstream (the remaining whole-step suppressions, and all
+    # term scanning) operates on this truncated, scoped text only; the
+    # marker-to-end text is not evaluated for anything.
+    scoped_lower = _truncate_at_commentary_marker(step_lower)
+
+    # Step-wide suppressions (spec Sec. 2, plus revision round 1's two
     # whole-step classes, 2026-07-18 ruling): negation, serving/intended-use
-    # cues, a leading editorial-commentary label, and an optional-variation/
-    # cross-reference phrase each suppress the ENTIRE step's matches, not a
-    # specific term.
+    # cues, and an optional-variation/cross-reference phrase each suppress
+    # the ENTIRE (scoped) step's matches, not a specific term.
     if (
-        _step_has_generic_negation(step_lower)
-        or _step_has_serving_cue(step_lower)
-        or _step_has_commentary_prefix(step_lower)
-        or _step_has_optional_variation(step_lower)
+        _step_has_generic_negation(scoped_lower)
+        or _step_has_serving_cue(scoped_lower)
+        or _step_has_optional_variation(scoped_lower)
     ):
         return {}
 
@@ -692,19 +958,21 @@ def _scan_step_for_categories(step: str) -> dict[str, list[str]]:
     ]
     all_terms.sort(key=lambda pair: len(pair[0]), reverse=True)
 
-    phrase_spans = _phrase_suppression_spans(step_lower)
+    phrase_spans = _phrase_suppression_spans(scoped_lower)
     consumed: list[tuple[int, int]] = []
     hits: dict[str, list[str]] = {}
 
     for term, category in all_terms:
-        for span in _find_term_spans(step_lower, term):
+        for span in _find_term_spans(scoped_lower, term):
             if _overlaps(span, consumed):
                 continue
-            if _term_negated_specific(step_lower, term):
+            if _term_negated_specific(scoped_lower, term):
                 continue
             if _is_phrase_suppressed(span, term, phrase_spans):
                 continue
-            if _is_preceding_token_suppressed(step_lower, span, term):
+            if _is_preceding_token_suppressed(scoped_lower, span, term):
+                continue
+            if _is_following_token_suppressed(scoped_lower, span, term):
                 continue
             consumed.append(span)
             hits.setdefault(category, []).append(term)
@@ -717,6 +985,18 @@ def _scan_step_for_categories(step: str) -> dict[str, list[str]]:
 
 def _ingredient_text_matches(term: str, ingredient_text_lower: str) -> bool:
     return bool(re.search(rf"\b{re.escape(term)}s?\b", ingredient_text_lower))
+
+
+# Shared union (extracted in revision round 2 so the pre-existing arm 2
+# above and the NEW arm 3 evidence filter below can't silently drift apart
+# on what counts as "an animal row" -- deliberately excludes the round-2
+# `_MEAT_TRIGGER_ONLY_EXTRAS` ("rib"): a "celery ribs" ingredient row must
+# never count as an animal row for either arm, per ruling item 10).
+_ANIMAL_FLESH_OR_SEAFOOD_TERMS: frozenset[str] = MEAT_FLESH_TERMS | FISH_TERMS | CRUSTACEAN_TERMS | MOLLUSK_TERMS
+
+
+def _has_animal_flesh_or_seafood_row(ingredient_text_lower: str) -> bool:
+    return any(_ingredient_text_matches(term, ingredient_text_lower) for term in _ANIMAL_FLESH_OR_SEAFOOD_TERMS)
 
 
 def _stock_composite_satisfied(ingredient_text_lower: str) -> bool:
@@ -740,13 +1020,99 @@ def _stock_composite_satisfied(ingredient_text_lower: str) -> bool:
     "Rice, Apple and Raisin Dressing" has neither a `water` row nor any
     animal row (arm 2 fails on both conjuncts) nor a mollusk row (arm 1
     fails) -- both recipes correctly fall through to the literal
-    stock/broth/bouillon check, which is unchanged and still flags them."""
+    stock/broth/bouillon check, which is unchanged and still flags them.
+
+    See `_stock_pot_liquor_filtered_pairs` below for arm 3 (revision round
+    2, ruling item 9), which is NOT a satisfier (does not belong in this
+    function) -- it is an occurrence-level evidence filter applied
+    separately in `find_instructions_ingredient_mismatches`."""
     if any(_ingredient_text_matches(term, ingredient_text_lower) for term in MOLLUSK_TERMS):
         return True
     if not re.search(r"\bwaters?\b", ingredient_text_lower):
         return False
-    animal_terms = MEAT_FLESH_TERMS | FISH_TERMS | CRUSTACEAN_TERMS | MOLLUSK_TERMS
-    return any(_ingredient_text_matches(term, ingredient_text_lower) for term in animal_terms)
+    return _has_animal_flesh_or_seafood_row(ingredient_text_lower)
+
+
+# Tier B arm 3: pot-liquor evidence filter (revision round 2, 2026-07-18
+# ruling item 9, on the 231309Z HALT report's FP class (viii)): arm 2 above
+# requires a LISTED `water` row, but "water" is a commonly-unlisted item
+# (spec Sec. 2's own exclusion) -- so a recipe that simmers a LISTED animal
+# ingredient in its own rendered juices (no separate water row at all) was
+# falling through arm 2 and flagging as if the broth were purchased/hidden.
+# imp_a76aa35639d85deb "Borscht II": "keeping the broth at a simmer" is the
+# pot liquor from the recipe's own LISTED "beef stew meat" -- no water row,
+# no purchased stock.
+#
+# This is deliberately NOT a `_category_satisfied` satisfier (it does not
+# clear the WHOLE stock category the way arms 1/2 do) -- it is a per-
+# OCCURRENCE evidence filter: when the recipe has >=1 animal row (flesh,
+# fish, crustacean, or mollusk; a `water` row is explicitly NOT required,
+# unlike arm 2), a stock/broth/bouillon OCCURRENCE only counts as evidence
+# of a HIDDEN stock if its own step has an addition verb (the mention
+# describes putting something INTO the pot, i.e. a purchased/prepared
+# addition) or a purchased-stock word. An occurrence with neither is
+# presumed to be the recipe's own pot liquor and is dropped; if ALL
+# occurrences for a recipe's stock mismatch are dropped this way, the whole
+# mismatch is dropped. Arms 1 and 2 are completely unchanged.
+_STOCK_ADDITION_VERB_PATTERN = re.compile(
+    r"\badd(?:s|ed|ing)?\b"
+    r"|\bstir(?:red|ring)?\s+in(?:to)?\b"
+    r"|\bpour(?:ed|ing)?\s+in(?:to)?\b"
+    r"|\bmix(?:ed|ing)?\s+in\b"
+    r"|\bwhisk(?:ed|ing)?\s+in\b"
+)
+_STOCK_PURCHASED_WORD_PATTERN = re.compile(
+    r"\b(?:instant|canned|can of|cubes?|granules?|base|powders?|powdered|"
+    r"packets?|envelopes?|cartons?|store-bought|boxed)\b"
+)
+
+
+def _stock_occurrence_survives_pot_liquor_filter(step_lower: str) -> bool:
+    return bool(_STOCK_ADDITION_VERB_PATTERN.search(step_lower) or _STOCK_PURCHASED_WORD_PATTERN.search(step_lower))
+
+
+def _stock_pot_liquor_filtered_pairs(
+    hit_pairs: list[tuple[str, str]], ingredient_text_lower: str
+) -> list[tuple[str, str]]:
+    """Arm 3 (see `_STOCK_ADDITION_VERB_PATTERN`'s citation comment above).
+    Only applies when the recipe has >=1 animal row; otherwise `hit_pairs`
+    is returned unchanged (arm 3 inapplicable -- pinned by
+    imp_00efafa3c86e5b9e "Beef Stroganoff with Dill", which has no animal
+    ingredient row at all and must still flag `stock` on the unfiltered
+    literal check)."""
+    if not _has_animal_flesh_or_seafood_row(ingredient_text_lower):
+        return hit_pairs
+    return [(term, step) for term, step in hit_pairs if _stock_occurrence_survives_pot_liquor_filter(step.lower())]
+
+
+# wheat_gluten `crust`/`pie shell` category-specific composite satisfiers
+# (revision round 2, ruling item 11) -- see the two constants'
+# `_WHEAT_GLUTEN_CRUST_COOKIE_LIKE_SATISFIERS` /
+# `_WHEAT_GLUTEN_CRUST_NUT_OR_COCONUT_SATISFIERS` definitions above (with
+# `WHEAT_GLUTEN_TERMS`) for the full citations. This is an occurrence-level
+# evidence filter, exactly like arm 3 above, NOT a `_category_satisfied`
+# satisfier -- it applies per matched TERM, not per category, so a `crepe`
+# occurrence in the same category is never affected by it.
+def _wheat_gluten_term_composite_satisfied(term: str, ingredient_text_lower: str) -> bool:
+    if term not in ("crust", "pie shell"):
+        return False
+    if any(_ingredient_text_matches(t, ingredient_text_lower) for t in _WHEAT_GLUTEN_CRUST_COOKIE_LIKE_SATISFIERS):
+        return True
+    if term == "crust" and any(
+        _ingredient_text_matches(t, ingredient_text_lower) for t in _WHEAT_GLUTEN_CRUST_NUT_OR_COCONUT_SATISFIERS
+    ):
+        return True
+    return False
+
+
+def _wheat_gluten_crust_filtered_pairs(
+    hit_pairs: list[tuple[str, str]], ingredient_text_lower: str
+) -> list[tuple[str, str]]:
+    return [
+        (term, step)
+        for term, step in hit_pairs
+        if not _wheat_gluten_term_composite_satisfied(term, ingredient_text_lower)
+    ]
 
 
 def _category_satisfied(
@@ -804,6 +1170,18 @@ def find_instructions_ingredient_mismatches(recipe: Recipe) -> list[Mismatch]:
         spec = CATEGORIES[category]
         if _category_satisfied(category, spec, ingredient_text_lower, recipe_allergens):
             continue
+
+        # Occurrence-level evidence filters (revision round 2, ruling items
+        # 9 and 11): these operate AFTER the whole-category satisfier check
+        # above fails, and can shrink `hit_pairs` -- possibly to empty, in
+        # which case the whole mismatch is dropped, not just narrowed.
+        if category == "stock":
+            hit_pairs = _stock_pot_liquor_filtered_pairs(hit_pairs, ingredient_text_lower)
+        elif category == "wheat_gluten":
+            hit_pairs = _wheat_gluten_crust_filtered_pairs(hit_pairs, ingredient_text_lower)
+        if not hit_pairs:
+            continue
+
         mismatches.append(
             Mismatch(
                 recipe_id=recipe.recipe_id,

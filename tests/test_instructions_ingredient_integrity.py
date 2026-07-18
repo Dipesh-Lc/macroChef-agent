@@ -769,17 +769,22 @@ def test_synthetic_cape_cod_place_name_suppressed() -> None:
 def test_synthetic_oyster_crackers_suppresses_oyster_not_cracker() -> None:
     # "oyster crackers" (no oyster ingredient) must not flag mollusk, but
     # bare "cracker" is still a wheat trigger with no flour/cracker row.
+    # Deliberately NOT step-initial "Serve" (revision round 2, ruling item
+    # 4, added a whole-step suppression for `^\s*serve\b` -- this step is
+    # rephrased to "Top the soup..." so the fixture keeps testing the
+    # exact-phrase suppression it was written for, rather than colliding
+    # with the new unrelated serve-initial rule).
     recipe = _recipe(
         "syn15",
         "Synthetic",
         [{"name": "soup", "amount": 1, "unit": None}],
-        ["Serve the soup topped with oyster crackers."],
+        ["Top the soup with oyster crackers."],
     )
     all_mismatches = find_instructions_ingredient_mismatches(recipe)
-    # "Serve the soup topped with..." contains "serve" but not one of the
-    # exact serving-cue phrases ("serve with"/"serve over"/...), so the step
-    # is NOT suppressed by the serving-cue rule; "oyster" is suppressed by
-    # the exact-phrase rule; "cracker" fires wheat_gluten with no satisfier.
+    # "Top the soup with..." contains no serving-cue phrase ("serve with"/
+    # "serve over"/...) and does not begin with "serve", so the step is not
+    # suppressed by either whole-step rule; "oyster" is suppressed by the
+    # exact-phrase rule; "cracker" fires wheat_gluten with no satisfier.
     categories = _categories(tier_ab_mismatches(all_mismatches))
     assert "mollusk" not in categories
     assert "wheat_gluten" in categories
@@ -1283,30 +1288,26 @@ def test_imp_b3f19d74632257ba_trifle_flags_tree_nut_not_soy_or_dairy() -> None:
     assert "dairy" not in categories
 
 
-def test_imp_6f3463afcc2f5d51_sparerib_trigger_added_but_worcestershire_row_still_satisfies_meat() -> None:
-    # CONFLICT, discovered by this test, flagged to the orchestrator/advisor
-    # rather than silently patched (see the executor report's "ASSUMPTIONS /
-    # DEVIATIONS" section): ruling item 6 ("must-flag: imp_6f3463afcc2f5d51
-    # Pork Spareribs -> meat") is satisfied at the TRIGGER level -- "sparerib"
-    # now fires the meat category from "Trim spareribs..." -- but this exact
-    # recipe's own "Worcestershire sauce" ingredient row ALREADY satisfies
-    # the "meat" category via the PRE-EXISTING (spec Sec. 2, not part of
-    # this ruling) satisfier design: meat's satisfiers include FISH_TERMS
-    # (which contains "worcestershire", cited there as a fish-allergen
-    # condiment), on the documented rationale that "a row already containing
-    # ANY animal-flesh OR fish/crustacean/mollusk term is already
-    # non-vegetarian at serve time." That pre-existing, working-as-designed
-    # leniency defeats THIS specific miss fix for THIS specific recipe --
-    # sparerib does trigger, but the category still resolves to
-    # "satisfied," so no Tier A/B mismatch is produced. Ruling item 6 did
-    # not authorize touching meat's satisfier composition (only adding
-    # "sparerib"/"spare rib" to MEAT_FLESH_TERMS), so this executor pass
-    # does not remove "worcestershire" from the satisfier set -- that is an
-    # architectural call for the advisor/orchestrator to make, not a
-    # mechanical vocabulary addition. This test pins the CURRENT, correctly-
-    # implemented-per-the-ruling's-literal-text behavior so a future change
-    # to either vocabulary shows up as an intentional diff, not a silent
-    # regression.
+def test_imp_6f3463afcc2f5d51_sparerib_trigger_now_flags_meat_after_worcestershire_satisfier_removed() -> None:
+    # Round 1 discovered a CONFLICT here (recorded then, resolved now):
+    # ruling item 6 ("must-flag: imp_6f3463afcc2f5d51 Pork Spareribs ->
+    # meat") was satisfied at the TRIGGER level in round 1 -- "sparerib" was
+    # already firing the meat category from "Trim spareribs..." -- but this
+    # exact recipe's own "Worcestershire sauce" ingredient row was ALSO
+    # satisfying the "meat" category via the then-existing satisfier design
+    # (meat's satisfiers included the whole of FISH_TERMS, which contains
+    # "worcestershire"). That pre-existing leniency defeated the miss fix
+    # for THIS specific recipe.
+    #
+    # Round 2 (2026-07-18 ruling item 12) removes "worcestershire"/
+    # "puttanesca" from meat's satisfiers specifically -- see the module's
+    # own inline comment on `CATEGORIES["meat"]["satisfiers"]` for the
+    # honest counter-argument (constraint_engine.MEAT_ALIASES already
+    # treats "worcestershire" as its own condiment hazard, so this recipe
+    # is ALREADY blocked at serve time regardless; the quarantine value
+    # here is the untrustworthy row set, independent of that redundancy).
+    # This test now asserts the FLIPPED, correctly-fixed behavior: the
+    # recipe flags meat.
     recipe = _recipe(
         "imp_6f3463afcc2f5d51",
         "Pork Spareribs in Tangy Sauce",
@@ -1333,7 +1334,10 @@ def test_imp_6f3463afcc2f5d51_sparerib_trigger_added_but_worcestershire_row_stil
         allergens=["fish", "seafood", "soy", "soya"],
     )
     mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
-    assert _categories(mismatches) == set()
+    categories = _categories(mismatches)
+    assert "meat" in categories
+    meat_mismatch = next(m for m in mismatches if m.category == "meat")
+    assert "sparerib" in meat_mismatch.matched_terms
 
 
 def test_synthetic_sparerib_trigger_flags_meat_without_a_fish_term_satisfier_present() -> None:
@@ -1357,6 +1361,825 @@ def test_synthetic_sparerib_trigger_flags_meat_without_a_fish_term_satisfier_pre
     assert "meat" in categories
     meat_mismatch = next(m for m in mismatches if m.category == "meat")
     assert "sparerib" in meat_mismatch.matched_terms
+
+
+def test_imp_712db6319e3957c7_apricot_basting_sauce_accepted_residual_fp_flags_meat() -> None:
+    # Accepted residual FP (revision round 2, ruling item 12 -- pinned here
+    # so it shows up as an intentional, documented diff rather than a
+    # silent surprise): removing "worcestershire" from meat's satisfiers
+    # means this sauce recipe's own "Use sauce over chicken, pork, and
+    # lamb." step now flags meat, even though the sauce ITSELF plausibly
+    # contains no meat (it is a basting sauce FOR meat, not a claim the
+    # sauce contains it). Deliberately NOT patched with a `^use` rule per
+    # the ruling -- recorded as an accepted residual in the audit report
+    # instead.
+    recipe = _recipe(
+        "imp_712db6319e3957c7",
+        "Apricot Basting Sauce",
+        [
+            {"name": "sugar", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "dry white wine", "amount": 1.0, "unit": None},
+            {"name": "honey", "amount": 1.0, "unit": None},
+            {"name": "Worcestershire sauce", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Mix together sugar, apricot jam, salt, apricots, wine, honey and Worcestershire "
+            "sauce in a saucepan.",
+            "Heat over medium heat until jam has been melted.",
+            "Use sauce over chicken, pork, and lamb.",
+        ],
+        allergens=["fish", "seafood"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "meat" in categories
+
+
+# --- Revision round 2 fixtures (2026-07-18 advisor ruling on the 231309Z
+# HALT report, docs/instructions_integrity_spec.md) -- verbatim from
+# data/processed/imported_recipes.jsonl. -------------------------------
+
+
+def test_imp_2380cadece955cc7_alfredo_with_pasta_mid_step_variation_suppressed() -> None:
+    # Ruling item 1: the commentary-prefix marker is now recognized ANYWHERE
+    # in a step, not just step-initial -- "Variation:" here is the step's
+    # SECOND sentence.
+    recipe = _recipe(
+        "imp_2380cadece955cc7",
+        "Alfredo Sauce with Pasta",
+        [
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "margarine", "amount": 1.0, "unit": None},
+            {"name": "heavy cream", "amount": 1.0, "unit": None},
+            {"name": "parmesan cheese", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "pepper", "amount": 1.0, "unit": None},
+            {"name": "fettuccine", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Cook noodles or fettuccine according to package directions.",
+            "Heat butter and  cream in saucepan until butter is melted.",
+            "Remove from heat. Add 1 cup Parmesan  cheese, salt and pepper; stir until sauce "
+            "is blended and fairly smooth.",
+            "Add to  drained noodles and toss until they are well coated.",
+            "Sprinkle  with remaining  cheese. Variation: Add cooked shrimp, crab or mushrooms.",
+        ],
+        allergens=["dairy", "gluten", "milk", "wheat"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "crustacean" not in categories
+
+
+def test_synthetic_mid_step_note_marker_still_flags_before_the_marker() -> None:
+    recipe = _recipe(
+        "syn23",
+        "Synthetic",
+        [{"name": "flour", "amount": 1, "unit": None}],
+        ["Stir in walnuts. Note: keeps 3 days."],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    categories = _categories(mismatches)
+    assert "tree_nut" in categories
+    tree_nut = next(m for m in mismatches if m.category == "tree_nut")
+    # TREE_NUT_TERMS registers both "walnut" and "walnuts" as separate
+    # trigger entries; longest-phrase-first consumption picks the plural
+    # entry for this text, so the recorded matched term is "walnuts".
+    assert "walnuts" in tree_nut.matched_terms
+
+
+def test_imp_3233766015ca524d_buttermilk_cornbread_can_add_suppressed_meat() -> None:
+    recipe = _recipe(
+        "imp_3233766015ca524d",
+        "Buttermilk Jalapeno Cornbread",
+        [
+            {"name": "all-purpose flour", "amount": 1.0, "unit": None},
+            {"name": "yellow cornmeal", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 1.0, "unit": None},
+            {"name": "baking powder", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "milk", "amount": 1.0, "unit": None},
+            {"name": "buttermilk", "amount": 1.0, "unit": None},
+            {"name": "shortening", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Sift together flour, cornmeal, sugar, baking powder and salt.",
+            "Add eggs, milk and oil or melted shortening. Beat until just smooth-do not overbeat.",
+            "Turn into a greased 9x9x2 inch baking pan. Bake in a 425: oven for 20-25 minutes.",
+            "Can add drained corn, bacon,  finely chopped jalapeno peppers etc. for a "
+            "different taste.",
+        ],
+        allergens=["dairy", "egg", "eggs", "milk"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "meat" not in categories
+
+
+def test_imp_8c7176ba96a35dce_chewy_chocolate_cookies_still_flags_peanut() -> None:
+    # Confirms "can add"/"can be added" is narrowly scoped -- this recipe's
+    # own unrelated "Stir in peanut butter or chocolate chips" step must
+    # still flag peanut.
+    recipe = _recipe(
+        "imp_8c7176ba96a35dce",
+        "Chewy Chocolate Cookies",
+        [
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "margarine", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "vanilla extract", "amount": 1.0, "unit": None},
+            {"name": "all-purpose flour", "amount": 1.0, "unit": None},
+            {"name": "baking soda", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Heat oven to 350.",
+            "In large mixer bowl; cream butter and sugar until light and fluffy.",
+            "Add eggs and vanilla; beat well.",
+            "Combine flour, cocoa, baking soda and salt; gradually blend into creamed mixture. "
+            "Stir in peanut butter or chocolate chips.",
+            "Drop by teaspoonfuls onto ungreased cookie sheet. Bake 8-9 minutes. (Do not "
+            "overbake; cookies will be soft. They will puff while baking and flatten while "
+            "cooling.).",
+            "Cool slightly; remove from cookie sheet onto wire rack. Cool completely.",
+        ],
+        allergens=["dairy", "egg", "eggs", "milk"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "peanut" in categories
+
+
+def test_imp_9b2c1d45a9f55ef1_alfredo_sauce_if_serving_suppressed() -> None:
+    recipe = _recipe(
+        "imp_9b2c1d45a9f55ef1",
+        "Alfredo Sauce",
+        [
+            {"name": "sweet butter", "amount": 1.0, "unit": None},
+            {"name": "heavy cream", "amount": 1.0, "unit": None},
+            {"name": "parmesan cheese", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "pepper", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Place butter in microwave safe pot and heat on high for 30 seconds or until melted.",
+            "Add cream and warm on high for approximately 1 minute.",
+            "Add Parmesan cheese and warm until cheese melts.",
+            "Add salt and pepper to taste. (If serving with shrimp, you might not need much "
+            "salt.).",
+        ],
+        allergens=["dairy", "milk"],
+    )
+    assert find_instructions_ingredient_mismatches(recipe) == []
+
+
+def test_imp_748b6422ecbb5c7d_polish_sausage_serve_initial_suppressed() -> None:
+    recipe = _recipe(
+        "imp_748b6422ecbb5c7d",
+        "Polish Sausage and Peppers",
+        [
+            {"name": "Polish sausage", "amount": 1.0, "unit": None},
+            {"name": "green peppers", "amount": 1.0, "unit": None},
+            {"name": "onions", "amount": 1.0, "unit": None},
+            {"name": "-3 beer", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Put all the above into a roaster.",
+            "Stir occasionally  Cook at 250 - 300 deg. for most of the day (4- 5 hr.)",
+            "Serve the sausage and peppers and onions on French bread.",
+            "Always well liked.",
+        ],
+        allergens=[],
+    )
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_fbf6565762c0590d_mabo_dofu_non_initial_serve_still_flags_sesame() -> None:
+    recipe = _recipe(
+        "imp_fbf6565762c0590d",
+        "Mabo Dofu - Tofu with Beef",
+        [
+            {"name": "ground beef", "amount": 1.0, "unit": None},
+            {"name": "minced beef", "amount": 1.0, "unit": None},
+            {"name": "garlic", "amount": 1.0, "unit": None},
+            {"name": "chili peppers", "amount": 1.0, "unit": None},
+            {"name": "leek", "amount": 1.0, "unit": None},
+            {"name": "soy sauce", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 1.0, "unit": None},
+            {"name": "cornstarch", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "broth", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Cut bean curd into bite-sized squares and set aside. Heat oil and fry garlic,  "
+            "chili peppers and chopped leek.",
+            "Add meat. When meat changes color, lightly stir  in bean curd, soy sauce and = "
+            "sugar.",
+            "Cover with lid and cook for 10 min.",
+            "Add cornstarch mixture, allowing it  to thicken for a few minutes.",
+            "Turn out into serving dish, sprinkle with the  sesame oil and serve hot. EmmaDeer",
+        ],
+        allergens=["soy", "soya"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert categories == {"sesame"}
+
+
+def test_imp_e7fb53c18ced5dc0_beer_batter_dip_no_in_suppressed() -> None:
+    recipe = _recipe(
+        "imp_e7fb53c18ced5dc0",
+        "Beer Batter",
+        [
+            {"name": "beer", "amount": 1.0, "unit": None},
+            {"name": "flour", "amount": 1.0, "unit": None},
+            {"name": "seasoning salt", "amount": 1.0, "unit": None},
+            {"name": "pepper", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Blend on high until smooth.",
+            "Dip fresh shrimp, mushrooms or veggies.",
+            "Put on flat pan and chill for one hour.",
+            "Deep fry.",
+        ],
+        allergens=["egg", "eggs", "gluten", "wheat"],
+    )
+    assert find_instructions_ingredient_mismatches(recipe) == []
+
+
+def test_imp_a22b3c09a6b25bb5_dip_fish_in_egg_white_contains_in_still_flags_fish() -> None:
+    recipe = _recipe(
+        "imp_a22b3c09a6b25bb5",
+        "Crispy Baked Fish & Herbs",
+        [
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "lemon pepper", "amount": 1.0, "unit": None},
+            {"name": "fresh parsley", "amount": 1.0, "unit": None},
+            {"name": "low-fat margarine", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Preheat oven 400F.",
+            'Lightly spray a medium size shallow baking pan with vegetable spray.',
+            "Rinse fish and pat dry.",
+            "In small bowl, beat egg white with a little water.",
+            "Dip fish in egg white, then roll in crumbs.",
+            "Arrange fish in baking pan.",
+            "Sprinkle with lemon pepper and parsley, then drizzle margarine over all.",
+            "Bake uncovered 20 min or until fish flakes easily.",
+        ],
+        allergens=[],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    fish_mismatch = next(m for m in mismatches if m.category == "fish")
+    # The "Dip fish in egg white..." step itself must have contributed
+    # evidence -- i.e. NOT been suppressed by the item-5 dip-initial rule,
+    # since it contains "in".
+    dip_step_terms = {
+        entry["term"] for entry in fish_mismatch.evidence if entry["quoted_step"].startswith("Dip fish in egg white")
+    }
+    assert "fish" in dip_step_terms
+
+
+def test_imp_13e739367b505085_spiced_pear_butter_cheese_cloth_suppressed() -> None:
+    recipe = _recipe(
+        "imp_13e739367b505085",
+        "Spiced Pear Butter",
+        [
+            {"name": "pears", "amount": 1.0, "unit": None},
+            {"name": "cinnamon sticks", "amount": 1.0, "unit": None},
+            {"name": "allspice", "amount": 1.0, "unit": None},
+            {"name": "2 cloves", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Combine pears and apple juice in a large Dutch oven.",
+            "Tie broken cinnamon  spices, gingerroot, allspice and cloves in a piece of cheese "
+            "cloth; add  to pear mixture. Bring to a boil; cover, reduce heat, and simmer for "
+            "45  minutes to 1 hour or until pears are tender.",
+            "Drain pears, and discard  spice bag.",
+            "Mash pears or process in food processor until smooth.",
+            "Return  pear puree to Dutch oven, and add sugar.",
+            "Cook, uncovered, over medium  heat for 30 to 40 minutes or until mixture thickens, "
+            "stirring frequently.",
+            "Remove from heat, and quickly pour hot pear mixture into hot sterilized  jars, "
+            "leaving 1/4-inch headspace; wipe jar rims.",
+            "Cover at once with  metal lids, and screw on bands.",
+            "Process in boiling water bath for 5  minutes.",
+        ],
+        allergens=[],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "dairy" not in categories
+
+
+def test_imp_d287af8d742e5d44_katjang_sauce_ketjap_manis_satisfies_soy_and_wheat() -> None:
+    recipe = _recipe(
+        "imp_d287af8d742e5d44",
+        "Katjang Sauce: Peanut Sauce",
+        [
+            {"name": "onion", "amount": 1.0, "unit": None},
+            {"name": "garlic cloves", "amount": 1.0, "unit": None},
+            {"name": "brown sugar", "amount": 1.0, "unit": None},
+            {"name": "sambal oelek", "amount": 1.0, "unit": None},
+            {"name": "mild paprika", "amount": 1.0, "unit": None},
+            {"name": "ginger powder", "amount": 1.0, "unit": None},
+            {"name": "crunchy peanut butter", "amount": 1.0, "unit": None},
+            {"name": "ketjap manis", "amount": 1.0, "unit": None},
+            {"name": "milk", "amount": 1.0, "unit": None},
+            {"name": "lemon juice", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Mix onion and garlic.",
+            "Place onion mixture in a bowl; add the brown sugar.",
+            "Mash with  the back of a spoon to make a paste.",
+            "Brown the paste in the oil at very low heat.",
+            "Stir in sambal oelek, paprika, and ginger powder.",
+            "Add the peanut butter.",
+            "When the sauce is brown, add the ketjap manis and the milk.",
+            "Keep stirring at low heat until the sauce thickens.",
+            "Finally, add the lemon  juice, salt and pepper.",
+            "If the sauce is too thick, add a little more milk  until it reaches a better "
+            "consistency.",
+            "NOTES :",
+            "*Ketjap manis is a sweet Indonesian soy sauce. It may be found in  Dutch stores, "
+            "some Chinese stores or maybe European Delis. It is worth  looking for as it is "
+            "just delicious!",
+            "*Sambal oelek is a paste made from marinaded chili peppers.",
+            "It can be  found in Chinese groceries, or Dutch stores.",
+        ],
+        allergens=["dairy", "milk"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "soy" not in categories
+    assert "wheat_gluten" not in categories
+
+
+def test_imp_a76aa35639d85deb_borscht_pot_liquor_arm3_clears_stock() -> None:
+    recipe = _recipe(
+        "imp_a76aa35639d85deb",
+        "Borscht II",
+        [
+            {"name": "beef stew meat", "amount": 1.0, "unit": None},
+            {"name": "beets", "amount": 1.0, "unit": None},
+            {"name": "onion", "amount": 1.0, "unit": None},
+            {"name": "tomatoes", "amount": 1.0, "unit": None},
+            {"name": "lime, juice of", "amount": 1.0, "unit": None},
+            {"name": "-2 sugar", "amount": 1.0, "unit": None},
+            {"name": "sour cream", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Combine the first five ingredients in a large non-reactive pot.  Bring to a boil, "
+            "then reduce heat and allow the soup to simmer for 2= hours.",
+            "Half an hour before serving, remove beets, keeping the broth at a simmer.",
+            "When beets are cool enough to handle, peel and grate them (the peels should slip "
+            "right off).  Then  return them to the pot.  Stir in lime juice and sugar, then "
+            "season with salt and pepper.",
+            "Serve, garnished with a dollop of sour cream and/or some snipped chives.",
+        ],
+        allergens=[],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" not in categories
+
+
+def test_imp_2020aaedc3cf532a_lasagna_rollups_instant_broth_kept() -> None:
+    recipe = _recipe(
+        "imp_2020aaedc3cf532a",
+        "Lasagna Rollups with Bechamel Sauce",
+        [
+            {"name": "-15 beef", "amount": 1.0, "unit": None},
+            {"name": "- 2 parmesan cheese", "amount": 1.0, "unit": None},
+            {"name": "bay leaf", "amount": 1.0, "unit": None},
+            {"name": "milk", "amount": 1.0, "unit": None},
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "pepper", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "nutmeg", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Preheat oven to 350.",
+            "Cook noodles in salted, boiling water until just tender.  Drain and place in "
+            "large bowl of cold water and drain on paper towels.",
+            "Cook ground meat in microwave until done.  Mix cooked meat and breading mix from "
+            "meatloaf mixture until well blended.",
+            "Spread meat mixture in thin layer on noodles and roll up  jelly roll fashion "
+            "(don't roll too tightly).",
+            "Spread all of sauce over bottom of 9/13 baking dish and arrange roll ups, seam "
+            "side down on sauce.",
+            "Cover with foil and bake 30 minutes at 350*.",
+            "Melt butter in medium sauce pan, stir in flour, and cook stirring constantly with "
+            "wooded spoon until mixture bubbles.",
+            "Stir in scalded milk, instant chicken broth, salt, pepper and nutmeg.",
+            "Continue cooking and stirring until sauce thickens and bubbles (about 3 minutes), "
+            "and remove from stove.",
+            "After rollups have baked 30 minutes, remove  foil and spoon bechamel sauce over "
+            "top and sprinkle with parmesan cheese.",
+            "Bake 10 minutes more or until bubbly hot and sauce is golden.",
+            "It's not nearly as hard to make as it sounds, and the results are wonderful! All "
+            "you need to round out  the meal is a salad, and garlic bread if desired.",
+        ],
+        allergens=["dairy", "milk"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" in categories
+
+
+def test_imp_4206dd29ea5550fb_escalope_of_salmon_add_fish_stock_kept() -> None:
+    recipe = _recipe(
+        "imp_4206dd29ea5550fb",
+        "Escalope of Salmon With Chanterelles",
+        [
+            {"name": "salmon", "amount": 1.0, "unit": None},
+            {"name": "canned chanterelles", "amount": 1.0, "unit": None},
+            {"name": "Noilly Prat", "amount": 1.0, "unit": None},
+            {"name": "broad beans", "amount": 1.0, "unit": None},
+            {"name": "peas", "amount": 1.0, "unit": None},
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "shallots", "amount": 1.0, "unit": None},
+            {"name": "lemon juice", "amount": 1.0, "unit": None},
+            {"name": "sea salt", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Add 25g of Butter to a small sauti pan.",
+            "Add Chanterelles and shallots, cover  with a lid and sweat for a few minutes.",
+            "Make a space for the salmon in the pan,  add wine and fish stock.",
+            "Poach for 4-5 minutes, take out fish and keep warm.",
+            "Reduce cooking liquid by two thirds, take out mushrooms.",
+            "Cut butter into small  cubes and whisk in to make sauce. Add lemon juice abd peas.",
+            "Return mushrooms,  add broad beans and peas, check seasoning.",
+        ],
+        allergens=["dairy", "fish", "milk", "seafood"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" in categories
+    assert "fish" not in categories
+
+
+def test_imp_00efafa3c86e5b9e_stroganoff_no_animal_row_arm3_inapplicable_kept() -> None:
+    recipe = _recipe(
+        "imp_00efafa3c86e5b9e",
+        "Beef Stroganoff with Dill",
+        [
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "mushroom", "amount": 1.0, "unit": None},
+            {"name": "onion", "amount": 1.0, "unit": None},
+            {"name": "cornstarch", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "sour cream", "amount": 1.0, "unit": None},
+            {"name": "dill weed", "amount": 1.0, "unit": None},
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "paprika", "amount": 1.0, "unit": None},
+        ],
+        [
+            'Cut meat into 1/4" strips and brown in butter.',
+            "In a separate pan, saute mushrooms and add to meat. In the separate pan, saute "
+            "onions and add to meat mixture. Add beef stock.",
+            "Cover and simmer 1 hour.",
+            "At about 40 min., begin to cook noodles.",
+            "Mix corn starch and water in small container and add, stirring rapidly until "
+            "sauce is thickened.",
+            "Stir in sour cream and dill weed.",
+            "Serve over Paprika Noodles: Drain noodles and p ut in bowl.",
+            "Toss gently with chicken stock base, butter, and paprika.",
+            "Note: Chicken stock base or granular boullion may be very salty.",
+            "Let diners salt and pepper to their own tastes.",
+            "Robert Boston http://home.earthlink.net/~bboston/",
+        ],
+        allergens=["dairy", "milk"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "stock" in categories
+
+
+def test_imp_635b6cd0fbd557ad_hutspot_bare_rib_flags_meat() -> None:
+    recipe = _recipe(
+        "imp_635b6cd0fbd557ad",
+        "Hutspot",
+        [
+            {"name": "carrots", "amount": 1.0, "unit": None},
+            {"name": "onions", "amount": 1.0, "unit": None},
+            {"name": "potatoes", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+        ],
+        [
+            "First put potatoes in kettle.",
+            "Add ribs, carrots and onions; salt to taste.",
+            "Bring to slow boil, cover and cook for about 3 hours.",
+            "When done take out bones and mash.",
+        ],
+        allergens=[],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    categories = _categories(mismatches)
+    assert "meat" in categories
+    meat_mismatch = next(m for m in mismatches if m.category == "meat")
+    assert "rib" in meat_mismatch.matched_terms
+
+
+def test_imp_41bfceea6ba65b47_corn_chowder_celery_ribs_row_does_not_flag_meat() -> None:
+    recipe = _recipe(
+        "imp_41bfceea6ba65b47",
+        "Corn Chowder",
+        [
+            {"name": "bacon", "amount": 1.0, "unit": None},
+            {"name": "-3 potatoes", "amount": 1.0, "unit": None},
+            {"name": "onion", "amount": 1.0, "unit": None},
+            {"name": "-3 celery ribs", "amount": 1.0, "unit": None},
+            {"name": "water", "amount": 1.0, "unit": None},
+            {"name": "bacon", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Dice  bacon, fry until crisp; drain and set aside, reserving 3 tablespoons of "
+            "grease.",
+            "Stir diced potatoes,  diced onion, and celery into the grease.",
+            "Add water, salt and pepper to taste.",
+            "Cook until soft.",
+            "Then add can cream style corn and can of milk.",
+            "Heat to desired temperature.",
+            "Dish up into soup bowls and garnish with crumbled bacon.",
+        ],
+        allergens=[],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "meat" not in categories
+
+
+def test_imp_0ea6e8bb1fd85633_pickled_tomato_parcels_seeds_and_ribs_suppressed() -> None:
+    recipe = _recipe(
+        "imp_0ea6e8bb1fd85633",
+        "Pickled Tomato Parcels",
+        [
+            {"name": "green tomatoes", "amount": 1.0, "unit": None},
+            {"name": "coarse salt", "amount": 1.0, "unit": None},
+            {"name": "head of cabbage", "amount": 1.0, "unit": None},
+            {"name": "whole mustard seeds", "amount": 1.0, "unit": None},
+            {"name": "1/4 clove", "amount": 1.0, "unit": None},
+            {"name": "allspice", "amount": 1.0, "unit": None},
+            {"name": "white vinegar", "amount": 1.0, "unit": None},
+            {"name": "chipotle chiles", "amount": 1.0, "unit": None},
+            {"name": "garlic", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Remove a slice at the stem end of tomato.",
+            "With a melon baller remove seeds and ribs, leaving outer wall intact. Sprinkle "
+            "inside of each tomato with 1 tsp salt.  Place tomatoes upright in a glass or "
+            "plastic container with enough room to hold the tomatoes in one layer with the "
+            "top slices next to them.",
+            "Cover with cold water and soak 24 hours.",
+            "The next day take the tomatoes out and drain upside down.",
+            "While they are draining, shred cabbage into a large glass or crockery bowl.",
+            "Toss the cabbage with rest of the salt, and set aside for 30 minutes until it "
+            "gives off moisture. Cover the cabbage with cold water, swish to remove salt and "
+            "drain it in a colander.",
+            "Rinse and dry the bowl.",
+            "Squeeze handfuls of the cabbage to remove as much liquid as you can and place the "
+            "cabbage back in the bowl.",
+            "Toss cabbage with mustard, cloves and allspice and pack gently into the tomatoes.",
+            "Replace the tops and tie in place with kitchen twine. Scald the tomato container "
+            "and place tomatoes in it upright. Cover tomatoes with the vinegar, add peppers "
+            "and garlic, and place a scalded plate over the toma toes.",
+            "Weight the plate so that the plate is under the vinegar level but does not crush "
+            "the tomatoes.",
+            "Cover the container with plastic wrap.",
+            "Let the tomatoes sit in a cool place for 1 week.",
+        ],
+        allergens=[],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "meat" not in categories
+
+
+def test_imp_06f98881ebf05a75_pork_loin_crust_verb_use_suppressed() -> None:
+    recipe = _recipe(
+        "imp_06f98881ebf05a75",
+        "Roasted Pork Loin with Bacon and Onion Spaetzle",
+        [
+            {"name": "olive oil", "amount": 1.0, "unit": None},
+            {"name": "cracked black pepper", "amount": 1.0, "unit": None},
+            {"name": "bacon", "amount": 1.0, "unit": None},
+            {"name": "yellow onions", "amount": 1.0, "unit": None},
+            {"name": "red wine", "amount": 1.0, "unit": None},
+            {"name": "shallots", "amount": 1.0, "unit": None},
+            {"name": "garlic", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Prehaet the oven to 400 degrees.",
+            "For pork loin: Season the entire loin  with olive oil and salt. In a hot saute "
+            "pan, sear the loin for 1-2  minnutes on each side. Remove from pan and crust the "
+            "loin with cracked  black pepper.",
+            "Place in a roasting pan.",
+            "Roast the loin for 25 to 30  minutes for medium.",
+            "Remove from the oven and allow to rest for 10  minutes.",
+            "For the spaetzle: In a hot large pan, render the bacon until  crispy, remove the "
+            "bacon from the pan.",
+            "In the bacon fat, saute the  onions for 2-3 minutes.",
+            "Stir in the bacon.",
+            "Season.",
+        ],
+        allergens=[],
+    )
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_968a7fa664885493_emerald_fried_rice_crepe_pan_suppressed() -> None:
+    recipe = _recipe(
+        "imp_968a7fa664885493",
+        "Emerald Fried Rice",
+        [
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "spring onions", "amount": 1.0, "unit": None},
+            {"name": "rice", "amount": 1.0, "unit": None},
+            {"name": "msg", "amount": 1.0, "unit": None},
+            {"name": "ham", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Sprinkle the finely shredded greens with 1 teaspoon salt and leave for 10  "
+            "minutes, then squeeze out the liquid and chop finely.",
+            "Heat 1 tablespoon of oil  in a frying-pan or crepe pan.",
+            "Pur in the beaten egg and allow to spread thinly  over with a palette knife and "
+            "cook the other side gently.",
+            "Remove the omelette  and cut into fine shreds.",
+            "Heat another tablespoon of oil in the frying-pan and  add the finely chopped "
+            "greens.",
+            "Stir-fry for about 30 seconds, then remove from  the pan.",
+            "Heat the remaining oil in a wok until it is smoking.",
+            "Add the spring  onions, then the rice, and toss well together until the rice is "
+            "heated through.",
+            "Add the remaining salt with the MSG, greens, omelette shreds and ham.",
+            "Toss all  together and serve hot on a serving dish.",
+        ],
+        allergens=["egg", "eggs"],
+    )
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)) == []
+
+
+def test_imp_15fe9cc27b96537b_pumpkin_pecan_pie_flags_wheat_gluten_pie_shell() -> None:
+    # Pecan rows must NOT satisfy "pie shell" (only "crust" gets the
+    # nut/coconut composite arm).
+    recipe = _recipe(
+        "imp_15fe9cc27b96537b",
+        "Pumpkin-Pecan Pie",
+        [
+            {"name": "canned pumpkin", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 1.0, "unit": None},
+            {"name": "ground cinnamon", "amount": 1.0, "unit": None},
+            {"name": "ground ginger", "amount": 1.0, "unit": None},
+            {"name": "ground cloves", "amount": 1.0, "unit": None},
+            {"name": "salt", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "evaporated milk", "amount": 1.0, "unit": None},
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "pecans", "amount": 1.0, "unit": None},
+            {"name": "brown sugar", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Combine the pumpkin, sugar, spices and salt in a bowl mixing well.",
+            "Add the eggs and evaporated milk.",
+            "Beat until smooth, using a rotary beater or an electric mixer.",
+            "Pour into the unbaked pie shell.",
+            "Bake in a preheated oven at 425 degrees Fahrenheit for 15 minutes and then reduce "
+            "the temperature to 350 degree and bake for an additional 45 minutes or until a "
+            "knife inserted halfway between the center and edge comes out clean.",
+            "Cool on a wire rack.",
+            "CRUNCHY PECAN TOPPING:  Place the softened butter, brown sugar, and pecans in a "
+            "bowl and mix until crumbly with a fork.  Sprinkle over the cooled pie. Place the "
+            "pie under the broiler (5 inches from the heat source) until the mixture begins "
+            "to bubble, about 1 minute.",
+            "Cool to room temperature on a wire rack.",
+        ],
+        allergens=["dairy", "egg", "eggs", "milk", "nuts", "tree nut"],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    categories = _categories(mismatches)
+    assert "wheat_gluten" in categories
+    wheat_mismatch = next(m for m in mismatches if m.category == "wheat_gluten")
+    assert "pie shell" in wheat_mismatch.matched_terms
+
+
+def test_imp_d63bae35bb3a55bb_austrian_crepes_flags_wheat_gluten() -> None:
+    recipe = _recipe(
+        "imp_d63bae35bb3a55bb",
+        "Austrian Sweet Cheese Crepes Baked in Custard",
+        [
+            {"name": "dried currant", "amount": 1.0, "unit": None},
+            {"name": "boiling water", "amount": 1.0, "unit": None},
+            {"name": "cream cheese", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "lemon, zest of", "amount": 1.0, "unit": None},
+            {"name": "vanilla", "amount": 1.0, "unit": None},
+            {"name": "granulated sugar", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "granulated sugar", "amount": 1.0, "unit": None},
+            {"name": "milk", "amount": 1.0, "unit": None},
+            {"name": "confectioners' sugar", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Make filling: In a small heatproof bowl plump currants in boiling-hot water 15 "
+            "minutes  and drain.",
+            "Pat currants dry between paper towels.",
+            "In a food processor or in a bowl with an electric mixer blend together well cream "
+            "cheese, jam, yolks, zest, and vanilla.",
+            "In a bowl with an electric mixer (beaters cleaned if necessary) beat whites with "
+            "a pinch of salt until they hold soft peaks.",
+            "Add sugar to whites and beat meringue until it holds stiff peaks.",
+            "Fold cheese mixture into meringue gently but thoroughly and fold in currants.",
+            "Preheat oven to 400F.",
+            "and lightly butter a 14-inch-long oval gratin dish or other 2 1/2-quart shallow "
+            "baking dish.",
+            "Working with 1 crepe at a time, spread 2 generous tablespoons filling on  each "
+            "crepe, leaving a 1/2-inch border all around, and roll up crepes  jelly-roll "
+            "fashion.",
+            "With a sharp knife cut crepes on a diagonal in half  and arrange, overlapping "
+            "slightly, in layers in baking dish.",
+            "Crepes may  be prepared up to this point 4 hours ahead and chilled, covered.",
+            "Bring  crepes to at room temperature before proceeding.",
+            "In a small bowl whisk together eggs, granulated sugar, and milk and pour  over "
+            "crepes, letting custard seep between layers.",
+            "Bake crepes in middle  of oven 30 to 35 minutes, or until puffed and custard is "
+            "set, and cool to warm.",
+            "Dust crepes with confectioners' sugar and serve with apricot caramel  sauce.",
+        ],
+        allergens=["dairy", "egg", "eggs", "milk"],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    categories = _categories(mismatches)
+    assert "wheat_gluten" in categories
+    wheat_mismatch = next(m for m in mismatches if m.category == "wheat_gluten")
+    assert "crepe" in wheat_mismatch.matched_terms
+
+
+def test_imp_fe5e997cb47c553c_chocolate_caramel_pecan_cheesecake_crust_satisfied() -> None:
+    recipe = _recipe(
+        "imp_fe5e997cb47c553c",
+        "Chocolate-Caramel-Pecan Cheesecake",
+        [
+            {"name": "graham cracker crumbs", "amount": 1.0, "unit": None},
+            {"name": "butter", "amount": 1.0, "unit": None},
+            {"name": "margarine", "amount": 1.0, "unit": None},
+            {"name": "evaporated milk", "amount": 1.0, "unit": None},
+            {"name": "pecans", "amount": 1.0, "unit": None},
+            {"name": "cream cheese", "amount": 1.0, "unit": None},
+            {"name": "sugar", "amount": 1.0, "unit": None},
+            {"name": "eggs", "amount": 1.0, "unit": None},
+            {"name": "vanilla extract", "amount": 1.0, "unit": None},
+            {"name": "pecan halves", "amount": 1.0, "unit": None},
+        ],
+        [
+            "Combine graham cracker crumbs and butter, stirring well.",
+            "Press mixture evenly onto bottom and 1 inch up sides of a 9-inch springform pan.",
+            "Unwrap caramels; combine with milk and heat over low heat until  caramels are "
+            "melted, stirring often.",
+            "Pour over graham cracker crust;  sprinkle chopped pecans evenly over caramel "
+            "layer and set aside.",
+            "Beat  cream cheese at high speed until light and fluffy; gradually add  sugar, "
+            "mixing well.",
+            "Add eggs, one at a time, mixing well after each  one. Stir in vanilla and "
+            "chocolate; beat until blended.",
+            "Spoon over  pecan layer.",
+            "Bake at 350 degrees for 30 minutes.",
+            "Remove from oven,  and run knife around edge of pan to release sides.",
+            "Let cool t  o room  temperature on a wire rack; cover and chill at least 8 hours "
+            "before  serving.",
+            "Top with pecan halves and serve.",
+        ],
+        allergens=["dairy", "egg", "eggs", "milk", "nuts", "tree nut"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "wheat_gluten" not in categories
+
+
+def test_synthetic_crust_nut_or_coconut_composite_satisfies_crust_not_pie_shell() -> None:
+    # Isolates the nut/coconut composite arm from any pre-existing
+    # "cracker"/"graham" satisfier -- ingredient rows here are ONLY
+    # coconut+pecans (no flour/cracker/cookie row at all), same shape as
+    # imp_21d303d861785454 "Cocoa-Nut Meringue Cheesecake": "Combine
+    # coconut, pecans, and margarine, press onto bottom of 9-inch springform
+    # pan" / "...pour over crust."
+    recipe_crust = _recipe(
+        "syn24",
+        "Synthetic Crust",
+        [
+            {"name": "flaked coconut", "amount": 1, "unit": None},
+            {"name": "pecans", "amount": 1, "unit": None},
+            {"name": "margarine", "amount": 1, "unit": None},
+        ],
+        ["Combine coconut, pecans, and margarine, press onto bottom of pan.", "Pour over crust."],
+    )
+    assert tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe_crust)) == []
+
+    recipe_pie_shell = _recipe(
+        "syn25",
+        "Synthetic Pie Shell",
+        [
+            {"name": "flaked coconut", "amount": 1, "unit": None},
+            {"name": "pecans", "amount": 1, "unit": None},
+            {"name": "margarine", "amount": 1, "unit": None},
+        ],
+        ["Pour filling into the unbaked pie shell."],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe_pie_shell))
+    categories = _categories(mismatches)
+    assert "wheat_gluten" in categories
 
 
 # --- Structural tests --------------------------------------------------
