@@ -309,6 +309,159 @@ rather than patched with an overfit, single-case rule:
    than a silent surprise on any future vocabulary change.
 """
 
+# Round 3 (2026-07-18, adjudication_20260718T090522Z.md diet_023 +
+# advisor-review APPROVED verdict/remediation-scope amendments, same date --
+# see that file's "Remediation" and "Advisor review verdict" sections).
+# Corpus context differs from rounds 1-2: this round runs AFTER the Option A
+# mass quarantine (rounds 1-2's own flagged set) was applied to the corpus
+# (imported_recipes.jsonl went from the rounds-1/2 4,045-row corpus down to
+# 2,889 rows, commit 6045acb) and after the single manual-adjudication
+# quarantine of imp_2bd54fd475cf50fc (2,889 -> 2,888 rows,
+# `scripts/quarantine_flagged_recipes.py --recipe-ids imp_2bd54fd475cf50fc`)
+# -- so this round's baseline is a corpus that has ALREADY had rounds 1-2's
+# vocabulary applied to it, not the original 4,045-row corpus rounds 1-2
+# baselined against.
+ROUND_3_REVISIONS_MD = """\
+**Round 3** (2026-07-18, adjudication_20260718T090522Z.md diet_023 +
+advisor-review APPROVED remediation-scope amendments; docs/
+instructions_integrity_spec.md remains the frozen base spec -- this is a
+single pre-registered miss-fix under spec Sec. 3's "a miss is a spec bug:
+fix and re-run the audit" rule, not a spec amendment).
+Corpus baseline for this round: post-Option-A-quarantine, post-
+imp_2bd54fd475cf50fc-manual-quarantine corpus, 2,888 rows (NOT the rounds
+1-2 baseline of 4,045 rows -- see this constant's module-level citation
+comment for the corpus-history chain).
+Baseline (this round, cereal NOT yet a wheat_gluten trigger): 0/2888 (0.00%)
+flagged. This round's result (cereal added): 5/2888 (0.17%) flagged --
+still comfortably under the 1%-10% expected band's floor and the 12% hard
+ceiling; the run's own guard-band verdict is PROBABLE_BUG (floor sanity:
+<10 rows), which is the pre-registered, expected artifact of running the
+floor-sanity check against an already-quarantined, mostly-clean corpus (the
+same "known post-quarantine artifact" class as the 20260718T090602Z run
+that followed the Option A mass quarantine) -- NOT investigated as a real
+bug: this round's own miss (diet_023's cereal case) is direct, adjudicated
+proof the vocabulary gap was real, and the sample-audit evidence below (all
+5 flagged rows) is reported for the orchestrator's own sample check before
+any of these 5 are quarantined, per this round's task scope (report, do not
+auto-quarantine).
+
+Single-rule ablation (flagged-recipe count with `cereal` reverted out of
+`WHEAT_GLUTEN_TERMS`, all other rounds' rules held active, vs. this round's
+5 final count): 0 without it -> 5 with it -- INCREASES the flagged count by
+5 (a genuine-miss fix, not an FP suppression; the `s?` trailing-morphology
+idiom shared by every other term in this set covers "cereals" from the
+singular `cereal` entry, so no separate plural entry was needed). Cite
+imp_2bd54fd475cf50fc "Butterscotch Chewy Bars" (adjudication_
+20260718T090522Z.md diet_023: "Remove from heat and immediately stir in
+cereals." with no cereal row; quarantined via the manual-adjudication path
+prior to this audit run, per the task's step 1, so it does not itself
+appear in this round's 5). `cereal` is automatically its own satisfier (the
+category's satisfiers are `WHEAT_GLUTEN_TERMS | WHEAT_GLUTEN_SATISFIER_
+EXTRAS | _KETJAP_SATISFIER_EXTRAS` -- a wholesale union of the trigger set
+-- consistent with the core lenient-satisfier design already used by every
+other wheat_gluten trigger), so a listed "rice cereal"/"crispy rice cereal"
+row satisfies a "stir in cereal" mention without any additional satisfier
+wiring; pinned by `tests/test_instructions_ingredient_integrity.py::
+test_synthetic_crispy_rice_cereal_row_satisfies_stir_in_cereal_mention`.
+
+**Newly flagged rows this round (5, reported for the orchestrator's sample
+check per this round's task scope -- NOT auto-quarantined):**
+- `imp_e5c662ec002355d6` "Praline Pecan Crunch" -- ingredients: pecan
+  pieces, light corn syrup, brown sugar, margarine, butter, vanilla, baking
+  soda. Steps: "Combine cereal and pecans in 13x9-inch baking pan; set
+  aside." / "Stir in vanilla and baking soda and pour over cereal mixture;
+  stir to coat evenly." No cereal row -- same undisclosed-cereal shape as
+  diet_023's bars row.
+- `imp_9c4f812bcda75ef0` "Crunchy Pretzel Drops No-Bake Cookies" --
+  ingredients: light corn syrup, milk, butter, vanilla. Step: "Remove from
+  heat and stir in cereal and pretzels." No cereal (or pretzel) row --
+  same shape.
+- `imp_42d786e354855c6c` "Grape-Nuts Pudding" -- ingredients:
+  quick-cooking tapioca, raisins, boiling water, brown sugar, vanilla
+  extract. Step: "In a heavy saucepan, stir together tapioca, boiling
+  water, brown sugar, raisins and cereal.  Let stand for 5 minutes." No
+  cereal row despite the title itself naming the Grape-Nuts brand cereal --
+  same undisclosed shape, title corroborates rather than substitutes for a
+  row.
+- `imp_fbfd3dda61af5cd5` "No-Bake Cereal Bars" -- ingredients: light corn
+  syrup, sugar, peanut butter. Step: "Add cereal;  mix well." No cereal
+  row despite the title itself naming "Cereal Bars" -- same shape.
+- `imp_9fb0ca4a0fa65c48` "Low-Fat Swiss Muesli" -- ingredients: rolled
+  oats, lemon juice, water, cinnamon, red apples, golden delicious apples,
+  prunes, pecans, honey. Step: "Cover and refrigerate overnight.  In the
+  morning, spoon some of the muesli into  a cereal bowl." FLAG PATTERN
+  DIFFERS from the other four: this recipe's own dish IS the muesli (rolled
+  oats row already present); "a cereal bowl" here reads as the SERVING
+  CONTAINER for the already-listed muesli, not a second, undisclosed cereal
+  ingredient -- a serving-vehicle mention structurally like the existing
+  `EXACT_PHRASE_SUPPRESSIONS`/serving-cue classes (e.g. "stock pot" the
+  utensil vs. "stock" the ingredient), but no such phrase suppression
+  exists for "cereal bowl" yet. Flagged as-is by the current vocabulary;
+  called out here as the one candidate among the 5 that may be a false
+  positive on inspection, left for the orchestrator's sample check rather
+  than pre-judged or suppressed by this executor pass (out of this task's
+  scope, which is limited to the single proven `cereal` trigger addition).
+
+**Rejected candidate (recorded, not implemented):** adding `cereal` as a
+DAIRY trigger. The advisor's supplementary review verdict raised this as an
+explicitly non-blocking suggestion (FARE lists cereals under milk as a
+hidden-dairy source), but the proven miss binding from diet_023 is gluten
+only -- imp_2bd54fd475cf50fc's own adjudicated hazard is undisclosed
+gluten (crisped-rice/bar cereals routinely carry barley-malt flavoring or
+wheat), not a demonstrated dairy gap. Adding an unproven trigger beyond the
+cited miss is out of this fix's scope; left as a candidate for a future
+round if a dairy-specific miss is separately proven.
+"""
+
+# Round 3 follow-up (2026-07-18, orchestrator sample check of the
+# 20260718T113546Z report's round-3 5-case list; docs/instructions_
+# integrity_spec.md remains the frozen base spec -- this closes out round
+# 3's own "report, do not auto-quarantine" task scope, it is not a new
+# HALT/revision round against the guard bands).
+ROUND_3_FOLLOWUP_REVISIONS_MD = """\
+**Round 3 follow-up** (2026-07-18, orchestrator sample check of the
+20260718T113546Z report's round-3 5-case sample-audit list).
+Baseline for this follow-up: 5/2884 flagged (post-round-3-quarantine
+corpus, imp_2bd54fd475cf50fc already removed per round 3's own manual
+quarantine).
+
+Of the 5 sample-audit candidates:
+- 4 adjudicated CORRECT_QUARANTINE (undisclosed-cereal class, same shape as
+  imp_2bd54fd475cf50fc): `imp_e5c662ec002355d6` "Praline Pecan Crunch",
+  `imp_9c4f812bcda75ef0` "Crunchy Pretzel Drops No-Bake Cookies",
+  `imp_42d786e354855c6c` "Grape-Nuts Pudding", `imp_fbfd3dda61af5cd5`
+  "No-Bake Cereal Bars" -- quarantined via the manual-adjudication path
+  (`python scripts/quarantine_flagged_recipes.py --recipe-ids
+  imp_e5c662ec002355d6 imp_9c4f812bcda75ef0 imp_42d786e354855c6c
+  imp_fbfd3dda61af5cd5 --reason "cereal vocabulary miss-fix
+  (adjudication_20260718T090522Z diet_023 class): instructions stir in
+  undisclosed cereal, no cereal row"`). Corpus: 2888 -> 2884 rows; sidecar:
+  1350 -> 1354 rows; no other row changed.
+- 1 adjudicated FALSE_POSITIVE: `imp_9fb0ca4a0fa65c48` "Low-Fat Swiss
+  Muesli" -- "spoon some of the muesli into a cereal bowl" is the SERVING
+  CONTAINER for the already-listed muesli (its own "rolled oats" row is
+  present), not a second, undisclosed cereal ingredient -- same
+  utensil/serving-vessel class as the existing "stock pot" exact-phrase
+  suppression. Fixed via a new `EXACT_PHRASE_SUPPRESSIONS["cereal bowl"] =
+  "cereal"` entry (`app/services/corpus_import/
+  instructions_ingredient_integrity.py`), pinned by
+  `tests/test_instructions_ingredient_integrity.py::
+  test_imp_9fb0ca4a0fa65c48_low_fat_swiss_muesli_cereal_bowl_not_flagged`
+  (fixture copied verbatim from `data/processed/imported_recipes.jsonl`
+  before quarantine).
+
+Net effect on the flagged count: 5/2888 (0.17%) before this follow-up (this
+round's sample-audit set) -> 0/2884 (0.00%) after (4 quarantined out of the
+corpus entirely, 1 suppressed by the new phrase rule) -- re-running
+`scripts/audit_instructions_integrity.py` against the resulting 2884-row
+corpus is idempotent (0 Tier A/B flags), confirming both the manual
+quarantine and the phrase-suppression fix fully account for this round's
+5-case list. The run's own guard-band verdict remains PROBABLE_BUG (floor
+sanity: <10 rows) -- the same pre-registered, expected post-quarantine
+artifact as round 3's own 5/2888 run (a mostly-clean corpus intrinsically
+trips the floor-sanity check; not investigated as a real bug).
+"""
+
 
 @dataclass
 class AuditResult:
@@ -638,6 +791,10 @@ def render_report(
     lines.append(ROUND_1_REVISIONS_MD)
     lines.append("")
     lines.append(ROUND_2_REVISIONS_MD)
+    lines.append("")
+    lines.append(ROUND_3_REVISIONS_MD)
+    lines.append("")
+    lines.append(ROUND_3_FOLLOWUP_REVISIONS_MD)
     lines.append("")
 
     return "\n".join(lines)

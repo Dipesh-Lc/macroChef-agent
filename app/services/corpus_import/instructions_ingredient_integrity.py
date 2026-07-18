@@ -170,6 +170,23 @@ DAIRY_SATISFIER_EXTRAS: frozenset[str] = frozenset({"margarine", "shortening", "
 # class as the round-1 "pastry"/"bread" triggers). Bare `shell` is
 # deliberately REJECTED (too polysemous -- "shellfish", "egg shell",
 # "seashell" homograph risk with no cited real-corpus benefit).
+#
+# Revision round 3 (adjudication_20260718T090522Z.md diet_023, advisor-
+# reviewed/APPROVED 2026-07-18): "cereal" added -- imp_2bd54fd475cf50fc
+# "Butterscotch Chewy Bars" (quarantined via the manual-adjudication path,
+# see data/processed/quarantined_recipes.jsonl) says "Remove from heat and
+# immediately stir in cereals." with NO cereal row in its ingredient list;
+# crisped-rice-style cereals routinely carry barley-malt flavoring and
+# wheat-based bar cereals are common, so the cereal's undisclosed identity
+# is a genuine gluten miss (spec Known-risk 1's residual-miss class, proven
+# by a benchmark-serve adjudication rather than the spot-check). The `s?`
+# trailing-morphology idiom in `_find_term_spans` covers "cereals" from this
+# singular entry, same as every other term in this set. `cereal` is
+# deliberately covered ONLY here (wheat_gluten) -- the advisor's supplementary,
+# explicitly non-blocking suggestion to also trigger dairy (FARE lists
+# cereals under milk) is a rejected-for-now candidate: the proven miss
+# binding from diet_023 is gluten only, and adding an unproven trigger is
+# out of this fix's scope.
 WHEAT_GLUTEN_TERMS: frozenset[str] = frozenset(
     {
         "bread", "flour", "pasta", "spaghetti", "macaroni", "linguine",
@@ -179,6 +196,7 @@ WHEAT_GLUTEN_TERMS: frozenset[str] = frozenset(
         "rye", "malt", "seitan", "breaded", "floured",
         "soy sauce",
         "crust", "pie shell", "crepe",
+        "cereal",
     }
 )
 # Satisfier-only extras (spec Sec. 2): "dough" and "mix" (e.g. "cake mix"
@@ -820,6 +838,18 @@ EXACT_PHRASE_SUPPRESSIONS: dict[str, str] = {
     # of oil in a frying-pan or crepe pan." (a recipe with no crepe/flour
     # content at all -- an omelette-style fried rice).
     "crepe pan": "crepe",
+    # Revision round 3 follow-up (2026-07-18, orchestrator sample check of
+    # the 20260718T113546Z report's round-3 5-case list; same utensil/
+    # serving-vessel class as "stock pot" above): "cereal bowl" is the
+    # SERVING CONTAINER for an already-listed dish, not a second,
+    # undisclosed cereal ingredient -- live in imp_9fb0ca4a0fa65c48 "Low-Fat
+    # Swiss Muesli": "spoon some of the muesli into a cereal bowl." This
+    # recipe's own dish IS the muesli (its "rolled oats" ingredient row is
+    # already present and already satisfies wheat_gluten independently);
+    # "a cereal bowl" here is the dish's serving vehicle, structurally
+    # identical to "stock pot" the utensil vs. "stock" the ingredient.
+    # Orchestrator-adjudicated FALSE_POSITIVE 2026-07-18.
+    "cereal bowl": "cereal",
 }
 
 

@@ -2307,3 +2307,105 @@ def test_build_quarantine_record_never_includes_tier_c_only_findings() -> None:
     assert {m.category for m in mismatches} == {"oil"}
     record = build_quarantine_record(recipe, mismatches)
     assert record["quarantine_reason"]["mismatches"] == []
+
+
+# --- Revision round 3: "cereal" wheat_gluten trigger (adjudication_
+# 20260718T090522Z.md diet_023, advisor-reviewed/APPROVED 2026-07-18) -------
+
+
+def test_imp_2bd54fd475cf50fc_butterscotch_chewy_bars_flags_wheat_gluten_cereal() -> None:
+    # Fixture copied verbatim from the quarantine sidecar payload
+    # (data/processed/quarantined_recipes.jsonl, quarantined via
+    # scripts/quarantine_flagged_recipes.py --recipe-ids
+    # imp_2bd54fd475cf50fc, reason: adjudication_20260718T090522Z.md
+    # diet_023: instructions "stir in cereals" with no cereal row).
+    recipe = _recipe(
+        "imp_2bd54fd475cf50fc",
+        "Butterscotch Chewy Bars",
+        [
+            {"name": "butter", "amount": 3.0, "unit": None},
+            {"name": "margarine", "amount": 0.5, "unit": None},
+            {"name": "brown sugar", "amount": 2.0, "unit": None},
+            {"name": "miniature marshmallows", "amount": 4.0, "unit": None},
+        ],
+        [
+            "Using a large saucepan, melt butter over medium heat.",
+            "Slowly add sugar and stir well.",
+            "Add marshmallows; stirring constantly until marshmallows melt.",
+            "Remove from  heat and immediately stir in cereals.",
+            "Coat a 13 x 9 x 2 inch pan with cooking spray; press chewy mixture evenly into "
+            "bottom of pan.",
+            "it's a lot easier if your  hands are wet.",
+            "Let cool for 60 minutes and cut.",
+        ],
+        allergens=["dairy", "milk"],
+    )
+    mismatches = tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe))
+    categories = _categories(mismatches)
+    assert "wheat_gluten" in categories
+    wheat_mismatch = next(m for m in mismatches if m.category == "wheat_gluten")
+    assert "cereal" in wheat_mismatch.matched_terms
+
+
+def test_synthetic_crispy_rice_cereal_row_satisfies_stir_in_cereal_mention() -> None:
+    # Must-NOT-flag counterpart to the fixture above: a recipe whose
+    # ingredient list DOES name a cereal row (lenient satisfier side, spec
+    # Sec. 2's core asymmetry -- `cereal` is its own satisfier since
+    # WHEAT_GLUTEN_TERMS is unioned wholesale into the category's
+    # satisfiers) must not flag on the same instruction wording.
+    recipe = _recipe(
+        "syn_cereal1",
+        "Synthetic Crispy Rice Treats",
+        [
+            {"name": "butter", "amount": 3.0, "unit": None},
+            {"name": "miniature marshmallows", "amount": 4.0, "unit": None},
+            {"name": "crispy rice cereal", "amount": 6.0, "unit": None},
+        ],
+        [
+            "Melt butter and marshmallows together over low heat.",
+            "Remove from heat and immediately stir in cereal.",
+            "Press into a greased pan and let cool.",
+        ],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "wheat_gluten" not in categories
+
+
+# --- Revision round 3 follow-up: "cereal bowl" exact-phrase suppression
+# (orchestrator sample check of the 20260718T113546Z report's round-3 5-case
+# list, adjudicated FALSE_POSITIVE 2026-07-18) -----------------------------
+
+
+def test_imp_9fb0ca4a0fa65c48_low_fat_swiss_muesli_cereal_bowl_not_flagged() -> None:
+    # Fixture copied verbatim from data/processed/imported_recipes.jsonl.
+    # "spoon some of the muesli into a cereal bowl" is the SERVING
+    # CONTAINER for the already-listed muesli (rolled oats row present),
+    # not a second, undisclosed cereal ingredient -- same utensil/
+    # serving-vessel class as "stock pot" the utensil vs. "stock" the
+    # ingredient.
+    recipe = _recipe(
+        "imp_9fb0ca4a0fa65c48",
+        "Low-Fat Swiss Muesli",
+        [
+            {"name": "rolled oats", "amount": 1.5, "unit": None},
+            {"name": "lemon juice", "amount": 2.0, "unit": None},
+            {"name": "water", "amount": 1.5, "unit": None},
+            {"name": "cinnamon", "amount": 0.5, "unit": None},
+            {"name": "red apples", "amount": 2.0, "unit": None},
+            {"name": "golden delicious apples", "amount": 1.5, "unit": None},
+            {"name": "prunes", "amount": 2.0, "unit": None},
+            {"name": "pecans", "amount": None, "unit": None},
+            {"name": "honey", "amount": None, "unit": None},
+        ],
+        [
+            "Combine oats, water, shredded apples, prunes, honey, lemon juice and cinnamon.",
+            "Cover and refrigerate overnight.  In the morning, spoon some of the muesli into "
+            " a cereal bowl.",
+            "Top with your choice of fresh fruits and nuts.",
+            "Serve with a  dollop of plain yogurt or milk, if desired.",
+            "Muesli can be stored in covered  container in refrigerator for several days.",
+        ],
+        allergens=["nuts", "tree nut"],
+    )
+    categories = _categories(tier_ab_mismatches(find_instructions_ingredient_mismatches(recipe)))
+    assert "wheat_gluten" not in categories
