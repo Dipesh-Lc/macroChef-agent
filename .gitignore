@@ -24,6 +24,8 @@ data/library/*.jsonl
 !data/library/.gitkeep
 data/cache/*
 !data/cache/.gitkeep
+data/scraped/*
+!data/scraped/.gitkeep
 frontend/.streamlit/
 dist/
 build/
