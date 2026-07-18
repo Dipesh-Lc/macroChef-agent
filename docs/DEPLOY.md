@@ -1,5 +1,13 @@
 # DEPLOY.md — Azure Container Apps
 
+> **STATUS: LIVE since 2026-07-18** at
+> <https://ca-macrochef.orangeplant-d8bf2180.italynorth.azurecontainerapps.io/>
+> (region `italynorth`, 1 vCPU / 2 GiB, min=max=1 replica). First-deploy
+> fixes that are now baked in: SP needs subscription-scope Contributor +
+> RG-scoped RBAC Administrator (for the AcrPull self-grant);
+> `psycopg2-binary` in requirements; `ENV PYTHONPATH=/app` in the
+> Dockerfile; explicit `--cpu 1.0 --memory 2.0Gi` in the workflow.
+
 How MacroChef gets from a green `pytest` run to a live public URL. What's
 automated, what's manual, and the exact `az` fallback commands if the
 automated create-if-absent steps ever fail on permissions.

@@ -51,10 +51,15 @@ Keys / accounts (fill placeholders the agents add to `.env.example`):
 
 Manual actions:
 - [ ] Capture 3 README screenshots + 60–90s demo GIF (the agents leave exact
-      capture instructions at the TODO markers).
-- [ ] Click the actual production deploy when the pre-deploy review is
-      APPROVED.
-- [ ] Post the soft-launch drafts (Show HN, subreddits) yourself.
+      capture instructions at the TODO markers) — the live app is now up, so
+      this can be done any time.
+- [x] Click the actual production deploy — DONE 2026-07-18; app live at
+      https://ca-macrochef.orangeplant-d8bf2180.italynorth.azurecontainerapps.io/
+- [ ] Verify analytics: open the live app, generate a recommendation, then
+      check the PostHog dashboard for the events (request completed / plan
+      generated). Only you have dashboard access.
+- [ ] Post the soft-launch drafts (docs/launch_drafts.md — URLs already
+      filled in) yourself, ideally after screenshots land in the README.
 
 ## Before / during Batch 3 (differentiation)
 
