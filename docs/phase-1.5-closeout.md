@@ -1,5 +1,16 @@
 # Phase 1.5 closeout — retrieval-eval ground-truth decontamination + grounding/parser fixes
 
+> **Corpus-change annotation (2026-07-18):** the pinned retrieval-eval
+> baseline in §4 below was computed on the 4,263-recipe corpus. Since
+> then, corpus-integrity quarantines (adjudication-driven rows plus the
+> instructions-vs-ingredients mass quarantine approved by the human at
+> the 2026-07-18 corpus gate, Option A) reduced the imported corpus to
+> ~2,889 rows (~3,100 with seeds withstanding later changes). The §4
+> numbers remain the frozen Phase 3.5 fine-tune baseline for the corpus
+> they were measured on, but are **not comparable** to any
+> post-quarantine run. Regeneration is backlogged (docs/BACKLOG.md,
+> "Corpus / nutrition"), not required for shipping.
+
 Status: this commit set touches BOTH eval-only files and three production
 modules. It is NOT eval-only.
 

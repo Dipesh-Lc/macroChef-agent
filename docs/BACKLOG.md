@@ -325,6 +325,31 @@ were pre-registered before anyone saw a result.
 - Regenerate `data/processed/grounding_report.md` end-to-end at the next
   change that alters any report NUMBER (two `_KNOWN_RESIDUALS` lines were
   text-synced by hand, verified byte-identical).
+- **Retrieval-eval baseline regeneration after the 2026-07-18 mass
+  quarantine.** The pinned baseline in `docs/phase-1.5-closeout.md` §4
+  (67 queries, 4,263-recipe corpus, all-MiniLM-L6-v2) predates the
+  instructions-integrity quarantine (imported corpus 4,045 → 2,889;
+  human decision Option A, 2026-07-18). Re-run
+  `python scripts/evaluate_retrieval.py` against the reduced corpus and
+  re-pin; until then the old numbers stand as the Phase 3.5 fine-tune
+  baseline for the corpus they measured, annotated non-comparable.
+  Ground-truth relevant-set sizes will shrink (some pinned queries may
+  need re-verification against the non-vacuity rule). Not
+  ship-blocking.
+- **Instructions-integrity residual classes (post-Option-A).** Recorded
+  in `data/evaluation/instructions_integrity_report_20260718T001212Z.md`
+  ("Residuals") and the two sample-audit records: (1) named
+  variation-block headers ("San Francisco:") — rare multi-variation
+  recipes, no deterministic rule separates them from genuine
+  sub-component headers; (2) core-leniency non-flags where a listed
+  same-category row satisfies any mention (imp_3aee17154e8c59e9's flour
+  row vs its unlisted crust; imp_4e524f5f9f8759a9's soy-sauce row
+  satisfying a bread-crumbs mention via dual-category membership — a
+  candidate future ruling: dual-category terms satisfy only their own
+  occurrences); (3) accepted FP imp_712db6319e3957c7 (non-contiguous
+  intended-use phrasing); (4) measured ~10% FP rate among the 1,156
+  quarantined rows — lost-recipe cost accepted by the human with
+  Option A, restorable per-row via the sidecar if ever needed.
 
 ## Deploy / infra
 
