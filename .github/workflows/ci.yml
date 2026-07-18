@@ -18,7 +18,7 @@ on:
 # chars). If `acrmacrochef01` is taken, `az acr create` fails loudly with a
 # name-conflict error (not silently) — pick a new suffix and re-run.
 env:
-  AZURE_REGION: westeurope
+  AZURE_REGION: italynorth
   RESOURCE_GROUP: rg-macrochef
   ACA_ENV_NAME: cae-macrochef
   ACA_APP_NAME: ca-macrochef

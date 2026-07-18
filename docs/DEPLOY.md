@@ -115,7 +115,8 @@ the HF token is for the Batch 2 dataset publication human gate.)
 ## Resource naming (in the workflow's `env:` block — change there, not here)
 
 ```yaml
-AZURE_REGION: westeurope
+AZURE_REGION: italynorth
+(was westeurope; changed 2026-07-18 to italynorth — Azure declined new-customer resource creation in westeurope: RequestDisallowedByAzure)
 RESOURCE_GROUP: rg-macrochef
 ACA_ENV_NAME: cae-macrochef
 ACA_APP_NAME: ca-macrochef
@@ -137,7 +138,7 @@ az login
 az account set --subscription <SUBSCRIPTION_ID>
 
 # 1. Resource group
-az group create --name rg-macrochef --location westeurope
+az group create --name rg-macrochef --location italynorth
 
 # 2. Container registry
 az acr create --name acrmacrochef01 --resource-group rg-macrochef --sku Basic --admin-enabled false
@@ -149,7 +150,7 @@ az provider register --namespace Microsoft.OperationalInsights --wait
 
 # 4. Container Apps environment
 az extension add --name containerapp --upgrade
-az containerapp env create --name cae-macrochef --resource-group rg-macrochef --location westeurope
+az containerapp env create --name cae-macrochef --resource-group rg-macrochef --location italynorth
 
 # 5. Grant the CI service principal Contributor, scoped narrowly to this RG
 #    if you don't want subscription-wide access:
