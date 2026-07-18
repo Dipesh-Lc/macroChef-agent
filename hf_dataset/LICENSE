@@ -1,0 +1,69 @@
+MacroChef Adversarial Allergy & Diet Safety Benchmark — Dataset License
+========================================================================
+
+The case data in this dataset (`data/*.jsonl`) is original work, authored
+directly in the MacroChef repository (https://github.com/Dipesh-Lc/macroChef-agent)
+for this benchmark. It is licensed under:
+
+    Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Full legal text: https://creativecommons.org/licenses/by/4.0/legalcode
+Human-readable summary: https://creativecommons.org/licenses/by/4.0/
+
+Copyright (c) 2026 MacroChef project.
+
+You are free to:
+
+  - Share — copy and redistribute the material in any medium or format.
+  - Adapt — remix, transform, and build upon the material for any purpose,
+    even commercially.
+
+Under the following terms:
+
+  - Attribution — You must give appropriate credit to the MacroChef
+    project, provide a link to this license, and indicate if changes were
+    made. You may do so in any reasonable manner, but not in any way that
+    suggests the MacroChef project endorses you or your use.
+  - No additional restrictions — You may not apply legal terms or
+    technological measures that legally restrict others from doing
+    anything the license permits.
+
+No warranties are given. The license may not give you all of the
+permissions necessary for your intended use. For example, other rights
+such as publicity, privacy, or moral rights may limit how you use the
+material. See the "Disclaimer" section of the accompanying README.md — this
+is a hobby-project safety-evaluation artifact, not medical advice.
+
+------------------------------------------------------------------------
+
+A note on scope (why this LICENSE file differs from the source repository's
+top-level MIT license):
+
+The MacroChef source repository (https://github.com/Dipesh-Lc/macroChef-agent)
+is MIT-licensed as a whole (its `LICENSE` file). This dataset packages a
+*subset* of that repository's content — the frozen benchmark case files
+under `app/evaluation/benchmark/cases/*.jsonl` — as a standalone,
+independently-citable artifact. Those case files were authored as original
+content specifically for this benchmark (per the blind-authoring rule in
+`app/evaluation/benchmark/cases/README.md`, ground truth in each case's
+`forbidden_terms` is sourced from external authorities the case cites, but
+the case text, structure, and adversarial framing themselves are original).
+No conflicting license statement for these specific files was found
+anywhere in the source repository (`case_schema.py`, `cases/README.md`,
+and the repository root `LICENSE` were all checked).
+
+This CC BY 4.0 license applies **only to the dataset content in this
+`hf_dataset/` package** (the case data under `data/`, and this dataset
+card). It does **not** relicense any other part of the MacroChef
+repository. In particular, the evaluation harness code that runs this
+benchmark (`scripts/run_safety_benchmark.py`,
+`app/evaluation/benchmark/safety_judge.py`,
+`app/evaluation/benchmark/loader.py`,
+`app/evaluation/benchmark/case_schema.py`) is not included in this dataset
+package and remains under the source repository's MIT license.
+
+Separately, and unrelated to this dataset: the source repository has a
+pending, human-cleared decision to import Wikibooks measurement-conversion
+data under CC BY-SA 4.0 for a different feature (recipe unit conversion).
+That data has never actually been imported (see `docs/BACKLOG.md`) and has
+no bearing on this benchmark's case data or its CC BY 4.0 license.

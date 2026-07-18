@@ -3,14 +3,16 @@
 ![CI](https://github.com/Dipesh-Lc/macroChef-agent/actions/workflows/ci.yml/badge.svg)
 
 > **Hobby project — not medical advice.** MacroChef is an unpaid personal project,
-> not a certified nutrition or allergy-safety product. Its adversarial safety
-> benchmark (371 cases, see below) **has been run**, and the current
-> adjudicated-true inherent violation count is **nonzero** — deployment is
-> blocked until it reaches zero. No violation-rate claim is made anywhere in
-> this README; the release gate is zero adjudicated-true inherent violations,
-> with the raw judge-flagged count always published alongside it. **If you have
-> a food allergy, you must independently verify every ingredient before you eat
-> anything this app suggests.**
+> not a certified nutrition or allergy-safety product. On its adversarial safety
+> benchmark (371 cases, see below) the deterministic judge flagged **17/259**
+> inherent-severity cases; written, advisor-reviewed per-case adjudication found
+> **0/259** of those to be true violations (the 17 are documented judge false
+> positives — see below). The release gate — zero adjudicated-true inherent
+> violations, with the raw judge-flagged count always published alongside it —
+> is met. This benchmark measures this system's behavior on its own recipe
+> corpus, not a real-world guarantee. **If you have a food allergy, you must
+> independently verify every ingredient before you eat anything this app
+> suggests.**
 
 **A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
@@ -44,15 +46,39 @@ deterministically by the scorer. The LLM cannot override a safety decision — b
 construction, not by prompt. Macro targets are *soft* constraints used only to
 rank, never to include or exclude on safety grounds.
 
-> A reproducible adversarial safety benchmark (371 cases: allergy-contradiction
-> traps, hidden allergens like "satay sauce" → peanut, diet-type traps, and more)
-> has been authored and **is now being run against MacroChef**. The current
-> adjudicated-true inherent violation count is **nonzero**, so deployment is
-> blocked and **no violation-rate number is published anywhere in this README**
-> until the release gate (zero adjudicated-true inherent violations, with the
-> raw judge-flagged count always published alongside) is met. The planned
-> comparison vs. direct LLM prompting is deferred until then. See
-> `docs/ROADMAP.md`.
+> A reproducible adversarial safety benchmark (371 frozen cases, authored blind
+> to the implementation: allergy-contradiction traps, hidden allergens like
+> "satay sauce" → peanut, diet-type traps, and more) has been run against
+> MacroChef. On the 259 release-blocking (`inherent`-severity) cases, the
+> deterministic judge flagged **17/259**; written per-case adjudication
+> (advisor-reviewed, committed at
+> `data/evaluation/adjudication_20260718T123735Z.md`) found **0/259 true
+> violations** — the 17 flags are documented judge false positives (substring
+> artifacts, e.g. the word "dairy" inside the title "Dairy-Free Chicken Fajita
+> Plate" matching a dairy-allergy check even though the recipe contains no
+> dairy). Per the project's methodology, judge false positives stay in the raw
+> judge-flagged number permanently — the judge itself is never modified to
+> close the gap, and both numbers are always published together, never a bare
+> "0 violations" claim.
+>
+> **Methodology:** the 371 cases are frozen and were authored before any
+> adjudication; runs are executed k=3 with identical failing sets across runs
+> (deterministic); every judge flag receives a written, per-case,
+> advisor-reviewed adjudication (verdict `TRUE_VIOLATION` or `JUDGE_FP`, with
+> matched term + field, the served recipe's actual ingredients, and a citable
+> rule — ambiguity defaults to `TRUE_VIOLATION`). Run the benchmark with
+> `python scripts/run_safety_benchmark.py`; see the adjudication files under
+> `data/evaluation/` (methodology convention set in
+> `adjudication_20260717T145539Z.md`, gate-deciding run in
+> `adjudication_20260718T123735Z.md`).
+>
+> The benchmark also includes a **precautionary** (non-blocking, "may-contain"
+> class) partition of 46 cases — judge-flagged **10/46**, adjudicated true
+> **6/46** — disclosed but not release-blocking and tracked in
+> `docs/BACKLOG.md`; and a **safe-control** partition of 60 cases used to
+> measure over-blocking, which stayed at **0/60** (no safe recipe was
+> incorrectly rejected). The planned comparison vs. direct LLM prompting is
+> deferred (see `docs/BACKLOG.md`). See `docs/ROADMAP.md`.
 
 ---
 
@@ -387,6 +413,23 @@ pytest
   shopping-list math, future cost estimation) are real only for the 25
   hand-authored seed recipes and user-entered pantry items. Allergen detection
   is name-based and unaffected.
+- **Imported corpus size reflects a deterministic integrity quarantine.** The
+  imported Food.com corpus is now **2,884 rows**, down from its original size
+  after a deterministic instructions-vs-ingredients integrity check removed
+  ~1,354 rows whose cooking instructions referenced an ingredient (typically a
+  meat, fish, or other allergen-relevant item) absent from that recipe's own
+  ingredient list — a corruption class that could otherwise let an allergen
+  slip past the safety filter undetected. See
+  `docs/instructions_integrity_spec.md` for the check's rules and residual
+  known limitations.
+- **A small number of diet-type checks intentionally over-block, by design.**
+  Recipes containing coconut milk or peanut butter are currently unservable
+  under `dairy-free`/`vegan` diet requests even though coconut milk and peanut
+  butter contain no dairy — the diet-exclusion path fails closed on the
+  substring "milk"/"butter" rather than risk a lookalike carve-out that could
+  also weaken the allergy-safety path (which shares the same matching code).
+  This is an accepted, deliberate tradeoff (favoring false rejections over any
+  risk of false admits); see `docs/BACKLOG.md` for the tracked fix.
 - **Identity is anonymous and per-browser.** Sessions are signed anonymous
   tokens — no email, no login (a deliberate scope decision: no PII in a hobby
   demo). Clearing cookies or switching devices starts a fresh library; tokens

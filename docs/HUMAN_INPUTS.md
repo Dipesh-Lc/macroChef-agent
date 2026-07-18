@@ -14,25 +14,32 @@ answered inline when the orchestrator's NEEDS HUMAN summary asks.
 ## Before / during Batch 2 (benchmark + deploy)
 
 Decisions:
-- [ ] Cloud: Azure Container Apps (default — Azure leads in your JDs) /
-      GCP Cloud Run (cheapest) / AWS App Runner. Requires an account on
-      the chosen cloud + deploy credentials as GitHub repo secrets.
-- [ ] Postgres: managed on the chosen cloud, or Neon / Supabase free tier
-      (default proposal: Neon — cheaper than cloud-managed).
-- [ ] Hugging Face account + write token, for publishing the benchmark
-      dataset (Batch 2) and optionally the fine-tuned model (Batch 3.5).
-      You click "publish"; agents prepare everything.
-- [ ] Auth email delivery: e.g. Resend / Postmark / Supabase Auth
-      (default proposal: magic links via Resend).
-- [ ] Analytics: PostHog / Plausible (default proposal: PostHog).
-- [ ] Benchmark spend approval: the harness will report an estimated cost
-      for running 300–500 cases against GPT / Claude / Gemini before any
-      paid calls. Approve a budget cap.
+- [x] Cloud: Azure Container Apps (chosen; `AZURE_CREDENTIALS` set as a
+      repo secret, confirmed 2026-07-17).
+- [x] Postgres: Neon (`DATABASE_URL` set as a repo secret, confirmed
+      2026-07-17).
+- [x] Hugging Face account + write token: `HUGGING_FACE_TOKEN` set as a
+      repo secret, confirmed 2026-07-17. You click "publish"; the
+      packaged dataset + upload instructions live in `hf_dataset/`.
+- [x] Auth email delivery: NOT NEEDED for launch — decision 3A
+      (2026-07-17): anonymous signed per-browser sessions ship instead;
+      magic-link deferred until retention measurement starts (Phase 4).
+- [x] Analytics: PostHog (`POSTHOG_API_KEY` set as a repo secret,
+      confirmed 2026-07-17).
+- [ ] Benchmark spend approval — NOW UNBLOCKED (deferred by decision 4A
+      until the adjudicated-zero gate was met; the gate was met
+      2026-07-18): the external-model comparison arms (3 models ×
+      {naive, steelman}, k=3) at an estimated ~$12.21 need your budget
+      approval + `OPENAI_API_KEY`/`GEMINI_API_KEY`/`ANTHROPIC_API_KEY`
+      in `.env` before any paid calls.
 - [ ] Corpus license posture: the Food.com Kaggle corpus (CC0-self-applied)
       is fine for hobby scope, but a public deployment is arguably
       "public/commercial-adjacent" — decide: keep as-is, or swap/trim the
       imported corpus before going live. (The seed/imported split makes a
-      swap cheap.)
+      swap cheap. Note: after the 2026-07-18 integrity quarantines the
+      imported corpus is 2,884 rows; the quality case for an eventual
+      swap got stronger — ~25% of the original import was corrupt — but
+      the licensing question is unchanged and still yours.)
 
 Keys / accounts (fill placeholders the agents add to `.env.example`):
 - [ ] `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` — for the
