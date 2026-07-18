@@ -180,6 +180,8 @@ jobs:
           # outside the container -- so ACA's public ingress has to point at
           # Streamlit or there would be no usable public URL, just a bare
           # JSON API.
+          # 1.0/2.0Gi: torch + MiniLM + Chroma + dual process needs >1Gi; default
+          # 0.5/1Gi crash-looped (OOM/probe-fail) on first deploy 2026-07-18
           az containerapp show \
             --name "$ACA_APP_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
             az containerapp create \
@@ -192,7 +194,8 @@ jobs:
               --registry-server "$ACR_NAME.azurecr.io" \
               --registry-identity system \
               --min-replicas 1 \
-              --max-replicas 1
+              --max-replicas 1 \
+              --cpu 1.0 --memory 2.0Gi
 
       - name: Update revision — image, secrets, env vars
         run: |
@@ -212,12 +215,15 @@ jobs:
           # with 2 revisions briefly active) risks corrupting the index. Do
           # NOT raise max-replicas above 1 without moving to an external
           # vector store first (tracked in docs/BACKLOG.md).
+          # 1.0/2.0Gi: torch + MiniLM + Chroma + dual process needs >1Gi; default
+          # 0.5/1Gi crash-looped (OOM/probe-fail) on first deploy 2026-07-18
           az containerapp update \
             --name "$ACA_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --image "${{ needs.build-and-push.outputs.image }}" \
             --min-replicas 1 \
             --max-replicas 1 \
+            --cpu 1.0 --memory 2.0Gi \
             --set-env-vars \
               DATABASE_URL=secretref:database-url \
               SESSION_SECRET=secretref:session-secret \

@@ -16,6 +16,10 @@
 
 **A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
+**🔴 Live demo:** <https://ca-macrochef.orangeplant-d8bf2180.italynorth.azurecontainerapps.io/>
+(Azure Container Apps, single small always-on container — first load may take a
+few seconds; anonymous per-browser sessions, per-session rate limits.)
+
 > **The LLM never enforces your allergies and never computes your macros.
 > Deterministic code does.** The model is used only for non-safety-critical work —
 > parsing messy inventory text, ranking, and phrasing explanations. Anything that

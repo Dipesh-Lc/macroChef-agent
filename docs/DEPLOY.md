@@ -169,8 +169,12 @@ after `build-and-push` runs once.
 `min_replicas=1` (and `max_replicas=1`, set for the same reason) means the
 container never scales to zero and is billed continuously, unlike the ACA
 consumption plan's free grant which assumes scale-to-zero idle time.
-**Estimated cost: roughly $15-30/month** for a small always-on container
-(0.5 vCPU / 1 GiB class) plus negligible Log Analytics ingestion, well
+The container runs at **1.0 vCPU / 2.0 GiB, always on** — bumped up from the
+default 0.5 vCPU / 1 GiB class, which crash-looped (OOM / probe-fail) on the
+first real deploy (2026-07-18): torch + MiniLM + Chroma + the dual
+Streamlit/FastAPI process need more than 1 GiB.
+**Estimated cost: roughly $30-60/month** for the 1.0 vCPU / 2.0 GiB
+always-on container, plus negligible Log Analytics ingestion, well
 above the ACA free monthly grant. This is a CLAUDE.md "Money" human gate —
 get explicit approval before the first real (non-`workflow_dispatch`-test)
 deploy. (The ACR Basic SKU adds a small, separate ~$5/month regardless of
@@ -186,8 +190,10 @@ tracked as a real fix in `docs/BACKLOG.md` ("Multi-replica / external vector
 store").
 
 **Money gate resolved 2026-07-17: APPROVED by the human.** `min_replicas=1`/
-`max_replicas=1` at ~$15–30/month is accepted (decision 4A). The
-external-model comparison arms (~$12.21 estimated) are DEFERRED until the
+`max_replicas=1` is accepted (decision 4A); the resource size was then
+bumped to 1.0 vCPU / 2.0 GiB (~$30-60/month) on 2026-07-18 after the
+default-size crash-loop, also human-approved by running the resource-bump
+deploy. The external-model comparison arms (~$12.21 estimated) are DEFERRED until the
 safety gate (zero adjudicated-true inherent violations) is met. The
 production deploy itself remains a separate "Public actions" human gate —
 prepare everything; the human pulls the trigger.
