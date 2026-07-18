@@ -192,10 +192,11 @@ were pre-registered before anyone saw a result.
 - Independent judge (`app/evaluation/benchmark/safety_judge.py`) with an
   **enforced import ban** on `ingredient_normalizer`/`constraint_engine`,
   tested by walking the import graph.
-- **`scripts/run_safety_benchmark.py` does not exist yet** — `app/evaluation/benchmark/`
-  currently has `case_schema.py`, `loader.py`, and the frozen `cases/` directory, but
-  no runner. Building the runner and executing all 371 cases against a paid API is a
-  money gate requiring human cost approval.
+- ~~`scripts/run_safety_benchmark.py` does not exist yet~~ **STALE — it
+  exists and has been run** (MacroChef mock arm, 2026-07-18: judge-flagged
+  17/259, adjudicated-true 0/259 inherent; gate met). Still open: the
+  external-model comparison arms (3 models x {naive, steelman}) remain a
+  money gate (~$12) requiring human cost approval + provider keys.
 - Harness specification (future): arms = MacroChef(mock),
   MacroChef(real, gated), 3 models x {naive, steelman}; both execution
   surfaces; structured-JSON contract; response cache; `non_answer` category.

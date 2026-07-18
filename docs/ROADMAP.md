@@ -8,6 +8,143 @@ Merged plan from both reviews (Opus 4.8 + Fable 5). Organized so each phase has 
 
 ---
 
+## Status snapshot (2026-07-19)
+
+| Phase | Status |
+|---|---|
+| 0 — Credibility | **DONE**, except README screenshots + demo GIF (human gate). |
+| 1 — Trust & grounding | **DONE** (USDA grounding, quantity model, 4,238-recipe corpus, re-derived macros). Residuals tracked in `docs/BACKLOG.md` "Corpus / nutrition". |
+| 2 — Benchmark + deploy | **Live** at ca-macrochef (italynorth) since 2026-07-18. MacroChef arm run, gate met: judge-flagged 17/259, adjudicated-true **0/259** inherent. NOT done: external-model comparison arms (money gate ~$12), analytics verified firing in prod (human), soft launch (human), screenshots (human). |
+| 3 — Differentiation | Not started. Was blocked by the unitless corpus — **unblocked 2026-07-18** by the Food.com raw-page scrape (4,238 pages archived to `data/scraped/foodcom/` with verbatim amount+unit ingredient lines + full JSON-LD). |
+| 4 — Retention/planning | Not started. Same blocker, same unblock. |
+| 5 — Platform | Not started. |
+
+The forward plan below ("Unlock chain") supersedes the Phase 3–4 internal ordering where they differ; the phase texts remain as reference. Known stale docs: `frontend/streamlit_app.py` disclaimer still says the benchmark "has not yet been run" (fix in C0 below); `docs/BACKLOG.md:195` says the benchmark runner doesn't exist (it does).
+
+---
+
+## Forward plan (added 2026-07-19): unlock chain → features → frontend
+
+### Stage A — The unlock chain (backend; do this before any UI work)
+
+Everything below depends on this chain — precise macros only exist once
+ingredients convert to grams.
+
+- **A1. Process the scraped archive into the structured corpus.**
+  (Already backlogged; FULL TREATMENT — touches allergen-label derivation.)
+  New `DatasetAdapter` subclass in `app/services/corpus_import/adapters.py`
+  reading `data/scraped/foodcom/*.md` (parse the fenced `Raw JSON-LD`
+  block), ingredient lines through `parse_quantity_string`
+  (`app/utils/quantity_parser.py`), allergens re-derived from scraped
+  names via `derive_allergen_labels`, `recipeYield` → `servings`, then the
+  existing pipeline (validation → dedup → integrity quarantine → rewrite
+  `imported_recipes.jsonl` → reindex). Turns ~24,000 unitless ingredient
+  rows into `{name, amount, unit}` rows. Quarantined recipes (1,354) get a
+  second chance from original-page truth.
+  *Eval gate:* pytest + `evaluate_demo_set.py` at 0.000 + safety-benchmark
+  MacroChef arm re-run (corpus changed under it) + before/after unit
+  coverage stat published in the import report.
+- **A2. Widen the conversion surface.** `app/utils/unit_converter.py` has a
+  12-entry density table and 10-entry piece-weight table — the real
+  bottleneck. With units now present, every added entry (cup of flour,
+  tbsp of oil…) converts hundreds of rows to grams. Per the standing
+  advisor ruling (BACKLOG "Corpus / nutrition"): strict-first
+  `_normalize_for_density_lookup()`, exact-match only, **every entry needs
+  a cited reference weight** (USDA FoodData Central / King Arthur /
+  peer-reviewed tables — no LLM-recalled densities), never strip
+  composition/physical-form words. Also add the missing unit aliases
+  (pinch/dash/quart/pint/gallon/fl oz/stick) to `quantity_parser.py`.
+  Fixes the latent `"cooked"`-stripping density bug as a side effect.
+  *Eval gate:* unit tests against the cited reference values; corpus-wide
+  conversion-rate stat before/after.
+- **A3. Re-ground nutrition corpus-wide** via `scripts/ground_corpus.py`
+  (USDA FDC, cached, `FDC_API_KEY` already provisioned). Baseline to beat:
+  grounded 0.4% / partial 59.2% (grounding_report.md). "Grounded %"
+  becomes a real, displayable metric.
+  *Eval gate:* macro-computation accuracy measured against the 25
+  hand-authored seed recipes as ground truth; publish the number in the
+  grounding report.
+
+### Stage B — Features that make it actually useful (each ships with an eval)
+
+- **B1. Per-serving macro cards with provenance.** Calories/P/C/F per
+  serving plus a **grounding badge** (N of M ingredients USDA-matched vs
+  estimated). Honest uncertainty display is good UX and on-brand; builds
+  on the existing `nutrition_view.macro_display_state` trust chokepoint.
+- **B2. Serving scaler.** 1–8 servings slider rescaling every ingredient
+  amount and the macros live. Trivial once quantities are structured;
+  feels magical.
+- **B3. Macro-targeted day planning.** "Hit 2,200 kcal / 160 g protein" →
+  the deterministic side assembles a day plan from grounded recipes
+  summing to target within tolerance. Knapsack-style solver component —
+  strong portfolio piece, stays deterministic (no safety-invariant
+  issues). Absorbs Phase 3 item 1 ("remaining macros") and seeds the
+  Phase 4 solvers. *Eval:* fit-error metric (kcal/protein deviation) on a
+  test set, tolerance target pre-stated.
+- **B4. Shopping-list aggregation across the plan.** Merge quantities
+  across the week, normalized to sensible purchase units. Extends the
+  existing `procurement_service.merge_shopping_lists` from per-recipe to
+  per-plan. *Eval:* reconciliation test — list quantities equal plan
+  requirements minus pantry, exactly (Phase 4 gate, now checkable).
+- **B5. Pantry match by weight.** Rank recipes by fraction of ingredient
+  **mass** covered, not name-count (upgrade `pantry_match_score` in
+  `nutrition_scorer.py`; `to_grams` does the work).
+- **B6. Recipe variations surface.** "Restored from source" badge for
+  quarantined recipes recovered in A1; later, the multi-source variations
+  pass (backlogged) gives side-by-side versions.
+
+### Stage C — Frontend redesign
+
+- **C0 (immediate, independent of A):** fix the stale benchmark disclaimer
+  in `frontend/streamlit_app.py` — it must state both numbers
+  (judge-flagged 17/259; adjudicated-true 0/259) per Honest scope. Do
+  before screenshots.
+- **C1. Two-pane layout:** conversational agent left, live **plan canvas**
+  right (day/week grid, macro totals updating as recipes land). Recipe
+  detail views with the scaler; macro donut per recipe; stacked daily
+  totals against target bands.
+- **C2. Make safety visible:** the allergy-filter status always on screen
+  ("filtered deterministically: N recipes excluded for tree nuts") —
+  turns the safety architecture into a visible feature.
+- **C3. React frontend against the existing FastAPI** — only if Streamlit
+  fights the two-pane design; bigger scope, itself a portfolio upgrade.
+  **Human decision point before starting C3.**
+
+### What makes it impressive to a reviewer (standing principles)
+
+1. **The honesty layer** — grounded-vs-estimated data quality shown per
+   recipe. Rare in the wild; demonstrates mature ML-product thinking.
+2. **An eval for every new component** — e.g. macro-computation accuracy
+   vs the 25 seed recipes as ground truth, published. Keeps the
+   "no unevaluated components" discipline that distinguishes this repo.
+
+### Execution order for everything still unimplemented
+
+| # | Item | Tier | Depends on |
+|---|---|---|---|
+| 1 | A1 archive → corpus | FULL TREATMENT | scrape (done) |
+| 2 | A2 conversion surface | FULL TREATMENT (advisor ruling applies) | — (parallel with A1) |
+| 3 | A3 re-ground + seed-accuracy eval | EVERYTHING ELSE | A1, A2 |
+| 4 | C0 stale-disclaimer fix | EVERYTHING ELSE | — (do first) |
+| 5 | B1 macro cards + B2 scaler | EVERYTHING ELSE | A3 |
+| 6 | B5 pantry-by-weight | EVERYTHING ELSE | A3 |
+| 7 | B3 day-plan solver (+ eval) | FULL TREATMENT (serves plans → allergy surface) | A3 |
+| 8 | B4 shopping aggregation (+ reconcile test) | EVERYTHING ELSE | B3 |
+| 9 | C1+C2 frontend redesign | EVERYTHING ELSE (C2 wording advisor-checked) | B1–B4 |
+| 10 | B6 variations surface | EVERYTHING ELSE | A1 |
+| 11 | Phase 3: substitution engine | FULL TREATMENT (allergen swaps) | A3 |
+| 12 | Phase 3: visible personalization; cost v1 | EVERYTHING ELSE | B1 |
+| 13 | Phase 4: batch solver → weekly solver → expiry → share URLs | mixed (solvers FULL) | B3, B4 |
+| 14 | Phase 5: API/MCP server, mobile polish, real vision, v2 launch | per-item | user signal |
+
+Human gates unchanged and still open: screenshots/GIF, analytics
+verification, soft-launch posting, external benchmark arms (~$12),
+corpus-license posture for public deployment (A1 re-imports Food.com-
+derived data into the served corpus — same posture question as today,
+flag at A1 review), React-frontend scope call (C3).
+
+---
+
 ## Phase 0 — Credibility Baseline (≈1 week)
 
 **Goal:** Remove everything that makes a stranger distrust the repo in the first 60 seconds.
