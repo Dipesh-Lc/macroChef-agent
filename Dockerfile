@@ -8,6 +8,9 @@ ENV PYTHONUNBUFFERED=1
 # locally `docker run -p 8501:8501` matches this default with no extra config.
 ENV PORT=8501
 
+# repo root on sys.path: Streamlit only adds the script dir (frontend/), but frontend imports app.config/app.dependencies — first caught in-container 2026-07-18
+ENV PYTHONPATH=/app
+
 # Pin the HF cache to a known, predictable path so the model baked in below
 # (RUN ... SentenceTransformer(...)) and the runtime load in
 # app/rag/embeddings.py resolve to the exact same on-disk cache. The image
