@@ -7,6 +7,9 @@ Before this fix, RecipeRetriever._base_recipes was built from
 `retrieve()`'s `recipes_by_id` lookup (built from `_base_recipes`) filtered
 every one of them back out, so they could never actually surface to a user.
 
+Post-2026-07-18 corpus quarantine: the imported corpus is now ~2,889 rows
+(down from ~4,238 due to instructions-integrity issues), plus 25 seeds.
+
 `RecipeRetriever` now builds `_base_recipes` from
 `app.rag.loaders.load_corpus()` (seed UNION imported, deduped by id, seeds
 win) instead. This test proves, at full corpus scale:
@@ -40,8 +43,8 @@ def test_full_corpus_is_loaded_seed_union_imported(monkeypatch) -> None:
 
     recipe_ids = {recipe.recipe_id for recipe in retriever.all_recipes()}
 
-    # 25 hand-curated seed recipes + the full ~4,238-recipe imported corpus.
-    assert len(recipe_ids) > 4000
+    # 25 hand-curated seed recipes + the full ~2,889-recipe imported corpus after 2026-07-18 quarantine.
+    assert len(recipe_ids) > 2900
     assert any(recipe_id.startswith("imp_") for recipe_id in recipe_ids)
     assert any(recipe_id.startswith("r_") for recipe_id in recipe_ids)
 
