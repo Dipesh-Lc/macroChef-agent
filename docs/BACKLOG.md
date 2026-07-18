@@ -335,6 +335,37 @@ were pre-registered before anyone saw a result.
 
 ## Corpus / nutrition
 
+- **Multi-source recipe variations pass (deferred from the 2026-07-18
+  Food.com raw-scrape item).** The primary pass
+  (`scripts/scrape_recipe_pages.py`) archives every corpus recipe's
+  original Food.com page (exact match via the numeric RecipeId retained in
+  `source_url`) to `data/scraped/foodcom/<id>.md` + `manifest.jsonl`. The
+  user also wants the same recipes scraped from other reputable sites
+  (AllRecipes, Serious Eats, BBC Good Food, …) as cross-checks/variations.
+  Decided seam: a separate `scripts/scrape_recipe_variations.py`, separate
+  `data/scraped/variations_manifest.jsonl`, output
+  `data/scraped/variations/<foodcom_id>__<domain>.md` with frontmatter
+  `matched_from_query`, `match_title`, `title_similarity` (rapidfuzz —
+  already a dep), `match_confidence: high|medium|low`. Discovery via the
+  DuckDuckGo HTML endpoint (no API key; brittle), parsing via
+  `recipe-scrapers` (add the dependency only then). Priority input: ids
+  whose latest primary-pass manifest status is `not_found` (dead Food.com
+  pages — the variations pass is their only recovery; food.com /search/ is
+  robots-disallowed, do not use it). Title-match ambiguity means a
+  variation is stored, never merged silently — "most reliable source wins"
+  resolution happens in the later structured-processing item, not at
+  scrape time.
+- **Process the raw scraped archive into the structured corpus.** The
+  archive's JSON-LD `recipeIngredient` lines carry full amounts + units —
+  this is the unblock path for the 2026-07-17 "units decision" (option 2A
+  treated corpus recipes as discovery-only because units were missing).
+  Later item: parse the fenced `Raw JSON-LD` block of each
+  `data/scraped/foodcom/<id>.md` through
+  `app/utils/quantity_parser.py`, re-derive allergen labels from the
+  scraped ingredient names via `derive_allergen_labels`, and re-import.
+  Quarantined recipes (1,354, also scraped) may be recoverable from
+  original-page truth. FULL TREATMENT when it lands (touches allergen
+  derivation inputs).
 - **Wikibooks import** — human already cleared CC BY-SA 4.0 for
   measurement; split-licensing decided (MIT code, CC BY-SA data).
   **Pre-registered import bands, set before the number existed: >=750
