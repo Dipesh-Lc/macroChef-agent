@@ -179,3 +179,306 @@ def test_output_name_never_drops_a_food_word(raw: str) -> None:
         assert unit is not None and canonical_unit(removed[0]) == unit, (
             f"input={raw!r} name={parsed['name']!r} removed a non-unit token: {removed!r}"
         )
+
+
+# --- New volume units (task A2): quart, pint, fluid ounce ---------------------
+
+
+def test_canonical_unit_quart_aliases() -> None:
+    for alias in ("quart", "quarts", "qt", "qts"):
+        assert canonical_unit(alias) == "qt"
+
+
+def test_canonical_unit_pint_aliases() -> None:
+    for alias in ("pint", "pints", "pt", "pts"):
+        assert canonical_unit(alias) == "pt"
+
+
+def test_canonical_unit_fluid_ounce_aliases() -> None:
+    for alias in ("fluid ounce", "fluid ounces", "fl oz", "fl oz.", "fl. oz.", "floz"):
+        assert canonical_unit(alias) == "floz"
+
+
+def test_canonical_unit_still_returns_none_for_unknown() -> None:
+    assert canonical_unit("smidge") is None
+    assert canonical_unit("fl") is None
+
+
+# --- Two-token unit parsing ("1 fl oz milk", "2 fluid ounces water") ---------
+
+
+def test_parses_two_token_fl_oz_unit() -> None:
+    assert parse_quantity_string("1 fl oz milk") == {
+        "name": "milk",
+        "amount": 1.0,
+        "unit": "floz",
+    }
+
+
+def test_parses_two_token_fluid_ounces_unit() -> None:
+    assert parse_quantity_string("2 fluid ounces water") == {
+        "name": "water",
+        "amount": 2.0,
+        "unit": "floz",
+    }
+
+
+def test_parses_single_token_quart_unit() -> None:
+    # Regression guard: adding the two-token lookahead must not break the
+    # ordinary single-token unit path.
+    assert parse_quantity_string("1 qt strawberries") == {
+        "name": "strawberries",
+        "amount": 1.0,
+        "unit": "qt",
+    }
+
+
+def test_two_token_lookahead_does_not_consume_ordinary_two_word_names() -> None:
+    # "medium egg" is not a unit, so the two-token attempt must fail cleanly
+    # and fall through to the pre-existing one-token behavior (no unit found).
+    assert parse_quantity_string("1 medium egg") == {
+        "name": "medium egg",
+        "amount": 1.0,
+        "unit": None,
+    }
+    # A single-token food name with nothing after it must still work (no
+    # crash from the two-token regex requiring a second token).
+    assert parse_quantity_string("1 egg") == {
+        "name": "egg",
+        "amount": 1.0,
+        "unit": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "1 fl oz milk",
+        "2 fluid ounces water",
+        "1 qt strawberries",
+        "3 pints blueberries",
+    ],
+)
+def test_new_unit_cases_also_satisfy_the_no_dropped_food_word_invariant(raw: str) -> None:
+    """Extend the safety invariant coverage (see above) to the new units."""
+    parsed = parse_quantity_string(raw)
+    input_tokens = _alpha_tokens(raw)
+    output_tokens = _alpha_tokens(parsed["name"])
+
+    remaining = list(output_tokens)
+    removed = []
+    for tok in input_tokens:
+        if tok in remaining:
+            remaining.remove(tok)
+        else:
+            removed.append(tok)
+
+    # A two-token unit ("fl oz", "fluid ounces") removes up to two tokens;
+    # everything else removes at most one.
+    assert len(removed) <= 2, (
+        f"input={raw!r} name={parsed['name']!r} removed too many tokens: {removed!r}"
+    )
+    unit = parsed["unit"]
+    if removed:
+        assert unit is not None
+        assert canonical_unit(" ".join(removed)) == unit or canonical_unit(removed[0]) == unit, (
+            f"input={raw!r} name={parsed['name']!r} removed a non-unit token: {removed!r}"
+        )
+
+
+# --- "X to Y" word ranges (addendum): same midpoint convention as the dash
+# range, spelled with the word "to". -------------------------------------------
+
+
+def test_parses_word_range_with_fractions_as_midpoint() -> None:
+    assert parse_quantity_string("1/2 to 3/4 cup milk") == {
+        "name": "milk",
+        "amount": 0.625,
+        "unit": "cup",
+    }
+
+
+def test_parses_word_range_with_plain_integers() -> None:
+    assert parse_quantity_string("1 to 2 eggs") == {
+        "name": "eggs",
+        "amount": 1.5,
+        "unit": None,
+    }
+
+
+def test_parses_word_range_with_mixed_number_operand() -> None:
+    assert parse_quantity_string("1 1/2 to 3 cups flour") == {
+        "name": "flour",
+        "amount": 2.25,
+        "unit": "cup",
+    }
+
+
+def test_parses_word_range_case_insensitive() -> None:
+    assert parse_quantity_string("1 TO 2 eggs")["amount"] == 1.5
+    assert parse_quantity_string("1 To 2 eggs")["amount"] == 1.5
+
+
+def test_word_that_starts_with_to_is_not_a_range_guard() -> None:
+    # "1 tomato" must never be parsed as a range: "to" is not a standalone
+    # word here, it's the start of "tomato".
+    assert parse_quantity_string("1 tomato") == {
+        "name": "tomato",
+        "amount": 1.0,
+        "unit": None,
+    }
+    # Likewise "2 toasted bread slices" -- "toasted" starts with "to" but
+    # isn't the word "to", and there's no second amount after it either way.
+    assert parse_quantity_string("2 toasted bread slices") == {
+        "name": "toasted bread slices",
+        "amount": 2.0,
+        "unit": None,
+    }
+
+
+def test_to_followed_by_non_amount_is_not_a_range_guard() -> None:
+    # A literal " to " that is NOT followed by a second valid amount must not
+    # be consumed as a range -- it falls through to the ordinary single-
+    # amount parse, leaving "to ..." as part of the (ugly but harmless) name,
+    # matching pre-existing behavior for this pattern.
+    parsed = parse_quantity_string("1 to go containers")
+    assert parsed["amount"] == 1.0
+    assert parsed["unit"] is None
+    assert "go" in parsed["name"] and "containers" in parsed["name"]
+
+
+_WORD_RANGE_INVARIANT_CASES = [
+    "1/2 to 3/4 cup milk",
+    "1 to 2 eggs",
+    "1 1/2 to 3 cups flour",
+    "1 TO 2 eggs",
+]
+
+
+@pytest.mark.parametrize("raw", _WORD_RANGE_INVARIANT_CASES)
+def test_word_range_cases_also_satisfy_the_no_dropped_food_word_invariant(raw: str) -> None:
+    """Extend the safety invariant coverage to the new "to" word-range form.
+
+    The word "to" itself is consumed as part of the amount (it is never a
+    food word), so it's allowed to disappear from the name in addition to at
+    most one recognized unit token -- nothing else may ever be dropped.
+    """
+    parsed = parse_quantity_string(raw)
+    input_tokens = _alpha_tokens(raw)
+    output_tokens = _alpha_tokens(parsed["name"])
+
+    remaining = list(output_tokens)
+    removed = []
+    for tok in input_tokens:
+        if tok in remaining:
+            remaining.remove(tok)
+        else:
+            removed.append(tok)
+
+    assert removed.count("to") <= 1, (
+        f"input={raw!r} name={parsed['name']!r} removed 'to' more than once: {removed!r}"
+    )
+    non_to_removed = [tok for tok in removed if tok != "to"]
+    assert len(non_to_removed) <= 1, (
+        f"input={raw!r} name={parsed['name']!r} removed too many tokens: {removed!r}"
+    )
+    if non_to_removed:
+        unit = parsed["unit"]
+        assert unit is not None and canonical_unit(non_to_removed[0]) == unit, (
+            f"input={raw!r} name={parsed['name']!r} removed a non-unit token: {removed!r}"
+        )
+
+
+# --- Pack-size lines (addendum, optional): "1 (8 ounce) package cream cheese" -
+
+
+def test_parses_pack_size_single_word_unit() -> None:
+    assert parse_quantity_string("1 (8 ounce) package cream cheese") == {
+        "name": "cream cheese",
+        "amount": 8.0,
+        "unit": "oz",
+    }
+
+
+def test_parses_pack_size_multiplies_n_by_m() -> None:
+    assert parse_quantity_string("2 (14.5 ounce) cans diced tomatoes") == {
+        "name": "diced tomatoes",
+        "amount": 29.0,
+        "unit": "oz",
+    }
+
+
+def test_parses_pack_size_two_word_unit() -> None:
+    assert parse_quantity_string("1 (8 fl oz) bottle vanilla extract") == {
+        "name": "vanilla extract",
+        "amount": 8.0,
+        "unit": "floz",
+    }
+
+
+@pytest.mark.parametrize(
+    "container_word",
+    ["package", "packages", "pkg", "can", "cans", "jar", "jars", "box",
+     "boxes", "bag", "bags", "bottle", "bottles", "container", "containers"],
+)
+def test_pack_size_recognizes_every_container_word(container_word: str) -> None:
+    parsed = parse_quantity_string(f"1 (8 oz) {container_word} flour")
+    assert parsed == {"name": "flour", "amount": 8.0, "unit": "oz"}
+
+
+def test_pack_size_container_word_matching_is_case_insensitive() -> None:
+    # "Can"/"CAN"/"can" must all be recognized as the container word; the
+    # captured food name keeps its original casing (only the container-word
+    # match itself is case-insensitive).
+    assert parse_quantity_string("1 (8 oz) Can beans") == {
+        "name": "beans",
+        "amount": 8.0,
+        "unit": "oz",
+    }
+    assert parse_quantity_string("1 (8 OUNCE) PACKAGE Cream Cheese") == {
+        "name": "Cream Cheese",
+        "amount": 8.0,
+        "unit": "oz",
+    }
+
+
+def test_pack_size_container_word_is_never_treated_as_a_unit() -> None:
+    # No can/package pseudo-units: the container word must never surface as
+    # `unit`, and it must never be added to the general unit vocabulary.
+    from app.utils.quantity_parser import KNOWN_UNITS
+
+    parsed = parse_quantity_string("1 (8 ounce) package cream cheese")
+    assert parsed["unit"] == "oz"
+    assert "package" not in KNOWN_UNITS
+    assert "can" not in KNOWN_UNITS
+    assert "jar" not in KNOWN_UNITS
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # Parenthetical isn't a number -- not a pack size; ordinary parsing
+        # takes over (pre-existing behavior for stray parens, unaffected).
+        ("2 (large) eggs", {"name": "(large) eggs", "amount": 2.0, "unit": None}),
+        # Missing container word -- falls through; "(8 ounce)" isn't a
+        # recognized unit token either, so it stays in the name.
+        ("1 (8 ounce) flour", {"name": "(8 ounce) flour", "amount": 1.0, "unit": None}),
+        # Parenthetical unit unrecognized.
+        ("1 (8 bogus) package flour", {"name": "(8 bogus) package flour", "amount": 1.0, "unit": None}),
+        # No name left after the container word -- must not return an empty name.
+        ("1 (8 ounce) package", {"name": "(8 ounce) package", "amount": 1.0, "unit": None}),
+        # Ordinary line, no parens at all.
+        ("150 g chicken breast", {"name": "chicken breast", "amount": 150.0, "unit": "g"}),
+        ("1 tomato", {"name": "tomato", "amount": 1.0, "unit": None}),
+    ],
+)
+def test_pack_size_falls_through_unchanged_when_pattern_does_not_fully_match(
+    raw: str, expected: dict[str, object]
+) -> None:
+    """Any failure anywhere in the pack-size pattern must fall through to the
+    ordinary parser, byte-for-byte, rather than guess.
+    """
+    from app.utils.quantity_parser import _parse_pack_size
+
+    assert _parse_pack_size(raw) is None
+    assert parse_quantity_string(raw) == expected

@@ -387,6 +387,24 @@ were pre-registered before anyone saw a result.
 - **Latent bug found, not fixed**: the legacy path strips `"cooked"` via
   `DESCRIPTORS`, so `"1 cup cooked rice"` hits the *uncooked* density
   (~15% error). The strict-first ordering fixes it as a side effect.
+- **Remaining cooked-variant density leak class** (advisor A2-revision #2,
+  `app/utils/unit_converter.py`). The strict-first fix above only closes
+  the specific spelling given an explicit table key (`"cooked rice"`,
+  `"cooked white rice"`); any other "X, cooked" comma phrasing still falls
+  through to the legacy `normalize_ingredient` tier, which strips
+  `"cooked"` as a `DESCRIPTORS` entry and returns the *uncooked* density.
+  Exact probe strings that currently leak (verified 2026-07-19):
+  `_density("rice, cooked")` returns `0.85` (uncooked), not `0.67`
+  (cooked) — same root cause, comma form. Other "X, cooked" phrasings for
+  any ingredient with both a cooked and uncooked table entry are likely
+  affected the same way (none currently exist besides rice, so the blast
+  radius today is exactly this one probe). Fix shape, not yet decided:
+  either add explicit comma-form keys (`"rice, cooked"`) alongside the
+  space-form ones, or teach `_normalize_for_density_lookup` to also try a
+  comma-swapped variant (`"X, cooked"` -> `"cooked X"`) as an additional
+  strict-tier candidate before the legacy fallback — the latter is more
+  general but needs its own advisor sign-off since it changes the
+  precedence-tier contract, not just the tables.
 - **The imported Food.com corpus has no units** — 35,059 of 35,183
   ingredient rows are `unit: None`, so corpus-wide GROUNDED is structurally
   ~0% and 89% of rows land in the report's `no_unit` bucket. LLM unit
