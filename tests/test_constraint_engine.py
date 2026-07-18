@@ -4,11 +4,13 @@ from pydantic import ValidationError
 from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
+from app.rag.loaders import load_recipes
 from app.services.constraint_engine import (
     ALLERGEN_ALIASES,
     contains_allergen,
     derive_allergen_labels,
     validate_recipe,
+    violates_diet_type,
 )
 
 
@@ -698,3 +700,84 @@ def test_contains_allergen_soy_sauce_still_true_for_soy_after_wheat_addition() -
     recipe = _recipe(ingredients=["rice", "soy sauce"], allergens=[])
 
     assert contains_allergen(recipe, ["soy"])
+
+
+# --- diet_014 remediation: the diet-tag opt-out is removed --------------
+# (adjudication_20260718T090522Z.md). A self-asserted `diet_tags` entry can
+# no longer bypass the exclusion-vocabulary scan; only the deterministic
+# scan decides. These tests pin the DELETION of
+# `constraint_engine.violates_diet_type`'s former
+# `requested in recipe_tags -> return False` early-return.
+
+
+@pytest.mark.parametrize(
+    "diet_type,ingredient",
+    [
+        # r_004's literal shape: tagged "vegetarian", carries bare parmesan.
+        ("vegetarian", "parmesan"),
+        ("vegetarian", "bacon"),
+        ("vegan", "butter"),
+        ("gluten-free", "all-purpose flour"),
+        ("dairy-free", "buttermilk"),
+    ],
+)
+def test_diet_tag_never_loosens_a_dirty_recipe(diet_type: str, ingredient: str) -> None:
+    # Tagging a recipe with the requested diet used to short-circuit the
+    # scan entirely; a recipe tagged with the requested diet but carrying a
+    # disqualifying ingredient must still be REJECTED.
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[diet_type])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize(
+    "diet_type,ingredients",
+    [
+        ("vegetarian", ["rice", "spinach"]),
+        ("vegan", ["rice", "spinach"]),
+        ("gluten-free", ["rice", "spinach"]),
+        ("dairy-free", ["rice", "spinach"]),
+    ],
+)
+def test_diet_tag_plus_clean_ingredients_still_admits(diet_type: str, ingredients: list[str]) -> None:
+    # Tagged AND ingredient-clean must still be admitted -- the fix must not
+    # turn the tag into a second, redundant block on top of the scan.
+    recipe = _recipe(ingredients=ingredients, allergens=[], diet_tags=[diet_type])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
+
+    assert result.is_valid
+
+
+def test_diet_tag_cannot_bypass_fail_loud_for_unsupported_diet_type() -> None:
+    # A recipe self-tagged with an unsupported diet_type (e.g. "keto", which
+    # UserProfile.diet_type intake rejects, so this exercises
+    # violates_diet_type directly) must not let the tag suppress the
+    # fail-loud ValueError -- tags were never able to affect this branch,
+    # and the deleted opt-out must not have moved it.
+    recipe = _recipe(ingredients=["rice", "spinach"], allergens=[], diet_tags=["keto"])
+
+    with pytest.raises(ValueError):
+        violates_diet_type(recipe, "keto")
+
+
+def test_seed_r004_no_longer_has_bare_parmesan_and_passes_vegetarian() -> None:
+    # Regression pin for the diet_014 seed fix: r_004's parmesan row was
+    # replaced with an explicitly vegetarian cheese, closing the gap the
+    # tag opt-out had been hiding.
+    recipes = {recipe.recipe_id: recipe for recipe in load_recipes("data/processed/sample_recipes.jsonl")}
+    r_004 = recipes["r_004"]
+
+    assert not any(item.name.lower() == "parmesan" for item in r_004.ingredients)
+    assert violates_diet_type(r_004, "vegetarian") is False
+
+
+def test_seed_r010_almond_meal_passes_gluten_free() -> None:
+    # Regression pin for the diet_014 seed fix: r_010's "almond flour" row
+    # (which tripped the gluten-free scan's "flour" head-noun artifact once
+    # the tag opt-out no longer suppressed the scan) was renamed to "almond
+    # meal", a term with no gluten alias membership.
+    recipes = {recipe.recipe_id: recipe for recipe in load_recipes("data/processed/sample_recipes.jsonl")}
+    r_010 = recipes["r_010"]
+
+    assert violates_diet_type(r_010, "gluten-free") is False

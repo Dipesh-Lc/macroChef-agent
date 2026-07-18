@@ -6,7 +6,7 @@ from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.schemas.user import NO_RESTRICTION_DIET_TYPES
-from app.services.constraint_engine import contains_allergen
+from app.services.constraint_engine import contains_allergen, violates_diet_type
 from app.services.recipe_image_service import placeholder_image_url
 from app.utils.ingredient_normalizer import ingredient_matches
 
@@ -147,10 +147,22 @@ class RecipeValidationService:
             return contains_allergen(recipe, ["dairy"])
         if requested == "gluten-free":
             return contains_allergen(recipe, ["gluten"])
-        # vegetarian/vegan/high-protein check candidate.diet_tags -- a
-        # separate mechanism, out of scope for this fix.
+        # vegetarian/vegan: the tag requirement is a TIGHTENING, not the
+        # sole check -- diet_014 (adjudication_20260718T090522Z.md) proved a
+        # self-asserted tag can be falsified by the recipe's own ingredients
+        # (r_004, tagged "vegetarian", carried a bare `parmesan` row).
+        # constraint_engine.violates_diet_type's tag opt-out was removed for
+        # exactly this reason; this call site must not reintroduce the same
+        # gap by trusting the tag alone. A candidate must BOTH carry the
+        # requested tag AND pass the engine's deterministic exclusion-
+        # vocabulary scan -- either condition failing is a violation.
+        # high-protein has no engine-side exclusion vocabulary (it is a
+        # nutrition-content label, not a diet restriction the engine
+        # enforces), so it remains tag-only.
         tags = {tag.lower() for tag in candidate.diet_tags}
-        if requested in {"vegetarian", "vegan", "high-protein"}:
+        if requested in {"vegetarian", "vegan"}:
+            return requested not in tags or violates_diet_type(recipe, requested)
+        if requested == "high-protein":
             return requested not in tags
         # Fail closed: an unrecognized diet_type (e.g. "pescatarian",
         # "kosher", "halal", a typo) must never fall through to `return

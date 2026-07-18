@@ -182,10 +182,45 @@ def test_vegetarian_diet_tag_path_is_unchanged() -> None:
     assert not result.valid_candidates
 
 
-def test_vegan_diet_tag_path_is_unchanged() -> None:
+# --- diet_014 remediation: vegan/vegetarian are no longer tag-only ---------
+#
+# (adjudication_20260718T090522Z.md). `_violates_requested_diet` used to
+# admit a vegan/vegetarian-tagged candidate purely on tag membership. That
+# was proven unsafe (constraint_engine's diet_014 finding: a recipe can be
+# falsely tagged). The tag is now a TIGHTENING on top of
+# constraint_engine.violates_diet_type's deterministic scan, not the sole
+# check.
+
+
+def test_vegan_diet_tag_alone_no_longer_admits_a_dirty_recipe() -> None:
+    # THE FLIP: before this fix, a candidate tagged "vegan" was admitted on
+    # tag presence alone, even carrying the default chicken-breast fixture
+    # rows (not vegan). This same input must now be REJECTED -- the old
+    # `test_vegan_diet_tag_path_is_unchanged` assertion (`valid_candidates`
+    # truthy) is deliberately NOT preserved here; it pinned the hole this
+    # remediation closes.
     request = RecipeDiscoveryRequest(diet_type="vegan")
     result = RecipeValidationService().validate_candidates(
-        [_candidate(diet_tags=["vegan", "high-protein"])],
+        [_candidate(diet_tags=["vegan", "high-protein"])],  # default rows include chicken breast
+        request,
+    )
+
+    assert result.failed_candidates
+    assert not result.valid_candidates
+
+
+def test_vegan_diet_tag_plus_clean_ingredients_still_admits() -> None:
+    # Tagged AND ingredient-clean (tofu/rice/broccoli -- no meat, dairy, egg,
+    # or honey) must still be admitted: the tag requirement is a
+    # tightening, not a replacement, of the engine scan.
+    request = RecipeDiscoveryRequest(diet_type="vegan")
+    result = RecipeValidationService().validate_candidates(
+        [
+            _candidate(
+                ingredients=["150 g tofu", "150 g rice", "80 g broccoli"],
+                diet_tags=["vegan", "high-protein"],
+            )
+        ],
         request,
     )
 

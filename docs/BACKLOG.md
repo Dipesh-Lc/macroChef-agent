@@ -66,6 +66,57 @@ were pre-registered before anyone saw a result.
   ("gelatin — possible fish source, fail-closed") when label UX is next
   touched.
 
+### Diet-path lookalike over-blocks after the tag-opt-out removal (diet_014
+### remediation, `adjudication_20260718T090522Z.md`)
+
+- **What happened:** removing `constraint_engine.violates_diet_type`'s
+  diet-tag opt-out (the `requested in recipe_tags -> return False`
+  early-return, deleted engine-wide per the diet_014 remediation) means
+  every tagged recipe is now scanned unconditionally through
+  `contains_allergen`/`_recipe_contains_any_term`, which is a substring
+  match with no lookalike carve-out for these four terms. Four seed rows
+  are now over-blocked for diets they are actually compatible with:
+  1. `dairy-free` + term `milk` vs `ingredient:coconut milk` on r_007
+     ("Indian Chickpea Spinach Curry") — coconut milk contains no dairy
+     milk (FDA; also the `multi_018`/`multi_022` adjudicated-FP ruling for
+     the ALLERGY path on this exact row).
+  2. `dairy-free` + term `milk` vs `ingredient:coconut milk` on r_019 —
+     same artifact, different seed row.
+  3. `dairy-free` + term `butter` vs `ingredient:peanut butter` on r_002
+     ("Thai Peanut Tofu Stir Fry") — peanut butter contains no dairy
+     butter.
+  4. `gluten-free` + term `flour` vs an `almond flour`-class ingredient —
+     almond flour/meal contains no gluten (this is also why r_010's
+     `almond flour` row was renamed to `almond meal` in the diet_014
+     remediation itself, which sidesteps the artifact for that ONE row
+     only by removing the trigger substring; any OTHER corpus row still
+     literally named "almond flour" remains over-blocked for
+     `gluten-free`).
+  5. `vegan` + term `milk` vs `ingredient:coconut milk` on r_007 — same
+     coconut-milk artifact as (1), on the vegan path (vegan exclusions
+     include the full dairy alias set).
+- **Availability cost:** r_002, r_007, and r_019 are unservable under the
+  diets listed above even though they are genuinely compatible with them —
+  a real, measured regression in recommendation availability for
+  dairy-free/gluten-free/vegan users on those specific seeds, traded for
+  closing the diet_014 admit-side gap.
+- **Why not fixed now:** the obvious fix is a `_LOOKALIKE_EXCLUSIONS` entry
+  for `milk` -> `{"coconut milk"}`, `butter` -> `{"peanut butter"}`, and
+  `flour` -> `{"almond flour", "almond meal"}` (or similar), mirroring the
+  existing `chestnut`/`romano` pattern. **This is explicitly out of scope
+  for the diet_014 remediation** — `_LOOKALIKE_EXCLUSIONS` is consumed by
+  `_is_lookalike_match`, which `_recipe_contains_any_term` calls
+  unconditionally for BOTH the diet-exclusion path and `contains_allergen`
+  (the shared allergy-safety path). Any lookalike entry added for `milk`,
+  `butter`, or `flour` would also suppress those terms for a genuine milk,
+  dairy-butter, or wheat-flour ALLERGY, not just the diet paths that
+  motivate it here — a strictly higher-stakes change than the diet-only
+  over-block it would fix. That is its own FULL TREATMENT decision
+  (advisor ADVISE + REVIEW, matching `constraint_engine.py`'s tier) and
+  requires a fresh adversarial benchmark run before/after to confirm no
+  allergy-path admit regressions, not a same-pass addition to this
+  remediation.
+
 - **`ingredient_matches` raw-substring bug** — `app/utils/ingredient_normalizer.py`.
   `left in right or right in left` plus a fuzzy fallback. Consumers:
   `app/services/recipe_discovery_service.py` (`_allowed`/`_has_conflict`),
@@ -106,16 +157,24 @@ were pre-registered before anyone saw a result.
   OR mirror `constraint_engine.violates_diet_type`'s fail-loud `ValueError` — the
   engine's comment reads "Returning False would silently claim the recipe is safe...
   fail loudly instead". Engine defends; discovery-request path has neither defense.
-- **Vegetarian/vegan/high-protein remain tag-only in `_violates_requested_diet`** —
-  same file and function. Those three diets are decided by tag presence
-  (`requested not in tags`) rather than through the constraint engine. Explicitly
-  scoped out of commit 61e03f8. Advisor analysis: admit set is strict SUBSET of
-  engine's (`violates_diet_type` admits tagged OR ingredient-clean; service admits
-  tagged only), so it fails CLOSED for untagged recipes — over-blocking, the safe
-  direction. Residual risk is falsely-tagged recipes, pre-existing in `constraint_engine
-  .violates_diet_type`'s own tag opt-out (including LLM-authored `diet_tags` on
-  `ai_generated` candidates). Entry recorded here because commit message is not the
-  backlog: per CLAUDE.md, "refine later" means never unless written down.
+- **AMENDED 2026-07-18 (diet_014 remediation, `adjudication_20260718T090522Z.md`):
+  this entry's original subset justification is now FALSE and is kept only for
+  history.** `_violates_requested_diet` (`app/services/recipe_validation_service.py`)
+  no longer treats vegetarian/vegan as tag-only: `constraint_engine.violates_diet_type`'s
+  tag opt-out (the `requested in recipe_tags -> return False` early-return) was
+  deleted engine-wide (all four diet types: gluten-free, dairy-free, vegetarian,
+  vegan) because diet_014 proved it let a falsely-tagged recipe (r_004, tagged
+  "vegetarian", bare `parmesan` row) serve unfiltered. `_violates_requested_diet`
+  now requires vegetarian/vegan candidates to BOTH carry the tag AND pass
+  `constraint_engine.violates_diet_type`'s scan (`requested not in tags or
+  violates_diet_type(recipe, requested)`) — tag alone can no longer admit. The
+  admit-set-subset argument this entry originally made (service admits a strict
+  subset of the engine's tagged-OR-clean set) no longer describes the code: the
+  service now scans via the engine directly. **Residual scope, still tag-only and
+  still open: `high-protein`** — a nutrition-content label with no engine-side
+  exclusion vocabulary, so `requested not in tags` remains its only check
+  (unrelated failure mode: a candidate could be mis-tagged "high-protein" with no
+  deterministic macro check here; out of scope for diet_014).
 - **`/inventory/extract`: add auth + rate limit BEFORE enabling vision** —
   `app/api/routes_inventory.py`, `POST /inventory/extract`. The route currently
   takes NO session dependency and has NO rate limit. NOT a live hole: `MACROCHEF_ENABLE_VISION`

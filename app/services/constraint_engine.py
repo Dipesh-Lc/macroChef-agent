@@ -616,10 +616,18 @@ def violates_diet_type(recipe: Recipe, diet_type: str | None) -> bool:
         return False
 
     requested = diet_type.lower()
-    recipe_tags = {tag.lower() for tag in recipe.diet_tags}
-    if requested in recipe_tags:
-        return False
-
+    # recipe.diet_tags is deliberately NEVER read here. A prior version
+    # returned False whenever `requested` was among the recipe's own
+    # diet_tags, bypassing every exclusion-vocabulary scan below for tagged
+    # recipes. Adjudication proved this admits genuinely unsafe recipes:
+    # diet_014 (adjudication_20260718T090522Z.md) served r_004, a
+    # hand-authored seed tagged "vegetarian" that carries a bare `parmesan`
+    # row (traditional parmesan is rennet-set, not vegetarian under the
+    # fail-closed convention) -- the tag opt-out let it through without an
+    # ingredient scan. A self-asserted tag can neither ADMIT (loosen the
+    # scan) nor REJECT (this function only ever returns True from a scan
+    # match, so a tag was never able to reject on its own) a diet outcome;
+    # only the deterministic scans below decide.
     if requested == "gluten-free":
         # Same substring-matching path as contains_allergen, not recipe.allergens
         # (which derive_allergen_labels populates via exact-set membership and
