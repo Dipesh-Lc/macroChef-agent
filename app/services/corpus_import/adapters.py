@@ -291,9 +291,10 @@ class FoodComAdapter(DatasetAdapter):
 # --- Food.com scraped-archive adapter --------------------------------------
 #
 # Reads `data/scraped/foodcom/*.md` -- one Markdown file per corpus recipe,
-# produced by `scripts/scrape_recipe_pages.py` from the LIVE Food.com page
-# (see `app.services.recipe_scraping.markdown_doc.render_markdown` for the
-# exact writer). Each file carries a small YAML-style frontmatter block
+# produced by `scripts/scrape_recipe_pages.py` (a local-only, untracked
+# scraper; see docs/BACKLOG.md) from the LIVE Food.com page (see
+# `app.services.corpus_import.scraped_archive_format.render_markdown` for
+# the exact writer). Each file carries a small YAML-style frontmatter block
 # (foodcom_id, recipe_id, corpus, url, fetched_at_utc, http_status,
 # scraper_version) followed by a fenced ```json block holding the page's raw
 # schema.org Recipe JSON-LD -- the ONLY field this adapter reads ingredients/

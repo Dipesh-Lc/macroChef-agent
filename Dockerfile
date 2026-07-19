@@ -38,6 +38,23 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 
 COPY . .
 
+# Bake the Chroma vector index into the image at build time, from the
+# TRACKED base corpus only (data/processed/sample_recipes.jsonl +
+# imported_recipes.jsonl via RecipeIndexingService._collect_recipes,
+# include_user=False) -- never from whatever data/chroma happens to be on
+# the machine/runner doing the build (that directory is excluded from the
+# build context by .dockerignore, so a stale or empty local/CI copy can
+# never leak in silently). include_user=False is required here, not just
+# preferred: there is no live DATABASE_URL at build time, and baking one
+# user's saved recipes into a shared image would be wrong regardless.
+# rebuild_index_clean drops and recreates the collection first, so this is
+# always a full, reproducible rebuild from the code currently being built,
+# not an incremental patch. User-saved recipes are added at runtime via
+# upsert (recipe save flow / POST /library/reindex), which is unaffected by
+# this step. See docs/DEPLOY.md "Vector index and embeddings" and
+# docs/BACKLOG.md for the staleness fix this closes (2026-07-19).
+RUN python -c "from app.services.recipe_indexing_service import RecipeIndexingService; n = RecipeIndexingService().rebuild_index_clean(include_base=True, include_user=False); print(f'Baked {n} base recipes into the Chroma index at build time.'); assert n > 0, 'Chroma index build produced 0 recipes -- refusing to ship an empty index'"
+
 RUN chmod +x docker-entrypoint.sh
 
 # Only the Streamlit port is exposed/public. FastAPI/uvicorn binds

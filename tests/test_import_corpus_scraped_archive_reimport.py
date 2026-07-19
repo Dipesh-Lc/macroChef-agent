@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from app.config import get_settings
-from app.services.recipe_scraping.markdown_doc import render_markdown
+from app.services.corpus_import.scraped_archive_format import render_markdown
 from scripts import import_corpus
 
 _FOODCOM_ID = "50001"

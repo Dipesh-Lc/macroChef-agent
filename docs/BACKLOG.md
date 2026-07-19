@@ -737,6 +737,18 @@ were pre-registered before anyone saw a result.
 
 ## Deploy / infra
 
+- **Scraper/scraped-HTML untrack is forward-only, not a history rewrite
+  (2026-07-19).** `app/services/recipe_scraping/` (package),
+  `scripts/scrape_recipe_pages.py`, `tests/test_recipe_scraping.py`, and
+  `tests/fixtures/scrape/*.html` were `git rm --cached`-ed and added to
+  `.gitignore`/`.dockerignore` per the human's 2026-07-19 hobby-scope
+  licensing decision (see `docs/DEPLOY.md` "Scraped-archive licensing").
+  They remain on disk locally and, deliberately, **in git history prior to
+  this commit** — no `git filter-repo`/history rewrite was performed
+  without explicit human instruction, per CLAUDE.md's git safety rules. If
+  the scope ever requires actually purging these from history (e.g. a
+  public fork/mirror concern), that is a separate, explicit human-approved
+  action, not implied by the untrack itself.
 - **Auth decision — 2026-07-17, decided by the human (option 3A, "accept
   and document")**: anonymous signed per-browser sessions ship instead of
   the roadmap Phase 2 "magic-link/email" exit criterion — an accepted

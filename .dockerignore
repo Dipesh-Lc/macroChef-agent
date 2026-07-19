@@ -19,7 +19,11 @@ macrochef.db
 *.db
 *.sqlite
 *.sqlite3
-!data/chroma/**
+# The Chroma index is always rebuilt inside the image from the tracked
+# corpus (see Dockerfile RUN step) -- never copied in from whatever
+# data/chroma happens to exist on the machine/runner running `docker
+# build`, so a stale or empty local/CI copy can never leak into the image.
+data/chroma/
 data/raw/uploads
 data/library/*.jsonl
 frontend/.streamlit
