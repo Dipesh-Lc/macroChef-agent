@@ -30,9 +30,9 @@ data/scraped/*
 # Recipe-scraping pipeline: raw scraper code and its captured live-page test
 # fixtures stay local-only per the human's 2026-07-19 licensing decision
 # (hobby scope; only the prepared/processed corpus in data/processed/ is
-# committed). Still present on disk and in git history prior to this commit
-# -- this is a forward-only untrack, not a history rewrite. See
-# docs/BACKLOG.md.
+# committed). Still present on disk; removed from history via git
+# filter-branch (2026-07-19, before first push) and have never been
+# committed to the public repo. See docs/BACKLOG.md.
 app/services/recipe_scraping/
 scripts/scrape_recipe_pages.py
 tests/test_recipe_scraping.py

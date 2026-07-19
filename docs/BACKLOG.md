@@ -737,18 +737,34 @@ were pre-registered before anyone saw a result.
 
 ## Deploy / infra
 
-- **Scraper/scraped-HTML untrack is forward-only, not a history rewrite
-  (2026-07-19).** `app/services/recipe_scraping/` (package),
+- **Scraper/scraped-HTML untrack: history-rewritten 2026-07-19.** The
+  untrack was initially forward-only (2026-07-19 morning), but before any
+  push the human instructed that these files also be removed from history.
+  All 7 unpushed local commits were rewritten via `git filter-branch
+  --index-filter` to remove `app/services/recipe_scraping/` (package),
   `scripts/scrape_recipe_pages.py`, `tests/test_recipe_scraping.py`, and
-  `tests/fixtures/scrape/*.html` were `git rm --cached`-ed and added to
-  `.gitignore`/`.dockerignore` per the human's 2026-07-19 hobby-scope
-  licensing decision (see `docs/DEPLOY.md` "Scraped-archive licensing").
-  They remain on disk locally and, deliberately, **in git history prior to
-  this commit** — no `git filter-repo`/history rewrite was performed
-  without explicit human instruction, per CLAUDE.md's git safety rules. If
-  the scope ever requires actually purging these from history (e.g. a
-  public fork/mirror concern), that is a separate, explicit human-approved
-  action, not implied by the untrack itself.
+  `tests/fixtures/scrape/*.html` entirely. Since origin/main had never
+  received these commits, the scraper code and captured HTML pages have
+  therefore **never been published to the remote**. Files remain on disk,
+  gitignored, per the human's 2026-07-19 hobby-scope licensing decision
+  (see `docs/DEPLOY.md` "Scraped-archive licensing").
+
+  **Commit hash mapping** (old → new, all unpushed):
+  - 39a80c1 → 001453f (A1 follow-up: untrack scraper package + deploy prep)
+  - 5b62b55 → d93e07a (A1: rebuild corpus from scraped Food.com archive)
+  - ec58eed → 6482c6b (A2: widen deterministic unit-conversion surface)
+  - 14fca83 → 8bb4871 (C0: fix stale benchmark disclaimer)
+  - bb6980f → d67fec6 (Roadmap: status snapshot + forward plan)
+  - 1a42738 → 89c3cdd (Backlog: record deferred items)
+  - 6090a75 → 258af1a (Corpus enrichment: scraper)
+
+  **Note:** Timestamped evaluation artifacts under `data/evaluation/`
+  (e.g. `safety_benchmark_report_20260719T*.md`,
+  `adjudication_20260719T115815Z.md`) still cite old hash `ec58eed`, which
+  corresponds to rewritten commit `6482c6b` — those records are deliberately
+  left unmodified. The only tree difference between old `ec58eed` and new
+  `6482c6b` is the removal of the local-only scraper files, which do not
+  affect benchmark behavior.
 - **Auth decision — 2026-07-17, decided by the human (option 3A, "accept
   and document")**: anonymous signed per-browser sessions ship instead of
   the roadmap Phase 2 "magic-link/email" exit criterion — an accepted
