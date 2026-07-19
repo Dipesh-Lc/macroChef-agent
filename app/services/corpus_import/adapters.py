@@ -14,6 +14,8 @@ Chroma index metadata downstream.
 from __future__ import annotations
 
 import csv
+import html
+import json
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -284,3 +286,327 @@ class FoodComAdapter(DatasetAdapter):
             if column in raw and raw[column] not in (None, ""):
                 return raw[column]
         return None
+
+
+# --- Food.com scraped-archive adapter --------------------------------------
+#
+# Reads `data/scraped/foodcom/*.md` -- one Markdown file per corpus recipe,
+# produced by `scripts/scrape_recipe_pages.py` from the LIVE Food.com page
+# (see `app.services.recipe_scraping.markdown_doc.render_markdown` for the
+# exact writer). Each file carries a small YAML-style frontmatter block
+# (foodcom_id, recipe_id, corpus, url, fetched_at_utc, http_status,
+# scraper_version) followed by a fenced ```json block holding the page's raw
+# schema.org Recipe JSON-LD -- the ONLY field this adapter reads ingredients/
+# instructions/macros/servings from. The rendered Markdown body (Ingredients/
+# Instructions/Nutrition sections) is a human-readable duplicate of the same
+# JSON-LD and is never parsed here.
+#
+# This supersedes `FoodComAdapter` (the original Kaggle-CSV adapter) as the
+# import path for this dataset: the archive is a per-recipe re-scrape of the
+# SAME Food.com pages the CSV rows originally came from, with real
+# amount+unit ingredient lines (the CSV's RecipeIngredientParts/Quantities
+# columns had already stripped units -- see `_combine_ingredients`'s
+# docstring above) and a machine-checkable JSON-LD source instead of R's
+# character-vector serialization.
+
+
+class ScrapedArchiveIntegrityError(RuntimeError):
+    """Raised when an archive file fails a hard integrity check (bad HTTP
+    status, unrecognized scraper version, unparseable JSON-LD, or an id that
+    doesn't match what this adapter deterministically recomputes for it).
+
+    Deliberately a hard abort, not a skip: every one of these conditions
+    means the archive file cannot be trusted to represent what
+    `scripts/scrape_recipe_pages.py` actually fetched, and importing 4,235
+    files unattended must never silently drop or mis-id a recipe -- a
+    skipped file would just look like "one fewer survivor" in the run
+    report, indistinguishable from an ordinary validation rejection. See
+    `docs/` corpus-import task spec (A1) for the pre-registered list of
+    conditions this covers.
+    """
+
+
+_FRONTMATTER_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$")
+_JSON_FENCE_RE = re.compile(r"```json\r?\n(.*?)\r?\n```", re.DOTALL)
+_LEADING_INT_RE = re.compile(r"^\s*(\d+)")
+
+
+def _parse_scraped_frontmatter(text: str, path: Path) -> dict[str, str]:
+    """Parse the small, flat `key: value` frontmatter block written by
+    `render_markdown` (see its module docstring) -- deliberately a
+    hand-rolled parser rather than a PyYAML dependency, since the format is
+    fully known and fixed (no nesting, no multi-line values, no lists)."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ScrapedArchiveIntegrityError(f"{path}: missing opening '---' frontmatter delimiter")
+    frontmatter: dict[str, str] = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return frontmatter
+        match = _FRONTMATTER_LINE_RE.match(line)
+        if not match:
+            continue
+        key, value = match.group(1), match.group(2).strip()
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        frontmatter[key] = value
+    raise ScrapedArchiveIntegrityError(f"{path}: missing closing '---' frontmatter delimiter")
+
+
+def _extract_jsonld_block(text: str, path: Path) -> dict:
+    match = _JSON_FENCE_RE.search(text)
+    if not match:
+        raise ScrapedArchiveIntegrityError(f"{path}: no fenced ```json Raw JSON-LD block found")
+    try:
+        data = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ScrapedArchiveIntegrityError(f"{path}: unparseable JSON-LD block ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ScrapedArchiveIntegrityError(f"{path}: JSON-LD block did not decode to a JSON object")
+    return data
+
+
+def _expected_scraped_recipe_id(dataset_name: str, foodcom_id: str) -> str:
+    """Reproduces `pipeline._deterministic_import_id`'s seed for this
+    dataset (`f"{dataset_name}:{source_url}:{cuisine or ''}"` with
+    `source_url=str(foodcom_id)`, `cuisine=None`) -- this is the id every
+    archive file's own `recipe_id` frontmatter field must already equal,
+    since these ids were originally minted by the CSV-adapter import that
+    first produced the current corpus. Kept in lockstep with the pipeline's
+    formula deliberately; see `FoodComScrapedArchiveAdapter`'s docstring."""
+    seed = f"{dataset_name}:{foodcom_id}:"
+    return f"imp_{uuid5(NAMESPACE_URL, seed).hex[:16]}"
+
+
+def _read_scraped_archive_file(path: Path, dataset_name: str) -> dict:
+    text = path.read_text(encoding="utf-8")
+    frontmatter = _parse_scraped_frontmatter(text, path)
+
+    foodcom_id = frontmatter.get("foodcom_id")
+    if not foodcom_id:
+        raise ScrapedArchiveIntegrityError(f"{path}: missing foodcom_id in frontmatter")
+
+    http_status = frontmatter.get("http_status")
+    if http_status != "200":
+        raise ScrapedArchiveIntegrityError(
+            f"{path}: http_status={http_status!r} (expected \"200\") -- refusing to import "
+            "a non-ok scrape result"
+        )
+
+    scraper_version = frontmatter.get("scraper_version")
+    if scraper_version != "1":
+        raise ScrapedArchiveIntegrityError(
+            f"{path}: scraper_version={scraper_version!r} (expected \"1\") -- unrecognized "
+            "archive format, refusing to guess at its shape"
+        )
+
+    expected_id = _expected_scraped_recipe_id(dataset_name, foodcom_id)
+    actual_id = frontmatter.get("recipe_id")
+    if actual_id != expected_id:
+        raise ScrapedArchiveIntegrityError(
+            f"{path}: recipe_id mismatch for foodcom_id={foodcom_id!r} -- frontmatter says "
+            f"{actual_id!r}, adapter computes {expected_id!r}. This id is the recipe's stable "
+            "corpus identity; silently accepting either value risks minting a duplicate or "
+            "orphaning an existing quarantine/index record."
+        )
+
+    jsonld = _extract_jsonld_block(text, path)
+
+    return {
+        "foodcom_id": foodcom_id,
+        "recipe_id": actual_id,
+        "corpus": frontmatter.get("corpus"),
+        "jsonld": jsonld,
+        "source_path": str(path),
+    }
+
+
+def _clean_scraped_ingredient(raw: object) -> str:
+    """html.unescape + whitespace-collapse, and NOTHING else: the string
+    stored on the resulting `Ingredient` (via `parse_quantity_string`, run
+    automatically by `Ingredient`'s pydantic coercion) and the string fed to
+    `derive_allergen_labels` below must be byte-identical, including any
+    parenthetical descriptor text -- see `FoodComScrapedArchiveAdapter.
+    to_candidate`'s docstring for why that matters for allergen safety."""
+    return " ".join(html.unescape(str(raw)).split())
+
+
+def _extract_instruction_texts(steps: list) -> tuple[list[str], int]:
+    """Pulls step text out of a JSON-LD `recipeInstructions` list. Accepts
+    both `HowToStep` dicts (`{"@type": "HowToStep", "text": "..."}`) and
+    bare strings (schema.org allows either). A dict step with no `text` key
+    is skipped (not coerced to `""`, which `_clean_instructions` would then
+    also drop, but silently -- this way the drop is counted and visible).
+    Each surviving step is `html.unescape`d before `_clean_instructions`
+    ever sees it (advisor ruling, 2026-07-19 A1 revise round: the original
+    ruling covered instructions too, not just title/ingredients -- an
+    earlier pass of this adapter missed it). Returns
+    (texts, missing_text_count)."""
+    texts: list[str] = []
+    missing = 0
+    for step in steps:
+        if isinstance(step, dict):
+            text = step.get("text")
+            if text is None:
+                missing += 1
+                continue
+            texts.append(html.unescape(str(text)))
+        else:
+            texts.append(html.unescape(str(step)))
+    return texts, missing
+
+
+class FoodComScrapedArchiveAdapter(DatasetAdapter):
+    """Adapter for the scraped Food.com archive (`data/scraped/foodcom/*.md`)
+    -- see this module's "Food.com scraped-archive adapter" section comment
+    above for the file format this reads.
+
+    `dataset_name` is kept identical to `FoodComAdapter.dataset_name`
+    ("foodcom_recipes_and_reviews") ON PURPOSE, even though the actual
+    source is now the raw-page scrape rather than the original Kaggle CSV: a
+    comment, not a bug. `pipeline._deterministic_import_id` seeds its uuid5
+    on `f"{dataset_name}:{candidate.source_url}:{candidate.cuisine or ''}"`,
+    and this adapter sets `source_url=str(foodcom_id)` and `cuisine=None`
+    (matching what the CSV adapter effectively produced for these same
+    ids) -- so reusing this exact string reproduces the EXISTING `imp_...`
+    ids already in the corpus/quarantine sidecar/Chroma index, rather than
+    minting a fresh id namespace that would orphan every existing reference.
+    `read_raw` hard-verifies this per file (see
+    `_expected_scraped_recipe_id`): if a file's own `recipe_id` frontmatter
+    doesn't match what this formula recomputes, the import aborts rather
+    than silently drifting the id space.
+
+    Ingredient strings are used completely unmodified beyond
+    html.unescape + whitespace-collapse (`_clean_scraped_ingredient`) --
+    deliberately NOT the CSV adapter's amount/name-array zip
+    (`_combine_ingredients`), and deliberately keeping parenthetical
+    descriptor text (e.g. "butter (cut into pieces)") -- because the exact
+    same string that ends up stored on the `Ingredient` (via
+    `parse_quantity_string`, through pydantic's automatic coercion) is also
+    what's fed to `derive_allergen_labels` below. Cleaning the two
+    differently would open a gap where the stored ingredient name and the
+    name used for allergen derivation silently diverge -- the LLM never
+    enforces allergies and this adapter must not either, by parsing twice
+    inconsistently.
+    """
+
+    dataset_name = "foodcom_recipes_and_reviews"
+
+    def __init__(self) -> None:
+        # Per-run counters, read by the CLI/report after a run (same idiom
+        # as FoodComAdapter's narrative_steps_dropped etc. above).
+        self.instructions_missing_text_dropped = 0
+        self.recipes_with_missing_text_steps = 0
+        self.servings_no_leading_digit = 0
+        self.servings_coerced_from_zero = 0
+        self.narrative_steps_dropped = 0
+        self.recipes_with_narrative_steps_dropped = 0
+
+    def read_raw(self, source_path: Path) -> Iterator[dict]:
+        directory = Path(source_path)
+        # Sort numerically by foodcom_id (every archive filename is a bare
+        # numeric id, e.g. "100.md") so read order -- and therefore dedup's
+        # order-sensitive first-seen-wins behavior -- is deterministic and
+        # reproducible across re-runs, independent of filesystem iteration
+        # order. `*.md` already excludes manifest.jsonl/scrape.log (neither
+        # has a .md extension), so no separate skip is needed for those.
+        paths = sorted(directory.glob("*.md"), key=lambda p: (not p.stem.isdigit(), p.stem.zfill(20)))
+        for path in paths:
+            yield _read_scraped_archive_file(path, self.dataset_name)
+
+    def to_candidate(self, raw: dict) -> RecipeCandidate | None:
+        jsonld = raw["jsonld"]
+        foodcom_id = raw["foodcom_id"]
+
+        name = jsonld.get("name")
+        if not name or not str(name).strip():
+            return None
+        title = html.unescape(str(name)).strip()
+
+        raw_ingredients = jsonld.get("recipeIngredient")
+        ingredient_texts = [
+            _clean_scraped_ingredient(item) for item in raw_ingredients if isinstance(raw_ingredients, list)
+        ]
+
+        raw_steps = jsonld.get("recipeInstructions") or []
+        step_texts, missing_text = _extract_instruction_texts(raw_steps if isinstance(raw_steps, list) else [])
+        if missing_text:
+            self.instructions_missing_text_dropped += missing_text
+            self.recipes_with_missing_text_steps += 1
+        instructions, narrative_dropped = _clean_instructions(step_texts)
+        self.narrative_steps_dropped += narrative_dropped
+        if narrative_dropped:
+            self.recipes_with_narrative_steps_dropped += 1
+
+        nutrition = jsonld.get("nutrition") if isinstance(jsonld.get("nutrition"), dict) else {}
+
+        # NEVER read description, review, author, or keywords fields --
+        # none of those are safety- or nutrition-relevant, and pulling from
+        # them risks leaking review/author free text into the corpus.
+        ingredient_names = [parse_quantity_string(text)["name"] for text in ingredient_texts]
+        allergens = derive_allergen_labels(ingredient_names)
+
+        # meal_type via the SAME _map_category_to_meal_type used by the CSV
+        # adapter (advisor revise, 2026-07-19): meal_type is a Chroma `where`
+        # exact-match filter (recipe_retriever.build_metadata_filter), so
+        # leaving it None for the whole corpus would silently exclude every
+        # imported recipe from any meal_type-filtered retrieval -- a
+        # functional regression, not a cosmetic one. `recipeCategory` is a
+        # bare string in the archive (verified empirically); defensively
+        # also accept the schema.org-legal list form, same idiom as
+        # `_parse_servings` for `recipeYield`.
+        raw_category = jsonld.get("recipeCategory")
+        if isinstance(raw_category, list) and raw_category:
+            raw_category = raw_category[0]
+        meal_type = _map_category_to_meal_type(raw_category if isinstance(raw_category, str) else None)
+
+        return RecipeCandidate(
+            candidate_id=f"foodcom_scraped_{foodcom_id}",
+            title=title,
+            cuisine=None,
+            meal_type=meal_type,
+            ingredients=ingredient_texts,  # bare strings; Ingredient coerces via parse_quantity_string
+            instructions=instructions,
+            cook_time_min=_parse_iso8601_duration_minutes(jsonld.get("cookTime")),
+            servings=self._parse_servings(jsonld.get("recipeYield")),
+            calories=_safe_float(nutrition.get("calories")),
+            protein_g=_safe_float(nutrition.get("proteinContent")),
+            carbs_g=_safe_float(nutrition.get("carbohydrateContent")),
+            fat_g=_safe_float(nutrition.get("fatContent")),
+            fiber_g=_safe_float(nutrition.get("fiberContent")),
+            allergens=allergens,
+            source_type="curated",
+            source_name="Food.com (Recipes and Reviews)",
+            source_url=str(foodcom_id),
+        )
+
+    def _parse_servings(self, recipe_yield: object) -> int:
+        """Leading integer of `recipeYield` (e.g. "8 serving(s)" -> 8).
+
+        `RecipeCandidate.servings` defaults to 1 and the pre-existing CSV
+        adapter's `_safe_int(...) or 1` idiom would silently coerce EVERY
+        recipe to servings=1 here (`recipeYield` is a free-text string like
+        "8 serving(s)", never a bare int `_safe_int` can parse) -- this
+        adapter reads the leading digits explicitly instead. No leading
+        digit at all (e.g. a non-numeric yield string) falls back to 1 with
+        `servings_no_leading_digit` counted; a leading "0" is coerced to 1
+        with `servings_coerced_from_zero` counted (servings=0 would violate
+        `RecipeCandidate.servings`'s `ge=1` constraint and is not a
+        meaningful serving count regardless).
+        """
+        if isinstance(recipe_yield, str):
+            text = recipe_yield
+        elif isinstance(recipe_yield, list) and recipe_yield:
+            text = str(recipe_yield[0])
+        else:
+            text = ""
+
+        match = _LEADING_INT_RE.match(text)
+        if not match:
+            self.servings_no_leading_digit += 1
+            return 1
+        value = int(match.group(1))
+        if value == 0:
+            self.servings_coerced_from_zero += 1
+            return 1
+        return value

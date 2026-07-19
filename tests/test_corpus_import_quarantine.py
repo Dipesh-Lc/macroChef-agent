@@ -9,6 +9,9 @@ with tests/fixtures/corpus_sample.csv (owned by test_corpus_import.py).
 import json
 from pathlib import Path
 
+import pytest
+
+from app.services.corpus_import import pipeline as pipeline_module
 from app.services.corpus_import.adapters import FoodComAdapter
 from app.services.corpus_import.pipeline import CorpusImportPipeline
 
@@ -165,3 +168,51 @@ def test_instructions_ingredient_mismatch_is_quarantined_not_written(tmp_path: P
     assert quarantined[0]["quarantine_reason"]["check"] == "instructions_ingredient_integrity"
     assert quarantined[0]["quarantine_reason"]["mismatches"][0]["category"] == "meat"
     assert quarantined[0]["quarantine_reason"]["mismatches"][0]["tier"] == "A"
+
+
+# --- Atomic quarantine-sidecar write (pipeline._write_quarantine_jsonl) ----
+# A1 (2026-07-19): ported the temp-file + os.replace pattern from
+# scripts/quarantine_flagged_recipes.py's _write_quarantine_atomic so a
+# crash/interruption partway through writing the sidecar for a 4,235-file
+# archive re-import can never truncate the file already on disk.
+
+
+def test_interrupted_quarantine_write_never_truncates_existing_sidecar(tmp_path: Path, monkeypatch) -> None:
+    quarantine_path = tmp_path / "quarantined_recipes.jsonl"
+    original_contents = '{"recipe": {"recipe_id": "imp_existing"}}\n'
+    quarantine_path.write_text(original_contents, encoding="utf-8")
+
+    class BoomError(Exception):
+        pass
+
+    real_dumps = pipeline_module.json.dumps
+    calls = {"n": 0}
+
+    def flaky_dumps(obj, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:  # blow up partway through a multi-record write
+            raise BoomError("simulated crash mid-write")
+        return real_dumps(obj, **kwargs)
+
+    monkeypatch.setattr(pipeline_module.json, "dumps", flaky_dumps)
+
+    new_records = [{"recipe": {"recipe_id": "imp_a"}}, {"recipe": {"recipe_id": "imp_b"}}]
+    with pytest.raises(BoomError):
+        pipeline_module._write_quarantine_jsonl(quarantine_path, new_records)
+
+    # The real file at quarantine_path is untouched -- os.replace() only
+    # ever happens after the temp file is fully written.
+    assert quarantine_path.read_text(encoding="utf-8") == original_contents
+    # No leftover temp file either.
+    leftovers = list(tmp_path.glob(f".{quarantine_path.name}.*.tmp"))
+    assert leftovers == []
+
+
+def test_quarantine_write_succeeds_atomically_on_the_happy_path(tmp_path: Path) -> None:
+    quarantine_path = tmp_path / "quarantined_recipes.jsonl"
+    records = [{"recipe": {"recipe_id": "imp_a"}}, {"recipe": {"recipe_id": "imp_b"}}]
+    pipeline_module._write_quarantine_jsonl(quarantine_path, records)
+
+    written = [json.loads(line) for line in quarantine_path.read_text(encoding="utf-8").splitlines()]
+    assert written == records
+    assert list(tmp_path.glob(f".{quarantine_path.name}.*.tmp")) == []

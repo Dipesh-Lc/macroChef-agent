@@ -14,7 +14,10 @@ whatever source-provided macros survived the adapter, or None.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
@@ -80,6 +83,27 @@ class ImportReport:
     instructions_ingredient_mismatches_flagged: int = 0
     instructions_ingredient_mismatch_pairs: int = 0
     example_instructions_ingredient_mismatches: list[dict] = field(default_factory=list)
+    # The actual survivor Recipes and quarantine-sidecar records this run
+    # produced, always populated (not just under dry_run=True) -- lets a
+    # caller inspect/diff the full output before it's written (e.g. a
+    # migration script computing an id ledger against the prior corpus
+    # state), and is what `run(..., dry_run=True)` returns in place of
+    # writing to disk.
+    recipes: list[Recipe] = field(default_factory=list, repr=False)
+    quarantine_records: list[dict] = field(default_factory=list, repr=False)
+    # Per-id visibility into the three ways a candidate can be dropped
+    # BEFORE it ever reaches recipe construction (so it never gets a
+    # `recipe_id` minted) -- needed to build a full per-id reconciliation
+    # ledger across a re-import (e.g. the scraped-archive migration), not
+    # used by the simple CLI summary. Adapter-rejected ids come from
+    # whatever the adapter's raw dict exposes as "foodcom_id" (present for
+    # `FoodComScrapedArchiveAdapter`, absent/ignored for adapters that don't
+    # set it, e.g. the CSV adapter); validation/duplicate ids come from
+    # `candidate_id`, which is adapter-defined and only meaningful to a
+    # caller that knows that adapter's own candidate_id convention.
+    rejected_by_adapter_source_ids: list[str] = field(default_factory=list, repr=False)
+    failed_validation_candidate_ids: list[str] = field(default_factory=list, repr=False)
+    duplicate_candidate_ids: list[str] = field(default_factory=list, repr=False)
 
     def summary(self) -> str:
         return (
@@ -113,6 +137,19 @@ class CorpusImportPipeline:
         self.validation_service = validation_service or RecipeValidationService()
         self.dedup_service = dedup_service or RecipeDedupService()
 
+    def write(self, output_path: str | Path, quarantine_path: str | Path, report: ImportReport) -> None:
+        """Write a report produced by an earlier `run(..., dry_run=True)`
+        call to disk -- lets a caller inspect/gate on the full would-be
+        output (`report.recipes` / `report.quarantine_records`) before
+        committing it, WITHOUT re-running the whole read -> adapt ->
+        validate -> dedupe -> build pipeline a second time (which, for a
+        several-thousand-row source, would double the run's wall-clock cost
+        for no benefit -- the dry run already deterministically produced the
+        exact same output). Uses the same atomic writers as a normal
+        (non-dry-run) `run()` call."""
+        _write_jsonl(Path(output_path), report.recipes)
+        _write_quarantine_jsonl(Path(quarantine_path), report.quarantine_records)
+
     def run(
         self,
         source_path: str | Path,
@@ -121,7 +158,15 @@ class CorpusImportPipeline:
         limit: int | None = None,
         existing_recipes: list[Recipe] | None = None,
         quarantine_path: str | Path | None = None,
+        dry_run: bool = False,
     ) -> ImportReport:
+        """Run the full read -> adapt -> validate -> dedupe -> build -> tally
+        pipeline. With `dry_run=True`, every step runs identically (so
+        `report.recipes` / `report.quarantine_records` / all the counts are
+        fully populated) EXCEPT the final two disk writes are skipped -- lets
+        a caller inspect the full would-be output (e.g. to compute a diff
+        against the current on-disk corpus, or run pre-registered safety
+        halts) before ever touching `output_path`/`quarantine_path`."""
         report = ImportReport()
         candidates: list[RecipeCandidate] = []
 
@@ -132,6 +177,8 @@ class CorpusImportPipeline:
             candidate = self.adapter.to_candidate(raw)
             if candidate is None:
                 report.rejected_by_adapter += 1
+                if isinstance(raw, dict) and raw.get("foodcom_id"):
+                    report.rejected_by_adapter_source_ids.append(raw["foodcom_id"])
                 continue
             candidates.append(candidate)
 
@@ -141,6 +188,9 @@ class CorpusImportPipeline:
         # time via constraint_engine.contains_allergen, not at corpus-build time.
         validation_result = self.validation_service.validate_candidates(candidates)
         report.failed_validation = len(validation_result.failed_candidates)
+        report.failed_validation_candidate_ids = [
+            failure["candidate_id"] for failure in validation_result.failed_candidates if failure.get("candidate_id")
+        ]
 
         # Dedupe against the curated seeds (and within this batch); defaults to
         # load_recipes() (seed file only) when existing_recipes isn't supplied,
@@ -152,6 +202,9 @@ class CorpusImportPipeline:
             validation_result.valid_candidates, existing_recipes=seeds
         )
         report.duplicates = len(dedup_result.duplicate_candidates)
+        report.duplicate_candidate_ids = [
+            candidate.candidate_id for candidate in dedup_result.duplicate_candidates
+        ]
 
         recipes: list[Recipe] = []
         quarantine_records: list[dict] = []
@@ -222,20 +275,25 @@ class CorpusImportPipeline:
         # Sort for stable diffs; full rewrite (not append) keeps re-runs idempotent.
         recipes.sort(key=lambda recipe: recipe.recipe_id)
         report.survivors = len(recipes)
-        _write_jsonl(Path(output_path), recipes)
+        report.recipes = recipes
+        report.quarantine_records = quarantine_records
 
-        # Full rewrite of the quarantine sidecar too, for the same
-        # idempotency reason as the main corpus file above: re-running this
-        # pipeline against the same source must reproduce the exact same
-        # quarantine file, not accumulate duplicates across runs. This means
-        # a fresh pipeline run intentionally OVERWRITES whatever quarantine
-        # file already exists at this path (e.g. from an earlier one-time
-        # `scripts/quarantine_flagged_recipes.py` cleanup) with only what
-        # THIS run flagged -- see this task's report for the discussion.
         quarantine_output_path = (
             Path(quarantine_path) if quarantine_path is not None else Path(output_path).parent / "quarantined_recipes.jsonl"
         )
-        _write_quarantine_jsonl(quarantine_output_path, quarantine_records)
+        if not dry_run:
+            _write_jsonl(Path(output_path), recipes)
+
+            # Full rewrite of the quarantine sidecar too, for the same
+            # idempotency reason as the main corpus file above: re-running
+            # this pipeline against the same source must reproduce the exact
+            # same quarantine file, not accumulate duplicates across runs.
+            # This means a fresh pipeline run intentionally OVERWRITES
+            # whatever quarantine file already exists at this path (e.g.
+            # from an earlier one-time `scripts/quarantine_flagged_
+            # recipes.py` cleanup) with only what THIS run flagged -- see
+            # this task's report for the discussion.
+            _write_quarantine_jsonl(quarantine_output_path, quarantine_records)
 
         report.narrative_steps_dropped = getattr(self.adapter, "narrative_steps_dropped", 0)
         report.recipes_with_narrative_steps_dropped = getattr(
@@ -294,8 +352,23 @@ def _write_quarantine_jsonl(path: Path, records: list[dict]) -> None:
     # Always writes the file (even when `records` is empty), so a clean
     # import run leaves an empty-but-present quarantine sidecar rather than
     # a stale one from a previous run with a different source/limit.
+    #
+    # Written ATOMICALLY (temp file in the same directory, then os.replace)
+    # -- ports the pattern from scripts/quarantine_flagged_recipes.py's
+    # _write_quarantine_atomic. A run over 4,235 archive files takes real
+    # wall-clock time; an interruption (crash, kill, power loss) partway
+    # through an in-place write must never truncate the existing sidecar
+    # down to a partial/corrupt file. The real path is only ever swapped for
+    # a complete new file, never edited in place.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False))
-            handle.write("\n")
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False))
+                handle.write("\n")
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(tmp_name)
+        raise

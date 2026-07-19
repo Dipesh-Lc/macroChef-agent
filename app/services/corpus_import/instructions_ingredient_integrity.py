@@ -315,12 +315,20 @@ _KETJAP_SATISFIER_EXTRAS: frozenset[str] = frozenset(
 # vocabulary didn't catch. Deliberately NOT adding bare "rib"/"ribs" here
 # (too polysemous, e.g. "rib of celery") -- see `_MEAT_TRIGGER_ONLY_EXTRAS`
 # below for round 2's narrower, guarded way of catching it.
+# Revision round 3 (2026-07-19, A1 revise round): "bologna"/"bratwurst"/
+# "sirloin" added to keep this set in sync with `constraint_engine.
+# MEAT_ALIASES`'s own addition of the same three flesh words (diet-leak
+# audit exposed by the A1 scraped-archive re-import; see that module's
+# inline citations and docs/BACKLOG.md for the full per-term rationale).
+# `test_meat_terms_are_superset_of_meat_alias_flesh_words` is the tripwire
+# that caught the drift -- required, not optional.
 MEAT_FLESH_TERMS: frozenset[str] = frozenset(
     {
         "bacon", "beef", "chicken", "chorizo", "duck", "goose", "ham",
         "hot dog", "lamb", "pancetta", "pepperoni", "pork", "prosciutto",
         "rabbit", "sausage", "steak", "turkey", "veal",
         "sparerib", "spare rib",
+        "bologna", "bratwurst", "sirloin",
     }
 )
 # Satisfier-only extra (revision round 1, 2026-07-18 ruling): "roast"

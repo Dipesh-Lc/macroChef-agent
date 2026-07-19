@@ -3,16 +3,16 @@
 ![CI](https://github.com/Dipesh-Lc/macroChef-agent/actions/workflows/ci.yml/badge.svg)
 
 > **Hobby project — not medical advice.** MacroChef is an unpaid personal project,
-> not a certified nutrition or allergy-safety product. On its adversarial safety
-> benchmark (371 cases, see below) the deterministic judge flagged **17/259**
-> inherent-severity cases; written, advisor-reviewed per-case adjudication found
-> **0/259** of those to be true violations (the 17 are documented judge false
-> positives — see below). The release gate — zero adjudicated-true inherent
-> violations, with the raw judge-flagged count always published alongside it —
-> is met. This benchmark measures this system's behavior on its own recipe
-> corpus, not a real-world guarantee. **If you have a food allergy, you must
-> independently verify every ingredient before you eat anything this app
-> suggests.**
+> not a certified nutrition or allergy-safety product. Adversarial safety
+> benchmark (run 2026-07-19, `20260719T115815Z`): judge-flagged inherent
+> **16/259**; adjudicated-true inherent **0/259**
+> (`data/evaluation/adjudication_20260719T115815Z.md`). Precautionary:
+> judge-flagged **8/46**, adjudicated separately, non-gating. Judge false
+> positives remain in the raw judge-flagged number permanently; the judge has
+> never been modified. This benchmark measures this system's behavior on its
+> own recipe corpus, not a real-world guarantee. **If you have a food
+> allergy, you must independently verify every ingredient before you eat
+> anything this app suggests.**
 
 **A deterministic meal-planning and food-safety engine that uses an LLM only for the fuzzy parts.**
 
@@ -52,37 +52,39 @@ rank, never to include or exclude on safety grounds.
 
 > A reproducible adversarial safety benchmark (371 frozen cases, authored blind
 > to the implementation: allergy-contradiction traps, hidden allergens like
-> "satay sauce" → peanut, diet-type traps, and more) has been run against
-> MacroChef. On the 259 release-blocking (`inherent`-severity) cases, the
-> deterministic judge flagged **17/259**; written per-case adjudication
-> (advisor-reviewed, committed at
-> `data/evaluation/adjudication_20260718T123735Z.md`) found **0/259 true
-> violations** — the 17 flags are documented judge false positives (substring
-> artifacts, e.g. the word "dairy" inside the title "Dairy-Free Chicken Fajita
-> Plate" matching a dairy-allergy check even though the recipe contains no
-> dairy). Per the project's methodology, judge false positives stay in the raw
-> judge-flagged number permanently — the judge itself is never modified to
-> close the gap, and both numbers are always published together, never a bare
-> "0 violations" claim.
+> "satay sauce" → peanut, diet-type traps, and more) is run against MacroChef
+> with `python scripts/run_safety_benchmark.py`, k=3, deterministic. On the
+> current corpus (re-imported from a richer scraped-archive source, task A1,
+> 2026-07-19), the 259 release-blocking (`inherent`-severity) cases: the
+> deterministic judge flagged **16/259**; written per-case adjudication
+> (advisor-reviewed, `data/evaluation/adjudication_20260719T115815Z.md`)
+> found **0/259 true violations**. The re-verification found and cured one
+> genuine gap along the way (a Kellogg's Rice Krispies serving undetectable
+> by the pre-fix gluten vocabulary — see
+> `data/evaluation/adjudication_20260719T083748Z.md` and
+> `docs/BACKLOG.md`'s A1 entries for the full writeup) before landing at
+> 0/259 true on the cured corpus.
 >
 > **Methodology:** the 371 cases are frozen and were authored before any
 > adjudication; runs are executed k=3 with identical failing sets across runs
 > (deterministic); every judge flag receives a written, per-case,
 > advisor-reviewed adjudication (verdict `TRUE_VIOLATION` or `JUDGE_FP`, with
 > matched term + field, the served recipe's actual ingredients, and a citable
-> rule — ambiguity defaults to `TRUE_VIOLATION`). Run the benchmark with
-> `python scripts/run_safety_benchmark.py`; see the adjudication files under
+> rule — ambiguity defaults to `TRUE_VIOLATION`). Judge false positives stay
+> in the raw judge-flagged number permanently — the judge itself is never
+> modified to close the gap, and both numbers are always published together,
+> never a bare "0 violations" claim. See the adjudication files under
 > `data/evaluation/` (methodology convention set in
-> `adjudication_20260717T145539Z.md`, gate-deciding run in
-> `adjudication_20260718T123735Z.md`).
+> `adjudication_20260717T145539Z.md`; current gate-deciding run in
+> `adjudication_20260719T115815Z.md`).
 >
 > The benchmark also includes a **precautionary** (non-blocking, "may-contain"
-> class) partition of 46 cases — judge-flagged **10/46**, adjudicated true
-> **6/46** — disclosed but not release-blocking and tracked in
-> `docs/BACKLOG.md`; and a **safe-control** partition of 60 cases used to
-> measure over-blocking, which stayed at **0/60** (no safe recipe was
-> incorrectly rejected). The planned comparison vs. direct LLM prompting is
-> deferred (see `docs/BACKLOG.md`). See `docs/ROADMAP.md`.
+> class) partition of 46 cases — judge-flagged **8/46**, adjudicated
+> separately and non-gating — and a **safe-control** partition of 60 cases
+> used to measure over-blocking, which stayed at **0/60** (no safe recipe was
+> incorrectly rejected); see the dated adjudication files
+> for the current raw counts. The planned comparison vs. direct LLM prompting
+> is deferred (see `docs/BACKLOG.md`). See `docs/ROADMAP.md`.
 
 ---
 
@@ -403,28 +405,46 @@ pytest
 
 - Not medical advice.
 - Nutrition is grounded via USDA FoodData Central for the 25 hand-authored seed
-  recipes; imported-corpus rows remain ungrounded and unit-less (see below).
+  recipes; imported-corpus rows remain ungrounded (USDA linkage is a separate,
+  not-yet-run pipeline stage — see `app/services/grounding_job.py`) even
+  though most of them now carry real units (see below).
 - The bundled recipe dataset is intentionally small for an MVP.
 - Vision extraction is deterministic mock by default and is not a real image
   recognizer.
 - Allergy safety depends on accurate recipe metadata and accurate user input.
 - Optional hosted/local model integrations are isolated and disabled by default,
   and are never treated as allergy or nutrition authorities.
-- **Imported corpus quantities have no units.** All but 122 of the ~33,732
-  imported Food.com ingredient rows carry no unit (verified 2026-07-17) — the
-  upstream dataset strips them. Imported recipes are therefore
-  discovery/inspiration; quantity-aware features (pantry-match amounts,
-  shopping-list math, future cost estimation) are real only for the 25
-  hand-authored seed recipes and user-entered pantry items. Allergen detection
-  is name-based and unaffected.
+- **Imported corpus quantities now mostly carry real units.** As of the
+  2026-07-19 migration off the original Kaggle CSV onto a per-recipe scraped
+  archive of the original Food.com pages (`data/scraped/foodcom/*.md`,
+  `scripts/import_corpus.py --dataset foodcom_scraped_archive`), **76.14%**
+  of imported ingredient rows (30,780 of 40,423) carry a real amount + unit,
+  up from 0.35% (124 of ~35,183) under the old CSV import, which had
+  stripped units from its ingredient columns. Imported recipes are still not
+  USDA-nutrition-grounded (a separate step), but quantity-aware features
+  (pantry-match amounts, shopping-list math) are now real for most imported
+  rows, not just the 25 hand-authored seed recipes. Allergen detection is
+  name-based and was unaffected either way.
 - **Imported corpus size reflects a deterministic integrity quarantine.** The
-  imported Food.com corpus is now **2,884 rows**, down from its original size
-  after a deterministic instructions-vs-ingredients integrity check removed
-  ~1,354 rows whose cooking instructions referenced an ingredient (typically a
-  meat, fish, or other allergen-relevant item) absent from that recipe's own
-  ingredient list — a corruption class that could otherwise let an allergen
-  slip past the safety filter undetected. See
-  `docs/instructions_integrity_spec.md` for the check's rules and residual
+  imported Food.com corpus is **3,853 rows** (as of the 2026-07-19
+  scraped-archive migration + diet_023 cure round), with **379 rows**
+  quarantined by the same deterministic title/instructions-vs-ingredients
+  integrity checks plus a small number of individually-reviewed manual
+  quarantines — a corruption/gap class that could otherwise let an allergen
+  slip past the safety filter undetected. The migration re-ran both
+  automated checks against the richer original-page text for every one of
+  the ~4,235 recoverable recipes: 984 of the previously-quarantined 1,354
+  rows were released back to active (their defect was cured by the more
+  complete source text — see `docs/BACKLOG.md`'s A1 entries and
+  `data/processed/quarantine_history/manual_release_adjudication_*.md` for
+  the human-reviewed subset), and 5 previously-active rows were newly
+  quarantined by the automated checks. A further 6 rows were manually
+  quarantined during the diet_023 safety-benchmark cure (brand-cereal
+  ingredients like bare "corn flakes" that a vocabulary fix couldn't reach
+  automatically — see `docs/BACKLOG.md`). 3 ids from the original corpus
+  have no recoverable archive page (persistent HTTP 500) and were dropped
+  entirely. See
+  `docs/instructions_integrity_spec.md` for the checks' rules and residual
   known limitations.
 - **A small number of diet-type checks intentionally over-block, by design.**
   Recipes containing coconut milk or peanut butter are currently unservable

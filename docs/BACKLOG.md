@@ -250,18 +250,31 @@ were pre-registered before anyone saw a result.
   before the FULL TREATMENT engine change. Unmasked (not introduced) by
   the b9e663c quarantine; both cases were previously served safe recipes
   by retrieval luck.
-- **Pipeline-side quarantine sidecar can still clobber**:
-  `scripts/quarantine_flagged_recipes.py` was fixed (merge by recipe_id,
-  first-decision-wins, atomic write — commit 1a13108, tests in
-  `tests/test_quarantine_flagged_recipes.py`), but
-  `CorpusImportPipeline._write_quarantine_jsonl`
-  (`app/services/corpus_import/pipeline.py`) still overwrites
-  unconditionally at the same default path
-  `data/processed/quarantined_recipes.jsonl`. A future full corpus
-  re-import would clobber the 186-row audit record exactly the way the
-  script once took it 177 -> 9. Pre-decided: port the same
-  merge/atomic-write helpers (or extract them to a shared module) with
-  the same first-decision-wins semantics.
+- **Pipeline-side quarantine sidecar can still clobber** — **DONE
+  (atomicity) 2026-07-19, task A1.** `CorpusImportPipeline.
+  _write_quarantine_jsonl` (`app/services/corpus_import/pipeline.py`) now
+  writes atomically (temp file + `os.replace`, ported from
+  `scripts/quarantine_flagged_recipes.py`'s `_write_quarantine_atomic`;
+  test: `tests/test_corpus_import_quarantine.py::
+  test_interrupted_quarantine_write_never_truncates_existing_sidecar`).
+  Deliberately NOT a merge, unlike the original ask below: the A1 task
+  spec decided a scraped-archive re-import is a NEW GENERATION that makes
+  fresh decisions on every one of the 4,235 archive ids, full rewrite by
+  design (`pipeline.run(..., dry_run=True)` + `pipeline.write(...)`). The
+  original "silently overturn a human decision" risk this item was really
+  about is now closed by a STRONGER, more targeted mechanism instead:
+  `scripts/import_corpus.py`'s `_ADVISOR_APPROVED_MANUAL_RELEASES`
+  allowlist + hard halt — any `quarantine_reason.check ==
+  "manual_adjudication"` row that a re-import would release must be on
+  that advisor-reviewed allowlist (with cited cure evidence) or the run
+  halts before any corpus/sidecar write
+  (`tests/test_import_corpus_scraped_archive_reimport.py`). Original ask,
+  preserved for context: `scripts/quarantine_flagged_recipes.py` was fixed
+  (merge by recipe_id, first-decision-wins, atomic write — commit
+  1a13108, tests in `tests/test_quarantine_flagged_recipes.py`), but the
+  pipeline's own writer still overwrote unconditionally at the same
+  default path, and a future full corpus re-import would clobber the
+  186-row audit record exactly the way the script once took it 177 -> 9.
 - **Stale Chroma embeddings for quarantined recipe ids** — quarantined
   rows are filtered at `load_corpus()`/retrieval time, so they are
   unservable, but their embeddings still sit in the Chroma index.
@@ -356,17 +369,271 @@ were pre-registered before anyone saw a result.
   variation is stored, never merged silently — "most reliable source wins"
   resolution happens in the later structured-processing item, not at
   scrape time.
-- **Process the raw scraped archive into the structured corpus.** The
-  archive's JSON-LD `recipeIngredient` lines carry full amounts + units —
-  this is the unblock path for the 2026-07-17 "units decision" (option 2A
-  treated corpus recipes as discovery-only because units were missing).
-  Later item: parse the fenced `Raw JSON-LD` block of each
-  `data/scraped/foodcom/<id>.md` through
-  `app/utils/quantity_parser.py`, re-derive allergen labels from the
-  scraped ingredient names via `derive_allergen_labels`, and re-import.
-  Quarantined recipes (1,354, also scraped) may be recoverable from
-  original-page truth. FULL TREATMENT when it lands (touches allergen
-  derivation inputs).
+- **Process the raw scraped archive into the structured corpus** — **DONE
+  2026-07-19, task A1 (VERDICT: REVISE then landed).**
+  `FoodComScrapedArchiveAdapter` (`app/services/corpus_import/adapters.py`)
+  + `scripts/import_corpus.py --dataset foodcom_scraped_archive` re-import
+  ran for real against all 4,235 archive files, wrote the new corpus
+  (`imported_recipes.jsonl`: 3,857 active; `quarantined_recipes.jsonl`:
+  375 quarantined), reindexed Chroma, and re-ran the full test suite +
+  demo eval + safety benchmark. Unit coverage 0.35% -> 76.14% (the whole
+  point of the migration). Full ledger/released/manual-adjudication
+  artifacts under `data/processed/` and `data/processed/quarantine_history/`
+  (run `20260719T070200Z`). See the two new entries directly below for the
+  methodology gaps this exposed (both explicitly NOT fixed here —
+  `constraint_engine.py`/`ingredient_normalizer.py` were off-limits for
+  this task). Quarantined recipes WERE recoverable from original-page
+  truth: 982/1,354 released (72.53%; non-gating for this source upgrade
+  per advisor adjudication 2026-07-19 — 811 have the flagged term
+  literally present in the scraped rows, 159 pass a fresh recheck via
+  category vocabulary, 12 are pre-existing manual-adjudication
+  quarantines individually cured at source, see
+  `data/processed/quarantine_history/manual_release_adjudication_20260719T070200Z.md`).
+
+- **FULL TREATMENT: `derive_allergen_labels` natural-language robustness**
+  (`app/services/constraint_engine.py:553`). Found during task A1's
+  scraped-archive re-import (run `20260719T061239Z`, corpus generation
+  before the run that actually landed). `derive_allergen_labels` does
+  EXACT-SET membership matching (via `normalize_ingredient`, tuned for
+  the old Kaggle CSV's already-atomized single-word ingredient names) —
+  it fails to reduce natural-language ingredient text with trailing
+  descriptor clauses or "X or Y" alternatives (e.g. `"2 eggs, slightly
+  beaten"`, `"1/2 cup butter or 1/2 cup margarine, softened"`) to a
+  canonical allergen term, unlike `contains_allergen`
+  (`_recipe_contains_any_term`), which substring-matches ingredient names
+  directly and is what the live app actually gates on
+  (`app/graph/nodes.py` -> `constraint_engine.validate_recipe`).
+  **Measured impact** (allergen diff report,
+  `data/processed/allergen_diff_report_20260719T061239Z.jsonl`): 1,351
+  genuine label losses (recipes where the normalized form of a lost label
+  is ALSO absent from the new label set — i.e. not just a benign
+  synonym-collapse artifact) / 402 recipes gained >=1 label / **0
+  serve-time gaps** (every one of the 4,314 individually lost (recipe,
+  label) pairs was tested directly against `contains_allergen` itself and
+  it still correctly detects the allergen on every case — verified,
+  gate added: `serve_time_coverage_gaps_<ts>.jsonl`, always empty so
+  far). So this is a METADATA-completeness gap, not a live safety gap —
+  but it does mean `recipe.allergens` (Chroma index metadata, UI display,
+  the title/instructions-integrity checks' OR-arm) under-covers reality.
+  **Proposed approach** (not designed in detail, FULL TREATMENT/advisor
+  consult required before implementing): make `derive_allergen_labels`
+  substring-consistent with `contains_allergen`'s own matching semantics,
+  so it can never regress relative to today — i.e. whatever it derives
+  from a "clean" old-style ingredient name must still derive from any
+  messier superset string containing that name as a substring.
+  **Pre-registered acceptance criteria** (fixed now, before any attempt):
+  (1) for every recipe, new derived labels must be a SUPERSET of the
+  labels it derives today (`new_labels ⊇ old_labels`) — verified by
+  reindexing the corpus and running a fresh allergen diff, zero
+  regressions allowed; (2) **zero changes to `contains_allergen` itself**
+  — the live safety gate is already correct and must not be touched by
+  this fix. **Warning, load-bearing:** never use Chroma `allergens`
+  metadata (or any `contains_*`-named Chroma filter) as an EXCLUSION
+  filter at retrieval time until this derivation is substring-consistent
+  — today it can under-report, and an exclusion filter built on an
+  under-reporting label set would admit unsafe rows. (No such filter
+  exists in the codebase today — confirmed by search during A1 — this is
+  a standing constraint on any FUTURE retrieval-filter design, not a
+  currently-live gap.)
+
+- **FULL TREATMENT, safety-adjacent: `MEAT_ALIASES`/diet-type exclusion
+  vocabulary gaps exposed by the A1 re-import** — **DONE 2026-07-19,
+  advisor-designed fix (A1 revise round 3).** `MEAT_ALIASES` gained
+  `bologna`/`bratwurst`/`sirloin`; `_WHEAT` gained `pretzel`/`pita`/`orzo`;
+  `_DAIRY` gained `yoghurt`/`curd`; `_SOY` gained `bean curd`;
+  `_LOOKALIKE_EXCLUSIONS` gained `"pita": {"pitaya"}` and
+  `"curd": {"bean curd", "bean curds"}` (all in
+  `app/services/constraint_engine.py`, each with an inline citation
+  comment). Audit-side factual correction:
+  `scripts/audit_diet_leaks.py`'s `GROUND_TRUTH_FALSE_POSITIVE_PAIRS`
+  carves out the bean-curd false positive so the audit agrees with
+  production's lookalike exclusion (tests:
+  `tests/test_diet_leak_audit.py`'s three audit-side tests). Also required
+  a sync fix in `app/services/corpus_import/instructions_ingredient_
+  integrity.py`'s independent `MEAT_FLESH_TERMS` set (caught by its own
+  pre-existing structural-invariant test,
+  `test_meat_terms_are_superset_of_meat_alias_flesh_words`) — releasing 2
+  previously-quarantined recipes (`imp_52b1a3c4f7d55036` "Sirloin Steak
+  with Mustard and Cream Dressing", `imp_e93630834e7b547c` "Whiskey Sour
+  Sirloin") whose own `sirloin` ingredient row is now correctly recognized
+  as satisfying their instructions' meat mention. `tests/
+  test_diet_leak_audit.py` is green (0/0/0/0 leaks across all four diet
+  types) with NO threshold or fixture changes, per vocabulary completeness
+  alone. Measured per-term over-block delta (previously-passing recipes
+  each NEW term alone now excludes, out of the pre-change passing-baseline
+  count — the "gelatin 61/4052" discipline standard): vegetarian —
+  `bratwurst` 1/2217, `bologna` 1/2217, `sirloin` 3/2217; vegan —
+  `bratwurst` 1/444, `bologna` 0/444, `sirloin` 1/444; gluten-free —
+  `pretzel` 4/2031, `pita` 1/2031, `orzo` 1/2031; dairy allergy —
+  `yoghurt` 1/1490, `curd` 0/1490; soy allergy — `bean curd` 0/3992 (the
+  one recipe that gained a `soy` label in the allergen-diff metadata,
+  "Pork in Hot Peanut Sauce", already matched `soy` under the OLD
+  vocabulary via a different ingredient — this addition only fixed
+  metadata completeness for it, not live coverage). Two sub-items spun out
+  as their OWN backlog entries directly below (pepperoni-suppression
+  rejected fix, systematic ground-truth-vs-production vocabulary diff).
+  Original finding, preserved for context (`app/services/
+  constraint_engine.py` — the vegetarian/vegan meat-term table and the
+  gluten-free exclusion terms). Found via
+  `tests/test_diet_leak_audit.py` going from 0 leaks (all 4 diet types,
+  old corpus) to 1/388 (vegan), 3/2046 (vegetarian), 6/1822
+  (gluten-free), 3/1323 (dairy-free) leaks on the new corpus written by
+  run `20260719T070200Z`. **Root cause, confirmed case-by-case, NOT an
+  adapter defect:** every leaking recipe's flagged ingredient term is
+  either (a) a self-titled ingredient that was MISSING from the old
+  truncated CSV row and is now present for the first time in the richer
+  scraped text (the same b9e663c "Curried Peanut Shrimp" corpus-integrity
+  pattern, e.g. "Gegrillte Bratwurst" — `imp_fe23c711b0af5a59` — had NO
+  `bratwurst` ingredient row at all in the CSV import; "Hobo Buns" —
+  `imp_ad294739f1dc5281` — had no `bologna` row), or (b) a previously
+  QUARANTINED recipe now RELEASED (9 of the 13 leak instances) whose
+  pre-existing meat/gluten term was always there but never reached this
+  audit (`test_diet_leak_audit.py` only scans the ACTIVE corpus file,
+  never the quarantine sidecar). One case
+  (`imp_dca6caf744fc5cc8`, "Country Fried Chicken Steak with Cream
+  Gravy") is subtler: its `sirloin tip roast` ingredient never mattered
+  for vegetarian either before or after (production `MEAT_ALIASES` does
+  not contain "sirloin"/"roast" at all) — in the OLD corpus this recipe
+  was accidentally excluded from the "passed filter" bucket by an
+  UNRELATED false-positive collision (`pepper` bidirectional-substring-
+  matches `pepperoni`), which the new archive's richer descriptor text
+  (`"pepper, Freshly Ground"`) broke, removing the accidental exclusion
+  and exposing that `MEAT_ALIASES` never actually caught the real meat
+  term in the first place. **Specific missing terms confirmed by this
+  investigation:** `bratwurst`, `bologna`, `sirloin` (as a bare
+  vegetarian-exclusion term; `MEAT_ALIASES` needs this the same way
+  `GROUND_TRUTH_MEAT_POULTRY_FISH` in `scripts/audit_diet_leaks.py`
+  already has it), plus whatever the gluten-free (pretzel-adjacent) and
+  dairy-free leak cases resolve to on a full per-case audit (not yet
+  done at the time — resolved above, all four diet types fixed in the
+  same pass since every leak traced back to the same handful of missing
+  terms). **Was not fixed at the time this was first written** (an
+  earlier A1 pass): `constraint_engine.py` was off-limits for that pass
+  specifically; the advisor then put it explicitly in scope for the fix
+  recorded at the top of this entry.
+- **FULL TREATMENT (rejected fix, recorded per advisor instruction,
+  2026-07-19): pepperoni-suppression failure mode.** A pepper/pepperoni
+  `_LOOKALIKE_EXCLUSIONS` entry was considered and REJECTED to close the
+  "Country Fried Chicken Steak with Cream Gravy" masking case (see above)
+  — the mechanism doesn't support it. `_is_lookalike_match` strips a
+  lookalike PHRASE out of the recipe's own ingredient term, then
+  rechecks; a hypothetical `_LOOKALIKE_EXCLUSIONS["pepperoni"] =
+  {"pepper"}` entry, applied to a GENUINE "pepperoni" ingredient, strips
+  "pepper" out of "pepperoni" leaving "oni" — "pepperoni" is obviously not
+  a substring of "oni", so the match is (wrongly) suppressed and a real
+  pepperoni ingredient would silently stop counting as meat. Verified by
+  direct trace, not just reasoning about the code. **Sibling case, same
+  root shape** (bidirectional substring + a short word that is itself a
+  prefix of a longer excluded compound term): a bare `"soy"` ingredient
+  row reverse-matches `_WHEAT`'s `"soy sauce"` entry (`"soy" in "soy
+  sauce"`), so `contains_allergen(recipe, ["gluten"])` and
+  `violates_diet_type(recipe, "gluten-free")` both wrongly return `True`
+  for a plain soybean ingredient — verified directly, 2026-07-19. Zero
+  corpus rows today (`grep`-verified: no bare `"soy"` ingredient name in
+  either `imported_recipes.jsonl` or `quarantined_recipes.jsonl`) — pure
+  future-import defense, not a currently measured over-block. **This
+  sirloin-masking history** (the original discovery vehicle): the
+  pepper/pepperoni collision is exactly what accidentally excluded
+  `imp_dca6caf744fc5cc8` from the OLD corpus's vegetarian "passed filter"
+  bucket for the wrong reason, masking that `MEAT_ALIASES` never actually
+  recognized "sirloin" (now fixed separately, see above). **Pre-registered
+  acceptance criteria for any future real fix** (design not started):
+  bare `"pepper"` must still pass vegetarian; `"pepperoni"` alone must
+  still fail; a recipe with BOTH `"pepperoni"` and bare `"pepper"` rows
+  must still fail; any measured over-block delta from the fix (recipes
+  that flip from failing to passing) must be reported before landing, per
+  the "gelatin 61/4052" discipline standard used elsewhere in this file.
+  **PRIORITY PROMOTED TO LOAD-BEARING, 2026-07-19 (diet_023 cure round):**
+  this is no longer a one-off nuisance. The SAME reverse-arm shape just
+  blocked THREE MORE legitimate compound-term additions in the diet_023
+  TRUE_VIOLATION cure (`adjudication_20260719T083748Z.md`,
+  `app/services/constraint_engine.py` `ALLERGEN_ALIASES["gluten"]`):
+  "rice krispies", "grape-nuts", and "corn flakes" could NOT be added as
+  their own compound terms (the reverse arm would match every bare
+  "rice"/"grape"/"corn" ingredient row corpus-wide) — bare "krispies" and
+  "cereal" were added instead, which is a narrower, less precise fix than
+  a proper direction-aware mechanism would allow, AND it left a
+  known gap: brand-cereal rows that name neither word (e.g. a bare "corn
+  flakes" ingredient with no "cereal" suffix) still need one-off manual
+  quarantine (see the "corn flakes"/"Post Toasties" manual-quarantine
+  entry, this same round, for the 6 ids affected) instead of a systematic
+  vocabulary fix. A real direction-aware mechanism (matching a compound
+  term as a substring of an ingredient name, but NEVER matching a bare
+  ingredient word as a substring of the compound term -- i.e. one-way,
+  not `_is_lookalike_match`'s current two-way-then-suppress shape) would
+  let "rice krispies"/"grape-nuts"/"corn flakes"/"pepperoni" all be added
+  precisely, closing this entire recurring class in one FULL TREATMENT
+  pass instead of one narrowly-scoped workaround per incident.
+  **Advisor label-amplification note (2026-07-19):** separately,
+  `derive_allergen_labels`'s composed `"nuts"` key (`_TREE_NUT | _PEANUT`
+  union) means a re-derived `"nuts"` label additionally blocks peanut
+  recipes for tree-nut-allergic users and vice versa -- this is
+  pre-existing, fail-closed (peanut and tree-nut allergies are
+  clinically distinct but frequently co-occur, and the union errs toward
+  over-blocking rather than a missed allergen), and NOT a defect; noted
+  here only so a future reader of the over-block deltas in this file
+  doesn't mistake the `"nuts"` amplification for a new bug.
+- **Manual quarantine: brand-cereal rows the "krispies"/"cereal"
+  vocabulary addition can't reach** (2026-07-19, diet_023 cure round,
+  advisor-directed enumeration). Searched the corpus for brand-cereal
+  ingredient names containing NEITHER "cereal" NOR "krispies" (the two
+  words just added to `ALLERGEN_ALIASES["gluten"]`) -- found 16 rows
+  across 16 recipes: 15 bare `"corn flakes"` rows + 1 `"Post Toasties"`
+  row (both real Kellogg's/Post brand cereals with barley-malt flavoring,
+  same hazard class as Rice Krispies). Of those 16, 10 already
+  independently fail the gluten filter (they also contain a genuine
+  wheat ingredient elsewhere in the same recipe, e.g. flour) -- no action
+  needed. **6 would otherwise pass the gluten filter** and were
+  MANUAL-QUARANTINED this round (`scripts/quarantine_flagged_recipes.py
+  --recipe-ids ... --reason "brand cereal with barley-malt risk, pending
+  direction-aware lookalike mechanism"`, `check: manual_adjudication` --
+  automatically protected against a silent future release by the
+  existing `_ADVISOR_APPROVED_MANUAL_RELEASES` allowlist/halt mechanism
+  in `scripts/import_corpus.py`): `imp_334d0269ca805812` "Low-Fat Sour
+  Cream Potato Casserole", `imp_a4f05171ac765162` "Mallow Sweet Potato
+  Balls", `imp_e572df5dc6c557f3` "Flake-and-Fruit Squares",
+  `imp_ec6ac830c040514a` "Hash Browns Casserole", `imp_f5b6e366f427503c`
+  "Baked Breakfast Potatoes", `imp_f90fc172136c51f8` "Carrot Casserole".
+  Superseded once the direction-aware lookalike mechanism above lands
+  (would let "corn flakes"/"post toasties" be added as precise compound
+  terms and these could be released on the same cure basis as the
+  Kellogg's Rice Krispies rows already fixed automatically).
+- **FULL TREATMENT: systematic ground-truth-vs-production vocabulary
+  diff** (2026-07-19, spun out of the MEAT_ALIASES gap fix above).
+  `scripts/audit_diet_leaks.py`'s independent `GROUND_TRUTH_MEAT_POULTRY_
+  FISH`/`GROUND_TRUTH_DAIRY`/`GROUND_TRUTH_GLUTEN` sets are the
+  hand-authored ground truth the diet-leak audit checks production
+  against — every gap found so far (bratwurst, bologna, sirloin,
+  pretzel/pita/orzo, yoghurt/curd) was found reactively, one leaking
+  recipe at a time. This entry runs that diff systematically, once
+  (2026-07-19), against the FULL composed production vocabulary (not just
+  the bare base set — e.g. checked against `_VEGETARIAN_EXCLUDED_TERMS`
+  for meat, so fish/shellfish terms already covered via that union don't
+  false-flag as gaps; checked against `ALLERGEN_ALIASES["gluten"]`, not
+  bare `_WHEAT`, so `barley`/`malt`/`rye` don't false-flag either) and
+  additionally filters out anything already substring-covered by an
+  existing term (so `"chicken broth"` doesn't false-flag when bare
+  `"chicken"` already catches it). **gluten: zero real gaps** — every
+  `GROUND_TRUTH_GLUTEN` term is already covered by production, once
+  substring/composition is accounted for. **meat (vegetarian/vegan),
+  17 real gaps, with corpus-hit counts** (2026-07-19, current 4,232-recipe
+  corpus): `brisket` 9, `salami` 5, `squid` 3, `anchovies` 1, `capon` 1,
+  `grouper` 2, `mackerel` 2, `meatball` 1, `tilapia` 1, and 8 terms with 0
+  corpus hits today (`calamari`, `caviar`, `octopus`, `perch`, `pheasant`,
+  `quail`, `tripe`, `venison`) — future-import defense only. **dairy
+  (allergy + dairy-free), 9 real gaps**: `gruyere` 8 (already a known,
+  separately-tracked item — see "Gorgonzola / gruyere PDO-verification
+  cluster" at the top of this file, a DIFFERENT question (vegetarian
+  rennet status) than this one (dairy-allergen status) — gruyere is
+  unambiguously dairy regardless of rennet source, so this gap is real
+  independent of that cluster's outcome), `provolone` 7, `creme fraiche`
+  5, `custard` 5, `brie` 3, `kefir` 2, `camembert` 1, `queso` 1, `gouda` 0.
+  **Not fixed here** — this is the diff + measurement only, per the
+  advisor's instruction to file it as its own FULL TREATMENT item, not to
+  land it inline with the reactive fixes above. The `brisket`/`salami`/
+  `gruyere`/`provolone` entries in particular have real, nonzero corpus
+  presence and should be prioritized over the 0-hit terms when this is
+  next picked up.
 - **Wikibooks import** — human already cleared CC BY-SA 4.0 for
   measurement; split-licensing decided (MIT code, CC BY-SA data).
   **Pre-registered import bands, set before the number existed: >=750
@@ -435,16 +702,24 @@ were pre-registered before anyone saw a result.
   change that alters any report NUMBER (two `_KNOWN_RESIDUALS` lines were
   text-synced by hand, verified byte-identical).
 - **Retrieval-eval baseline regeneration after the 2026-07-18 mass
-  quarantine.** The pinned baseline in `docs/phase-1.5-closeout.md` §4
-  (67 queries, 4,263-recipe corpus, all-MiniLM-L6-v2) predates the
-  instructions-integrity quarantine (imported corpus 4,045 → 2,889;
-  human decision Option A, 2026-07-18). Re-run
-  `python scripts/evaluate_retrieval.py` against the reduced corpus and
-  re-pin; until then the old numbers stand as the Phase 3.5 fine-tune
-  baseline for the corpus they measured, annotated non-comparable.
-  Ground-truth relevant-set sizes will shrink (some pinned queries may
-  need re-verification against the non-vacuity rule). Not
-  ship-blocking.
+  quarantine** — **DONE (re-run, not re-pinned) 2026-07-19, task A1.**
+  `python scripts/evaluate_retrieval.py` re-run twice: once against the
+  A1 corpus before the diet_023 cure (3,859 active + 25 seeds = 3,884
+  indexed, `data/evaluation/retrieval_eval_baseline_20260719T104216Z.md`)
+  and once more against the FINAL cured corpus (3,853 active + 25 seeds =
+  3,878 indexed, after the diet_023 cure's 6-recipe manual quarantine,
+  `data/evaluation/retrieval_eval_baseline_20260719T120000Z.md` —
+  superseding both the original `docs/phase-1.5-closeout.md` §4 baseline
+  and the intermediate `104216Z` file), both marked non-comparable to
+  prior baselines per this item's own original ask. **GATE RESULT: PASS**
+  on both runs (both gated categories — dish, dietary — win on
+  semantic-vs-keyword MRR+Recall@10 and stay within hybrid tolerance).
+  Not formally "re-pinned" into `docs/phase-1.5-closeout.md` itself (that
+  document's own pin is a separate, deliberate editorial action out of
+  this task's scope) — the dated artifact file (`120000Z`, the final one)
+  is the re-baseline of
+  record until/unless a human re-pins it there. Not ship-blocking, as
+  originally noted.
 - **Instructions-integrity residual classes (post-Option-A).** Recorded
   in `data/evaluation/instructions_integrity_report_20260718T001212Z.md`
   ("Residuals") and the two sample-audit records: (1) named

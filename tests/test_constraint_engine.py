@@ -781,3 +781,106 @@ def test_seed_r010_almond_meal_passes_gluten_free() -> None:
     r_010 = recipes["r_010"]
 
     assert violates_diet_type(r_010, "gluten-free") is False
+
+
+# --- A1 revise round, 2026-07-19: vocabulary additions from the diet-leak
+# audit exposed by the scraped-archive re-import (bratwurst/bologna/sirloin
+# in MEAT_ALIASES; pretzel/pita/orzo in _WHEAT; yoghurt/curd in _DAIRY;
+# bean curd in _SOY; two new _LOOKALIKE_EXCLUSIONS entries). See
+# docs/BACKLOG.md and constraint_engine.py's inline citations for the full
+# rationale per term.
+
+
+@pytest.mark.parametrize("ingredient", ["bratwursts", "sirloin tip roast", "bologna"])
+def test_new_meat_terms_violate_vegetarian_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_bratwurst_also_violates_vegan_diet() -> None:
+    recipe = _recipe(ingredients=["rice", "bratwursts"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegan"))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["pretzels, finely crushed", "pita pockets", "orzo"])
+def test_new_wheat_terms_block_gluten_and_wheat_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["gluten"])
+    assert contains_allergen(recipe, ["wheat"])
+
+
+@pytest.mark.parametrize("ingredient", ["natural yoghurt", "lemon curd"])
+def test_new_dairy_terms_block_dairy_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["dairy"])
+
+
+def test_bean_curd_is_soy_not_dairy() -> None:
+    # Lookalike guard: "bean curd" (tofu) must never trip the new "curd"
+    # dairy term, must never violate dairy-free, and must correctly trip
+    # the SOY allergen (added to _SOY directly, not via lookalike).
+    recipe = _recipe(ingredients=["rice", "bean curd"], allergens=[], diet_tags=[])
+
+    assert not contains_allergen(recipe, ["dairy"])
+    assert not contains_allergen(recipe, ["milk"])
+    assert violates_diet_type(recipe, "dairy-free") is False
+    assert contains_allergen(recipe, ["soy"])
+
+
+def test_real_dairy_curd_cannot_hide_behind_bean_curd_in_same_recipe() -> None:
+    # Same hiding-attack shape as the chestnut/romano regression tests: a
+    # recipe with BOTH the lookalike ("bean curd") AND a real dairy curd
+    # ingredient ("cheese curds") must still be blocked for a dairy
+    # allergy, on the strength of the real ingredient's own term.
+    recipe = _recipe(ingredients=["bean curd", "cheese curds", "rice"], allergens=[])
+
+    assert contains_allergen(recipe, ["dairy"])
+
+
+def test_pitaya_not_blocked_by_gluten_allergy() -> None:
+    # Lookalike guard: "pitaya" (dragon fruit) is genuinely gluten-free and
+    # botanically unrelated to "pita" (wheat flatbread).
+    recipe = _recipe(ingredients=["rice", "pitaya"], allergens=[])
+
+    assert not contains_allergen(recipe, ["gluten"])
+
+
+def test_pita_bread_still_blocked_by_gluten_allergy() -> None:
+    recipe = _recipe(ingredients=["rice", "pita bread"], allergens=[])
+
+    assert contains_allergen(recipe, ["gluten"])
+
+
+# --- Closing-verdict cure, 2026-07-19: diet_023 TRUE_VIOLATION
+# (adjudication_20260719T083748Z.md) -- Kellogg's Rice Krispies contain
+# barley malt flavoring, undetectable by the pre-cure gluten vocabulary.
+
+
+@pytest.mark.parametrize("ingredient", ["Rice Krispies", "Post Grape-Nuts cereal"])
+def test_krispies_and_cereal_block_gluten_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["gluten"])
+
+
+def test_rice_krispies_does_not_block_wheat_allergy() -> None:
+    # "krispies"/"cereal" are barley-malt vehicles, added only at the
+    # "gluten" ALLERGEN_ALIASES composition -- NOT in _WHEAT itself, so a
+    # wheat-specific allergy must stay unaffected.
+    recipe = _recipe(ingredients=["rice", "Rice Krispies"], allergens=[])
+
+    assert not contains_allergen(recipe, ["wheat"])
+
+
+def test_enchilada_sauce_blocks_peanut_allergy() -> None:
+    recipe = _recipe(ingredients=["rice", "enchilada sauce (Mild or Hot, your choice)"], allergens=[])
+
+    assert contains_allergen(recipe, ["peanut"])
+    assert contains_allergen(recipe, ["peanuts"])
+    assert contains_allergen(recipe, ["nuts"])

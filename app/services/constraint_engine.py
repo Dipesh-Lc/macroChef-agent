@@ -56,6 +56,23 @@ _DAIRY = frozenset(
         "romano",
         "whey",
         "yogurt",
+        # "yoghurt": the British spelling. The extra "h" defeats a substring
+        # match against the existing "yogurt" entry ("yoghurt" does not
+        # contain "yogurt" as a substring, nor the reverse) -- a bare
+        # "natural yoghurt" corpus row was servable to milk-allergic users
+        # before this addition, added 2026-07-19 per the diet-leak audit
+        # exposed by the A1 scraped-archive re-import (task A1 revise
+        # round; docs/BACKLOG.md).
+        "yoghurt",
+        # "curd": coagulated milk, by definition -- cheese curds, "curds and
+        # whey" (the nursery-rhyme name for the same dairy product). A bare
+        # "lemon curd" corpus row standardly contains butter/eggs/sugar and
+        # no other _DAIRY term catches it (added 2026-07-19, A1 revise
+        # round). NOTE the lookalike exclusion below: "bean curd" is tofu
+        # (soy, not dairy) and is explicitly carved out via
+        # _LOOKALIKE_EXCLUSIONS["curd"] so this addition doesn't
+        # over-block soy-based bean-curd rows.
+        "curd",
     }
 )
 
@@ -66,8 +83,26 @@ _DAIRY = frozenset(
 # Annex II, point 5 ("Peanuts") -- those two statute/regulation cites are
 # verified. "sate"/"saté" are accepted alternate transliterations of the
 # same dish/sauce.
+# "enchilada sauce" (added 2026-07-19, adjudication_20260719T083748Z.md
+# hidden_017 TRUE_VIOLATION): FARE (Food Allergy Research & Education)'s
+# peanut page lists "Enchilada sauce" verbatim under "Other Possible
+# Sources of Peanut" (some commercial/restaurant formulations use peanut
+# butter or ground peanuts as a thickener/flavor enhancer). Same
+# compound-term precedent as "satay sauce" above -- pinned as the full
+# phrase, not a bare "sauce"/"enchilada" head noun, because every corpus
+# occurrence already contains the full phrase and a bare head noun would
+# needlessly widen the substring-matching surface (the corpus has zero
+# bare "sauce"/"enchilada" rows today, verified, so this addition cannot
+# reverse-match an unrelated ingredient). Measured over-block (2026-07-19,
+# advisor-ratified, active-corpus scope): 3 recipes (imp_4599012eed065be5
+# "Mexican-Style Meatballs in Red Sauce", imp_c304eff4b40c579d "Linda's
+# Enchiladas", imp_ed2c12ce84705381 "Mexicali Casserole"). A 4th matching
+# row lives on imp_4632c3cbea4957e4 "Turkey Enchiladas", which is already
+# quarantined for an unrelated reason and therefore doesn't count in the
+# active-corpus over-block figure.
 _PEANUT = frozenset(
     {
+        "enchilada sauce",
         "groundnut",
         "peanut",
         "peanut butter",
@@ -217,10 +252,34 @@ _WHEAT = frozenset(
         "tortilla",
         "wheat",
         "whole wheat pasta",
+        # "pretzel": a wheat-flour baked good by definition. Same bare-row
+        # logic as the existing soy-sauce entry above -- a labeled
+        # gluten-free pretzel is the specialty exception, not something a
+        # bare corpus row can prove, so ambiguity resolves toward blocking.
+        # Added 2026-07-19 (A1 revise round, diet-leak audit).
+        "pretzel",
+        # "pita": wheat flatbread. Lookalike carve-out: "pitaya" (dragon
+        # fruit, gluten-free) is unrelated and explicitly excluded via
+        # _LOOKALIKE_EXCLUSIONS["pita"] below -- same water-chestnut-class
+        # mechanism as "chestnut"/"romano". Added 2026-07-19.
+        "pita",
+        # "orzo": a durum-wheat pasta shaped like a large grain of rice --
+        # same logic as "pretzel" above (no bare-row way to prove a
+        # gluten-free variant). Added 2026-07-19.
+        "orzo",
     }
 )
 
-_SOY = frozenset({"edamame", "miso", "soy", "soy sauce", "soya", "tamari", "tempeh", "tofu"})
+# "bean curd" (added 2026-07-19, A1 revise round): coagulated soymilk --
+# tofu's other common English name. Soy is a FALCPA major allergen (21
+# U.S.C. Sec. 321(qq)); a corpus row like "cube bean curd" contains neither
+# "soy" nor "tofu" as a substring, so it leaked past a soy allergy before
+# this addition (found via the A1 diet-leak audit re-run). See
+# _LOOKALIKE_EXCLUSIONS["curd"] for the corresponding dairy-side carve-out
+# (bean curd must never trip the *dairy* "curd" term).
+_SOY = frozenset(
+    {"bean curd", "edamame", "miso", "soy", "soy sauce", "soya", "tamari", "tempeh", "tofu"}
+)
 
 _EGG = frozenset({"egg", "egg whites", "eggs", "mayonnaise"})
 
@@ -325,8 +384,47 @@ ALLERGEN_ALIASES = {
     "nuts": _TREE_NUT | _PEANUT,
     "wheat": _WHEAT,
     # "malt" (barley-derived) and "rye" are gluten but not wheat -- added
-    # only at this composition, not in _WHEAT.
-    "gluten": _WHEAT | {"barley", "malt", "rye"},
+    # only at this composition, not in _WHEAT. Same for "krispies"/"cereal"
+    # below (added 2026-07-19, adjudication_20260719T083748Z.md diet_023
+    # TRUE_VIOLATION cure): these are barley-MALT vehicles, not wheat, so
+    # they belong here and NOT in _WHEAT -- contains_allergen(..., ["wheat"])
+    # must stay False for a bare "Rice Krispies" row.
+    #   - "krispies": Kellogg's Rice Krispies contain barley malt
+    #     flavoring; Kellogg's own allergen statement does not list them as
+    #     gluten-free. Direction-safe both ways (neither "krispies" nor any
+    #     corpus ingredient name is a substring of the other in an unsafe
+    #     way -- verified against the corpus). 8 corpus rows (measured
+    #     2026-07-19: imp_13f9f264a2c6580d, imp_17037d8dc09459ea,
+    #     imp_172df04faf2a5c66, imp_25b9fc8ec0fb58cb, imp_3b30b27e5edf5d3f,
+    #     imp_4b6bf6dc2acb55d5, imp_4e58b5fba51c5fcc, imp_cc173d9e8fc451c9
+    #     -- the last is the adjudicated diet_023 case, "Fresh Cherry
+    #     Tart").
+    #   - "cereal": closes the in-corpus brand-cereal class direction-safely
+    #     -- same "can't prove the labeled-GF/non-malted variant from a
+    #     bare row" logic as the existing soy-sauce entry in _WHEAT above.
+    #     Real corpus rows this closes: "Post Grape-Nuts cereal" (wheat +
+    #     malted barley flour, Post's own ingredient list), "corn flakes
+    #     cereal" / "crispy rice cereal" / "puffed corn cereal" (Kellogg's
+    #     malt flavoring, same as Rice Krispies), "Cheerios toasted oat
+    #     cereal" (General Mills' US Cheerios ARE independently
+    #     gluten-free-labeled -- this is a KNOWN, ACCEPTED over-block for
+    #     that specific brand: Health Canada does not accept General
+    #     Mills' gluten-free process validation for the Canadian market,
+    #     and Cheerios formulations sold outside the US/Canada are not
+    #     uniformly GF-labeled either, so a bare, unqualified "cereal" row
+    #     still cannot affirmatively prove the specific GF-labeled US
+    #     product -- the same fail-closed logic as the soy-sauce entry,
+    #     applied consistently even though this one case is a real,
+    #     measured, known false positive). Measured over-block: 28 corpus
+    #     rows total (2026-07-19), gluten-constrained users only -- see
+    #     docs/BACKLOG.md for the full row-by-row list. Do NOT add
+    #     "rice krispies"/"grape-nuts"/"corn flakes" as their own compound
+    #     terms: bidirectional substring matching's reverse arm would then
+    #     match bare "rice"/"grape"/"corn" ingredient rows corpus-wide --
+    #     see docs/BACKLOG.md's "direction-aware lookalike" entry (promoted
+    #     to load-bearing priority by this finding) for the mechanism that
+    #     would be needed to add those safely.
+    "gluten": _WHEAT | {"barley", "malt", "rye", "krispies", "cereal"},
     "soy": _SOY,
     "soya": _SOY,
     "egg": _EGG,
@@ -368,6 +466,19 @@ ALLERGEN_ALIASES = {
 MEAT_ALIASES = {
     "bacon",
     "beef",
+    # "bologna": a USDA-standardized cured meat sausage (9 CFR 319.140).
+    # Verified no collision with "bolognese" -- "bologna" is NOT a
+    # substring of "bolognese" (b-o-l-o-g-n-E vs b-o-l-o-g-n-A, differ at
+    # the 7th letter), so this addition cannot false-flag a meat sauce name
+    # via substring match. Added 2026-07-19 (A1 revise round, diet-leak
+    # audit -- "Hobo Buns" carried a bare "bologna" row with no meat
+    # ingredient the vegetarian scan previously recognized).
+    "bologna",
+    # "bratwurst": a German pork/veal sausage by definition. The existing
+    # bare "sausage" entry below does NOT catch it -- "sausage" is not a
+    # substring of "bratwursts" (the corpus's plural spelling). Added
+    # 2026-07-19 (A1 revise round, diet-leak audit).
+    "bratwurst",
     "chicken",
     "chorizo",
     "duck",
@@ -401,6 +512,14 @@ MEAT_ALIASES = {
     "prosciutto",
     "rabbit",
     "sausage",
+    # "sirloin": a beef primal cut. The reverse-arm substring match this
+    # enables (a longer recipe term like "sirloin tip roast" containing the
+    # shorter "sirloin") is meat either way, so it's fail-closed correct,
+    # not an over-block risk. Added 2026-07-19 (A1 revise round, diet-leak
+    # audit -- this term was previously masked for one corpus recipe by an
+    # unrelated "pepper"/"pepperoni" substring collision; see
+    # docs/BACKLOG.md for that separate, NOT-fixed-here finding).
+    "sirloin",
     "steak",
     "suet",
     "turkey",
@@ -499,6 +618,24 @@ _LOOKALIKE_EXCLUSIONS: dict[str, frozenset[str]] = {
     # contains cheese or rennet -- same lookalike shape as water chestnut,
     # wired identically.
     "romano": frozenset({"romano bean", "romano beans"}),
+    # "pita" (added to _WHEAT 2026-07-19, A1 revise round) vs "pitaya":
+    # dragon fruit (Hylocereus/Selenicereus spp.), a cactus fruit, is
+    # genuinely gluten-free and botanically unrelated to wheat flatbread --
+    # same water-chestnut-class false positive. Corpus grep (2026-07-19,
+    # 4,232-recipe post-migration corpus): 0 "pitaya" rows -- pure
+    # future-import defense today, not a measured fix.
+    "pita": frozenset({"pitaya"}),
+    # "curd" (added to _DAIRY 2026-07-19, A1 revise round) vs "bean curd":
+    # bean curd is tofu (coagulated SOYMILK), never dairy -- water-chestnut
+    # class. CRITICAL: this is evaluated per (term, recipe_term) pair (see
+    # this table's module-level docstring above), so a recipe carrying BOTH
+    # "bean curd" and a real dairy curd ingredient (e.g. "cheese curds")
+    # still correctly flags dairy -- only the "bean curd" ingredient's own
+    # match is suppressed, never the whole recipe. See the "hiding
+    # regression" test in test_constraint_engine.py and the audit-side
+    # correction in scripts/audit_diet_leaks.py (GROUND_TRUTH_FALSE_
+    # POSITIVE_PAIRS), which must never disagree with this entry.
+    "curd": frozenset({"bean curd", "bean curds"}),
 }
 
 

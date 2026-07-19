@@ -317,8 +317,8 @@ st.warning(
     "**Hobby project — not medical advice.** MacroChef is an unpaid personal "
     "project, not a certified nutrition or allergy-safety product. On its "
     "259-case adversarial allergy benchmark, the deterministic judge flagged "
-    "17/259 recipes; written per-case adjudication found 0 true violations "
-    "(all 17 were judge false positives). "
+    "16/259 recipes; written per-case adjudication found 0 true violations "
+    "(all 16 were judge false positives). "
     "**If you have a food allergy, you must independently verify every "
     "ingredient before you eat anything suggested here.**"
 )

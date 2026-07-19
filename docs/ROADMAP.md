@@ -15,8 +15,8 @@ Merged plan from both reviews (Opus 4.8 + Fable 5). Organized so each phase has 
 | 0 — Credibility | **DONE**, except README screenshots + demo GIF (human gate). |
 | 1 — Trust & grounding | **DONE** (USDA grounding, quantity model, 4,238-recipe corpus, re-derived macros). Residuals tracked in `docs/BACKLOG.md` "Corpus / nutrition". |
 | 2 — Benchmark + deploy | **Live** at ca-macrochef (italynorth) since 2026-07-18. MacroChef arm run, gate met: judge-flagged 17/259, adjudicated-true **0/259** inherent. NOT done: external-model comparison arms (money gate ~$12), analytics verified firing in prod (human), soft launch (human), screenshots (human). |
-| 3 — Differentiation | Not started. Was blocked by the unitless corpus — **unblocked 2026-07-18** by the Food.com raw-page scrape (4,238 pages archived to `data/scraped/foodcom/` with verbatim amount+unit ingredient lines + full JSON-LD). |
-| 4 — Retention/planning | Not started. Same blocker, same unblock. |
+| 3 — Differentiation | Not started (B1–B5 not yet begun). Was blocked by the unitless corpus — unblocked 2026-07-18 by the Food.com raw-page scrape; the corpus itself re-imported from that scrape **2026-07-19 (task A1)**: unit coverage 0.35% → **76.14%** (30,780/40,423 ingredient rows), imported corpus now 3,853 active / 379 quarantined (after the diet_023 safety-benchmark cure round, see docs/BACKLOG.md). A2 (widen the conversion surface) already landed at commit `ec58eed`, ahead of A1. A3 (re-ground nutrition corpus-wide) has not run against the new corpus yet — the unlock chain (A1→A2→A3) is otherwise clear for B1–B5 to start. |
+| 4 — Retention/planning | Not started. Same blocker, same unblock as Phase 3. |
 | 5 — Platform | Not started. |
 
 The forward plan below ("Unlock chain") supersedes the Phase 3–4 internal ordering where they differ; the phase texts remain as reference. Known stale docs: `frontend/streamlit_app.py` disclaimer still says the benchmark "has not yet been run" (fix in C0 below); `docs/BACKLOG.md:195` says the benchmark runner doesn't exist (it does).
@@ -30,20 +30,41 @@ The forward plan below ("Unlock chain") supersedes the Phase 3–4 internal orde
 Everything below depends on this chain — precise macros only exist once
 ingredients convert to grams.
 
-- **A1. Process the scraped archive into the structured corpus.**
-  (Already backlogged; FULL TREATMENT — touches allergen-label derivation.)
-  New `DatasetAdapter` subclass in `app/services/corpus_import/adapters.py`
-  reading `data/scraped/foodcom/*.md` (parse the fenced `Raw JSON-LD`
-  block), ingredient lines through `parse_quantity_string`
-  (`app/utils/quantity_parser.py`), allergens re-derived from scraped
-  names via `derive_allergen_labels`, `recipeYield` → `servings`, then the
-  existing pipeline (validation → dedup → integrity quarantine → rewrite
-  `imported_recipes.jsonl` → reindex). Turns ~24,000 unitless ingredient
-  rows into `{name, amount, unit}` rows. Quarantined recipes (1,354) get a
-  second chance from original-page truth.
-  *Eval gate:* pytest + `evaluate_demo_set.py` at 0.000 + safety-benchmark
-  MacroChef arm re-run (corpus changed under it) + before/after unit
-  coverage stat published in the import report.
+- **A1. Process the scraped archive into the structured corpus — DONE
+  2026-07-19** (FULL TREATMENT, two advisor REVISE rounds before landing;
+  touched allergen-label derivation AND `constraint_engine.py` vocabulary
+  by the second revise round). `FoodComScrapedArchiveAdapter`
+  (`app/services/corpus_import/adapters.py`) reads
+  `data/scraped/foodcom/*.md` (the fenced `Raw JSON-LD` block), ingredient
+  lines through `parse_quantity_string`, allergens re-derived via
+  `derive_allergen_labels`, `recipeYield` → `servings`,
+  `recipeCategory` → `meal_type`, through the existing pipeline
+  (validation → dedup → integrity quarantine → rewrite
+  `imported_recipes.jsonl` → reindex). **Result: unit coverage 0.35% →
+  76.14%** (30,780/40,423 rows); corpus 3,853 active / 379 quarantined
+  (after the diet_023 cure round) (984 of the original 1,354 quarantined
+  rows recovered from original-page truth, 5 newly quarantined by the
+  automated checks, 3 ids permanently lost to persistent HTTP 500, plus 6
+  more manually quarantined during the diet_023 cure round below). Along
+  the way this also fixed real, pre-existing `constraint_engine.py`
+  vocabulary gaps (`bratwurst`/`bologna`/`sirloin` in `MEAT_ALIASES`,
+  `pretzel`/`pita`/`orzo` in `_WHEAT`, `yoghurt`/`curd` in `_DAIRY`,
+  `bean curd` in `_SOY`, and — via a real adjudicated benchmark
+  TRUE_VIOLATION, "krispies"/"cereal" in the gluten composition and
+  "enchilada sauce" in `_PEANUT`) that the richer scraped-page ingredient
+  text exposed via `tests/test_diet_leak_audit.py` and the adversarial
+  safety benchmark (previously green/passing only because the old CSV's
+  truncated ingredient columns hid the very ingredients that would have
+  tripped them — see `docs/BACKLOG.md`'s A1 entries for the full
+  root-cause writeup, the per-term over-block deltas, and the FULL
+  TREATMENT items left behind: `derive_allergen_labels` natural-language
+  robustness, a systematic ground-truth-vs-production vocabulary diff,
+  and a direction-aware lookalike matching mechanism).
+  *Eval gate, all met:* pytest green (977+ tests) + `evaluate_demo_set.py`
+  at 0.000 + Chroma reindex (3,878 == 3,878 active+seed lines, final cured corpus) +
+  safety-benchmark MacroChef arm re-run + `evaluate_retrieval.py`
+  re-baseline (non-comparable-to-prior note) + before/after unit coverage
+  stat published in the import report and here.
 - **A2. Widen the conversion surface.** `app/utils/unit_converter.py` has a
   12-entry density table and 10-entry piece-weight table — the real
   bottleneck. With units now present, every added entry (cup of flour,

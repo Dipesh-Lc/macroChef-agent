@@ -64,6 +64,19 @@ GROUND_TRUTH_GLUTEN = {
     "graham cracker", "malt", "orzo", "pasta", "pastry",
     "pita", "pretzel", "rye", "seitan", "semolina", "spaghetti", "tortilla",
     "wheat", "wheat germ",
+    # "krispies"/"cereal" (added 2026-07-19, adjudication_20260719T083748Z.md
+    # diet_023 TRUE_VIOLATION cure): same citations as
+    # constraint_engine.ALLERGEN_ALIASES["gluten"]'s matching addition --
+    # Kellogg's Rice Krispies contain barley malt flavoring and are not
+    # gluten-free-labeled; a bare "cereal" row (Post Grape-Nuts, corn
+    # flakes, puffed corn, etc.) cannot prove a labeled-GF/non-malted
+    # variant, same fail-closed logic as this file's own soy-sauce-vs-wheat
+    # entry would be if this list tracked it (it tracks the production
+    # WHEAT/gluten table 1:1 for this addition). Audit-production parity is
+    # load-bearing here: this list must never disagree with
+    # constraint_engine.ALLERGEN_ALIASES["gluten"] on these two terms, or
+    # the diet-leak audit stops being a meaningful check of production.
+    "krispies", "cereal",
     # Deliberately NOT bare "noodle"/"noodles": cellophane/rice noodles are
     # genuinely gluten-free, and that generic a term would false-flag them.
     # Deliberately NOT "durum": bidirectional substring matching makes it
@@ -91,6 +104,24 @@ def _load_corpus(path: Path) -> list[Recipe]:
     return recipes
 
 
+# Known, specific false-positive substring collisions in the ground-truth
+# scan below -- same idiom as this module's "durum"/"rum" and bare-"noodle"
+# false-positive notes in GROUND_TRUTH_GLUTEN's docstring above (a
+# documented, cited exception to a hand-authored term, not a silent
+# weakening). Added 2026-07-19 (A1 revise round, diet-leak audit):
+#   - "curd" (GROUND_TRUTH_DAIRY) vs "bean curd"/"bean curds": bean curd is
+#     tofu (coagulated SOYMILK), never dairy. This is the audit-side twin
+#     of constraint_engine._LOOKALIKE_EXCLUSIONS["curd"] and must never
+#     disagree with it -- test_diet_leak_audit.py's audit-side test pins
+#     exactly that agreement. A recipe carrying a REAL dairy curd
+#     ingredient alongside bean curd (e.g. "cheese curds") still correctly
+#     flags: the scrub below only strips the false-positive phrase itself,
+#     never a same-named different ingredient's own term.
+GROUND_TRUTH_FALSE_POSITIVE_PAIRS: dict[str, frozenset[str]] = {
+    "curd": frozenset({"bean curd", "bean curds"}),
+}
+
+
 def _recipe_ingredient_terms(recipe: Recipe) -> set[str]:
     terms: set[str] = set()
     for item in recipe.ingredients:
@@ -112,9 +143,23 @@ def _ground_truth_violates(recipe: Recipe, excluded_terms: set[str]) -> bool:
     # an unrelated longer excluded word (e.g. "rum" in "breadcrumb").
     ingredient_terms = _recipe_ingredient_terms(recipe)
     for excluded in excluded_terms:
+        false_positive_phrases = GROUND_TRUTH_FALSE_POSITIVE_PAIRS.get(excluded)
         for ingredient_term in ingredient_terms:
-            if excluded in ingredient_term:
-                return True
+            if excluded not in ingredient_term:
+                continue
+            if false_positive_phrases:
+                # Same scrub-then-recheck mechanism as constraint_engine.
+                # _is_lookalike_match: strip every known false-positive
+                # phrase out of this ONE ingredient term, then re-check --
+                # evaluated per (excluded, ingredient_term) pair, so a
+                # different ingredient in the same recipe that genuinely
+                # carries the excluded term is untouched.
+                stripped = ingredient_term
+                for phrase in false_positive_phrases:
+                    stripped = stripped.replace(phrase, "")
+                if excluded not in stripped:
+                    continue
+            return True
     return False
 
 
