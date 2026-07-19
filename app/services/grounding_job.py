@@ -328,6 +328,137 @@ class BrandedDispersionEvent:
 
 
 @dataclass
+class MacroErrorStat:
+    """Aggregate absolute-relative-error stat for one macro, over exactly the
+    seeds that had BOTH a real computed value and a usable self-reported tag
+    ground truth for it (see `SeedMacroAccuracy` for the missing/excluded
+    split). `n == 0` (no seed qualified) renders both error fields `None`
+    rather than a misleading 0.0."""
+
+    n: int
+    median_abs_relative_error: float | None
+    mean_abs_relative_error: float | None
+
+
+@dataclass
+class SeedMacroAccuracy:
+    """Pre-registered A3 eval (docs/ROADMAP.md item A3): "macro-computation
+    accuracy measured against the 25 hand-authored seed recipes as ground
+    truth". These metric definitions are fixed BEFORE the corpus-wide A3
+    grounding run and must not be adjusted after seeing results.
+
+    For each macro (kcal, protein_g, carbs_g, fat_g), a seed contributes to
+    that macro's `MacroErrorStat` only when BOTH:
+      1. the seed's grounding status is GROUNDED or PARTIAL -- an UNGROUNDED
+         seed has no real computed value at all (its `per_serving` macros
+         are all-zero placeholders from an empty sum, not a measurement --
+         see `nutrition_grounding.compute_recipe_macros`), so it can never
+         supply a computed value to compare.
+      2. the seed has a non-null, non-zero self-reported tag value for that
+         macro (a zero or missing tag denominator makes a *relative* error
+         undefined, not zero).
+    Every seed excluded by either rule is counted in the matching
+    `*_missing` field instead of being silently dropped -- "reported
+    missing," never invisible. `kcal` is the PRIMARY metric per the
+    pre-registered gate; the three per-macro stats are secondary detail.
+    """
+
+    n_seeds: int
+    n_grounded: int
+    n_partial: int
+    n_ungrounded: int
+    kcal: MacroErrorStat
+    kcal_missing: int
+    protein_g: MacroErrorStat
+    protein_g_missing: int
+    carbs_g: MacroErrorStat
+    carbs_g_missing: int
+    fat_g: MacroErrorStat
+    fat_g_missing: int
+
+
+def _macro_error_stat(errors: list[float]) -> MacroErrorStat:
+    if not errors:
+        return MacroErrorStat(n=0, median_abs_relative_error=None, mean_abs_relative_error=None)
+    return MacroErrorStat(
+        n=len(errors),
+        median_abs_relative_error=statistics.median(errors),
+        mean_abs_relative_error=statistics.mean(errors),
+    )
+
+
+def compute_seed_macro_accuracy(
+    seeds_by_id: dict[str, Recipe], results: dict[str, RecipeNutrition]
+) -> SeedMacroAccuracy:
+    """Build the pre-registered A3 seed-accuracy aggregate -- see
+    `SeedMacroAccuracy`'s docstring for the exact, fixed metric definitions.
+
+    A seed in `seeds_by_id` absent from `results` (only possible when the
+    caller ran grounding over a corpus that didn't include every seed, e.g.
+    an isolated test) is excluded from `n_seeds` entirely, the same
+    "nothing to compare" treatment the per-seed `SeedRow` table already
+    uses -- there is no computed value at all to classify, not even as
+    ungrounded.
+    """
+    n_grounded = n_partial = n_ungrounded = 0
+    kcal_errors: list[float] = []
+    protein_errors: list[float] = []
+    carbs_errors: list[float] = []
+    fat_errors: list[float] = []
+    kcal_missing = protein_missing = carbs_missing = fat_missing = 0
+
+    for recipe_id in sorted(seeds_by_id):
+        seed = seeds_by_id[recipe_id]
+        nutrition = results.get(recipe_id)
+        if nutrition is None:
+            continue
+
+        if nutrition.status == GroundingStatus.GROUNDED:
+            n_grounded += 1
+        elif nutrition.status == GroundingStatus.PARTIAL:
+            n_partial += 1
+        else:
+            n_ungrounded += 1
+
+        has_computed_value = nutrition.status != GroundingStatus.UNGROUNDED
+
+        if has_computed_value and seed.calories:
+            kcal_errors.append(abs(nutrition.per_serving.calories - seed.calories) / seed.calories)
+        else:
+            kcal_missing += 1
+
+        if has_computed_value and seed.protein_g:
+            protein_errors.append(abs(nutrition.per_serving.protein_g - seed.protein_g) / seed.protein_g)
+        else:
+            protein_missing += 1
+
+        if has_computed_value and seed.carbs_g:
+            carbs_errors.append(abs(nutrition.per_serving.carbs_g - seed.carbs_g) / seed.carbs_g)
+        else:
+            carbs_missing += 1
+
+        if has_computed_value and seed.fat_g:
+            fat_errors.append(abs(nutrition.per_serving.fat_g - seed.fat_g) / seed.fat_g)
+        else:
+            fat_missing += 1
+
+    return SeedMacroAccuracy(
+        n_seeds=n_grounded + n_partial + n_ungrounded,
+        n_grounded=n_grounded,
+        n_partial=n_partial,
+        n_ungrounded=n_ungrounded,
+        kcal=_macro_error_stat(kcal_errors),
+        kcal_missing=kcal_missing,
+        protein_g=_macro_error_stat(protein_errors),
+        protein_g_missing=protein_missing,
+        carbs_g=_macro_error_stat(carbs_errors),
+        carbs_g_missing=carbs_missing,
+        fat_g=_macro_error_stat(fat_errors),
+        fat_g_missing=fat_missing,
+    )
+
+
+@dataclass
 class GroundingReport:
     total_recipes: int = 0
     status_counts: dict[str, int] = field(default_factory=dict)
@@ -348,6 +479,11 @@ class GroundingReport:
     # exclusive and sum to the corpus's total ingredient-row count exactly
     # (see the assertion in `run_grounding`).
     terminal_outcome_counts: dict[str, int] = field(default_factory=dict)
+    # Pre-registered A3 eval aggregate -- see `SeedMacroAccuracy`/
+    # `compute_seed_macro_accuracy`. `None` only for a `GroundingReport`
+    # built without going through `build_report` (should not happen in
+    # practice; `build_report` always computes it from `seeds`/`results`).
+    seed_macro_accuracy: SeedMacroAccuracy | None = None
 
     def implausible_band_flags(self) -> list[SeedRow]:
         return [row for row in self.seed_rows if row.implausible_band]
@@ -607,6 +743,7 @@ def build_report(
     report.rejection_counts = dict(rejection_counts or {})
     report.branded_dispersion_events = list(branded_dispersion_events or [])
     report.terminal_outcome_counts = dict(terminal_outcome_counts or {})
+    report.seed_macro_accuracy = compute_seed_macro_accuracy(seeds_by_id, results)
 
     return report
 
@@ -620,6 +757,22 @@ def render_report(report: GroundingReport) -> str:
         count = report.status_counts.get(status, 0)
         pct = (count / report.total_recipes * 100) if report.total_recipes else 0.0
         lines.append(f"- {status}: {count} ({pct:.1f}%)")
+    lines.append("")
+    lines.append(
+        "**Comparability note (A3 prep):** the pre-A3 baseline "
+        "(`data/processed/grounding_report_pre_A3_baseline.md`, grounded 0.4% / "
+        "partial 59.2%) was computed against the OLD, pre-A1 corpus of 4,263 "
+        "recipes (near-zero unit coverage, 0.35%). The A1 corpus rebuild "
+        "replaced that corpus with 3,853 active imported recipes + 25 "
+        "hand-authored seeds and raised unit coverage to 76.14% -- the "
+        "`total recipes processed` count above states THIS run's corpus size "
+        "so the before/after grounded/partial/ungrounded percentages are read "
+        "against the right denominator, not silently compared across two "
+        "different corpora of different sizes. `data/processed/"
+        "grounding_report_baseline.md` is a separate, even older snapshot "
+        "(also pre-A1, from an earlier point in phase 1.5) -- do not confuse "
+        "the two baseline files."
+    )
     lines.append("")
 
     lines.append(f"## Top ungrounded ingredients, corpus-wide (top {len(report.ungrounded_frequency)} of up to 50)")
@@ -744,6 +897,44 @@ def render_report(report: GroundingReport) -> str:
         lines.append("|---|---|---|---|")
         for event in report.branded_dispersion_events:
             lines.append(f"| {event.query} | {event.min_kcal:.0f} | {event.max_kcal:.0f} | {event.candidate_count} |")
+    lines.append("")
+
+    lines.append("## Seed macro-computation accuracy (pre-registered A3 eval)")
+    lines.append("")
+    lines.append(
+        "Pre-registered gate (docs/ROADMAP.md item A3): \"macro-computation accuracy measured "
+        "against the 25 hand-authored seed recipes as ground truth.\" These metric definitions "
+        "(see `SeedMacroAccuracy`/`compute_seed_macro_accuracy` in `app/services/grounding_job.py`) "
+        "were fixed BEFORE the corpus-wide A3 grounding run and are not adjusted after seeing "
+        "results. A seed contributes to a macro's error only when its status is GROUNDED or "
+        "PARTIAL (an UNGROUNDED seed has no real computed value) AND it has a non-null, "
+        "non-zero self-reported tag value for that macro -- every seed excluded either way is "
+        "counted as \"missing\" below, never silently dropped. **kcal is the PRIMARY metric.**"
+    )
+    lines.append("")
+    accuracy = report.seed_macro_accuracy
+    if accuracy is None:
+        lines.append(
+            "Not computed (this report was built without `seed_macro_accuracy` -- should not "
+            "happen via `build_report`)."
+        )
+    else:
+        lines.append(
+            f"- seeds: {accuracy.n_seeds} total -- {accuracy.n_grounded} grounded, "
+            f"{accuracy.n_partial} partial, {accuracy.n_ungrounded} ungrounded"
+        )
+        lines.append("")
+        lines.append("| macro | n compared | median abs relative error | mean abs relative error | missing (excluded) |")
+        lines.append("|---|---|---|---|---|")
+        for label, stat, missing in (
+            ("**kcal (PRIMARY)**", accuracy.kcal, accuracy.kcal_missing),
+            ("protein_g", accuracy.protein_g, accuracy.protein_g_missing),
+            ("carbs_g", accuracy.carbs_g, accuracy.carbs_g_missing),
+            ("fat_g", accuracy.fat_g, accuracy.fat_g_missing),
+        ):
+            median_str = f"{stat.median_abs_relative_error:.1%}" if stat.median_abs_relative_error is not None else "n/a"
+            mean_str = f"{stat.mean_abs_relative_error:.1%}" if stat.mean_abs_relative_error is not None else "n/a"
+            lines.append(f"| {label} | {stat.n} | {median_str} | {mean_str} | {missing} |")
     lines.append("")
 
     lines.append(f"## Seed tag-vs-computed comparison ({len(report.seed_rows)} recipes)")

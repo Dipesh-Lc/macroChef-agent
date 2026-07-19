@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 import requests
 
 from app.config import Settings
@@ -13,6 +14,7 @@ from app.services.grounding_job import (
     RATIO_OUTLIER_MAX,
     RAW_COOKED_BLOWUP_RATIO,
     build_report,
+    compute_seed_macro_accuracy,
     render_report,
     run_grounding,
 )
@@ -542,6 +544,126 @@ def test_build_report_works_from_precomputed_results_without_any_client(tmp_path
     assert report.total_recipes == 1
     assert report.status_counts == {"grounded": 1}
     assert report.seed_rows[0].computed_kcal == 330
+
+
+def _nutrition(status, calories, protein_g, carbs_g, fat_g) -> RecipeNutrition:
+    macros = FoodMacros(calories=calories, protein_g=protein_g, carbs_g=carbs_g, fat_g=fat_g, fiber_g=0)
+    return RecipeNutrition(
+        status=status,
+        servings=1,
+        total=macros,
+        per_serving=macros,
+        contributions=[],
+        ungrounded_ingredients=[],
+        coverage=1.0 if status == GroundingStatus.GROUNDED else (0.5 if status == GroundingStatus.PARTIAL else 0.0),
+    )
+
+
+def _seed_recipe(recipe_id, *, calories, protein_g, carbs_g, fat_g) -> Recipe:
+    return Recipe(
+        recipe_id=recipe_id,
+        title=recipe_id,
+        ingredients=[Ingredient(name="whatever", amount=1, unit="g")],
+        instructions=["Cook."],
+        calories=calories,
+        protein_g=protein_g,
+        carbs_g=carbs_g,
+        fat_g=fat_g,
+        servings=1,
+    )
+
+
+def test_compute_seed_macro_accuracy_synthetic_fixture() -> None:
+    # Seed A: GROUNDED, every tag macro present and nonzero -- contributes to
+    # all four error stats.
+    seed_a = _seed_recipe("sa1", calories=200, protein_g=20, carbs_g=10, fat_g=5)
+    nutrition_a = _nutrition(GroundingStatus.GROUNDED, calories=220, protein_g=18, carbs_g=12, fat_g=5)
+
+    # Seed B: PARTIAL (still has a real computed value), but tag protein_g
+    # is None and tag carbs_g is 0 -- both must land in "missing", not be
+    # divided into a spurious error.
+    seed_b = _seed_recipe("sa2", calories=100, protein_g=None, carbs_g=0, fat_g=10)
+    nutrition_b = _nutrition(GroundingStatus.PARTIAL, calories=150, protein_g=99, carbs_g=99, fat_g=8)
+
+    # Seed C: UNGROUNDED -- has real tag values for every macro, but no
+    # computed value exists at all, so every macro is "missing" for it.
+    seed_c = _seed_recipe("sa3", calories=300, protein_g=30, carbs_g=40, fat_g=10)
+    nutrition_c = _nutrition(GroundingStatus.UNGROUNDED, calories=0, protein_g=0, carbs_g=0, fat_g=0)
+
+    seeds_by_id = {"sa1": seed_a, "sa2": seed_b, "sa3": seed_c}
+    results = {"sa1": nutrition_a, "sa2": nutrition_b, "sa3": nutrition_c}
+
+    accuracy = compute_seed_macro_accuracy(seeds_by_id, results)
+
+    assert accuracy.n_seeds == 3
+    assert accuracy.n_grounded == 1
+    assert accuracy.n_partial == 1
+    assert accuracy.n_ungrounded == 1
+
+    # kcal: seed A |220-200|/200 = 0.10, seed B |150-100|/100 = 0.50, seed C missing.
+    assert accuracy.kcal.n == 2
+    assert accuracy.kcal.median_abs_relative_error == pytest.approx(0.30)
+    assert accuracy.kcal.mean_abs_relative_error == pytest.approx(0.30)
+    assert accuracy.kcal_missing == 1
+
+    # protein_g: only seed A qualifies (B's tag is None, C is ungrounded).
+    assert accuracy.protein_g.n == 1
+    assert accuracy.protein_g.median_abs_relative_error == pytest.approx(0.10)
+    assert accuracy.protein_g_missing == 2
+
+    # carbs_g: only seed A qualifies (B's tag is 0, C is ungrounded).
+    assert accuracy.carbs_g.n == 1
+    assert accuracy.carbs_g.median_abs_relative_error == pytest.approx(0.20)
+    assert accuracy.carbs_g_missing == 2
+
+    # fat_g: seed A |5-5|/5 = 0.0, seed B |8-10|/10 = 0.2, seed C missing.
+    assert accuracy.fat_g.n == 2
+    assert accuracy.fat_g.median_abs_relative_error == pytest.approx(0.10)
+    assert accuracy.fat_g.mean_abs_relative_error == pytest.approx(0.10)
+    assert accuracy.fat_g_missing == 1
+
+
+def test_compute_seed_macro_accuracy_excludes_seed_absent_from_results() -> None:
+    seed_a = _seed_recipe("sa1", calories=200, protein_g=20, carbs_g=10, fat_g=5)
+    seed_b = _seed_recipe("sa2", calories=100, protein_g=10, carbs_g=10, fat_g=10)
+    nutrition_a = _nutrition(GroundingStatus.GROUNDED, calories=200, protein_g=20, carbs_g=10, fat_g=5)
+
+    accuracy = compute_seed_macro_accuracy({"sa1": seed_a, "sa2": seed_b}, {"sa1": nutrition_a})
+
+    # sa2 was never ground (not in `results`) -- excluded from n_seeds entirely,
+    # not counted as ungrounded.
+    assert accuracy.n_seeds == 1
+    assert accuracy.n_grounded == 1
+    assert accuracy.n_ungrounded == 0
+
+
+def test_compute_seed_macro_accuracy_all_missing_renders_none_not_zero() -> None:
+    seed_c = _seed_recipe("sa3", calories=300, protein_g=30, carbs_g=40, fat_g=10)
+    nutrition_c = _nutrition(GroundingStatus.UNGROUNDED, calories=0, protein_g=0, carbs_g=0, fat_g=0)
+
+    accuracy = compute_seed_macro_accuracy({"sa3": seed_c}, {"sa3": nutrition_c})
+
+    assert accuracy.kcal.n == 0
+    assert accuracy.kcal.median_abs_relative_error is None
+    assert accuracy.kcal.mean_abs_relative_error is None
+    assert accuracy.kcal_missing == 1
+
+
+def test_seed_macro_accuracy_flows_through_build_report_and_render(tmp_path) -> None:
+    seed_a = _seed_recipe("sa1", calories=200, protein_g=20, carbs_g=10, fat_g=5)
+    nutrition_a = _nutrition(GroundingStatus.GROUNDED, calories=220, protein_g=18, carbs_g=12, fat_g=5)
+
+    report = build_report(corpus=[seed_a], seeds=[seed_a], results={"sa1": nutrition_a})
+
+    assert report.seed_macro_accuracy is not None
+    assert report.seed_macro_accuracy.n_seeds == 1
+    assert report.seed_macro_accuracy.kcal.n == 1
+    assert report.seed_macro_accuracy.kcal.median_abs_relative_error == pytest.approx(0.10)
+
+    markdown = render_report(report)
+    assert "Seed macro-computation accuracy (pre-registered A3 eval)" in markdown
+    assert "kcal (PRIMARY)" in markdown
+    assert "10.0%" in markdown  # the 0.10 relative error rendered as a percentage
 
 
 def test_render_report_includes_flags_and_counts(tmp_path) -> None:

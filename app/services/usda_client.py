@@ -212,6 +212,86 @@ _BRANDED_PAGE_SIZE = 25
 _MAX_ATTEMPTS = 8
 _RETRY_BACKOFF_SECONDS = (0.5, 1.0, 1.5, 2.0, 2.0, 2.5, 2.5)
 
+# --- Rate-limit handling (A3 prep) ---
+#
+# FDC signals its per-key hourly quota being exceeded via HTTP 429, or --
+# confirmed against FDC's own docs -- occasionally HTTP 403 with a JSON
+# error body whose `error.code` is "OVER_RATE_LIMIT" (as opposed to a 403
+# for a genuinely bad/missing key, which reports a different code and must
+# NOT be treated as a transient rate-limit condition). This is handled as
+# its OWN path, deliberately separate from `_MAX_ATTEMPTS`'s ordinary
+# transient-failure retry below:
+#
+#   - A rate-limited response is NEVER treated like an ordinary transient
+#     failure (400/503/connection-reset/etc, which -- after exhausting
+#     `_MAX_ATTEMPTS` -- degrades to returning `None`, which
+#     `search_food_with_reason` then classifies as a terminal
+#     REASON_NO_RELEVANT_CANDIDATE "ungrounded" outcome). Doing that for a
+#     rate-limited call would silently misclassify a real ingredient as
+#     "no USDA match" purely because the hourly quota ran out mid-run --
+#     corrupting the corpus-wide grounding report with no signal that
+#     anything went wrong.
+#   - It is also never written to `FdcCache` -- `_get_payload` only calls
+#     `cache.set_payload` on an actual returned payload (see its
+#     docstring), and the path below never returns one for a rate-limited
+#     response, so this is already structurally guaranteed, not something
+#     this addition has to separately enforce.
+#   - Instead: retry a SHORT, bounded number of times with a longer backoff
+#     (in case it's a brief burst rather than a genuinely exhausted hourly
+#     window), then raise `UsdaRateLimitError` -- a fail-loud, fail-CLEAN
+#     stop. The caller (the offline batch job, `grounding_job.run_grounding`
+#     via `scripts/ground_corpus.py`) is expected to let this propagate and
+#     crash the run rather than catch and continue: every payload
+#     successfully fetched earlier in the same run is already durably
+#     persisted to `FdcCache` (written incrementally, see `_get_payload`),
+#     so a re-run after the quota window resets resumes from exactly where
+#     this one stopped, re-fetching only what was never cached, at zero
+#     extra API cost for anything already grounded.
+_RATE_LIMIT_MAX_ATTEMPTS = 3
+_RATE_LIMIT_BACKOFF_SECONDS = (5.0, 30.0)
+
+
+class UsdaRateLimitError(RuntimeError):
+    """Raised by `UsdaClient._fetch_with_retry` when FDC keeps signaling its
+    rate limit (HTTP 429, or HTTP 403 with error code OVER_RATE_LIMIT) past
+    `_RATE_LIMIT_MAX_ATTEMPTS` bounded retries. See the module comment above
+    `_RATE_LIMIT_MAX_ATTEMPTS` for why this is a distinct, fail-loud path
+    rather than degrading to `None`/"ungrounded" like an ordinary transient
+    failure."""
+
+
+def _rate_limit_error_code(response: Any) -> str | None:
+    """Returns the FDC `error.code` string (uppercased) from `response`'s
+    JSON body, or `None` if the body isn't JSON or has no such field. Used
+    only to distinguish a rate-limited 403 (`OVER_RATE_LIMIT`) from a 403
+    for an invalid/missing API key, which must NOT be treated as transient
+    rate-limiting."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    return code.upper() if isinstance(code, str) else None
+
+
+def _is_rate_limited_response(response: Any) -> bool:
+    """True if `response` is FDC signaling its hourly rate limit has been
+    exceeded -- HTTP 429 unconditionally, or HTTP 403 specifically carrying
+    `error.code == "OVER_RATE_LIMIT"` in its JSON body (a bare 403 with any
+    other/no code, e.g. a bad API key, is NOT rate-limiting and falls
+    through to the ordinary transient-failure handling instead)."""
+    status_code = getattr(response, "status_code", None)
+    if status_code == 429:
+        return True
+    if status_code == 403:
+        return _rate_limit_error_code(response) == "OVER_RATE_LIMIT"
+    return False
+
 
 @dataclass
 class MatchOutcome:
@@ -895,6 +975,7 @@ class UsdaClient:
         self, query: str, data_types: list[str], page_size: int = _GENERIC_PAGE_SIZE
     ) -> dict[str, Any] | None:
         last_error: str | None = None
+        rate_limit_attempt = 0
         for attempt in range(_MAX_ATTEMPTS):
             try:
                 response = self._session.get(
@@ -907,6 +988,35 @@ class UsdaClient:
                     },
                     timeout=self._settings.model_timeout_seconds,
                 )
+            except requests.RequestException as exc:
+                last_error = str(exc)
+                if attempt < _MAX_ATTEMPTS - 1:
+                    self._sleep(_RETRY_BACKOFF_SECONDS[attempt])
+                continue
+
+            # Rate-limit responses take their own bounded-retry-then-raise
+            # path, entirely separate from the ordinary transient-failure
+            # handling below -- see the module comment above
+            # `_RATE_LIMIT_MAX_ATTEMPTS` for why a rate-limited call must
+            # never degrade to `None`/"ungrounded" the way a genuine
+            # transient failure does.
+            if _is_rate_limited_response(response):
+                if rate_limit_attempt < _RATE_LIMIT_MAX_ATTEMPTS - 1:
+                    self._sleep(_RATE_LIMIT_BACKOFF_SECONDS[rate_limit_attempt])
+                    rate_limit_attempt += 1
+                    continue
+                logger.error(
+                    "USDA FDC rate limit exceeded for %r (dataType=%s) after %d attempts -- "
+                    "stopping so a re-run (served by FdcCache for everything already fetched) "
+                    "can resume once the hourly quota resets.",
+                    query, data_types, rate_limit_attempt + 1,
+                )
+                raise UsdaRateLimitError(
+                    f"USDA FDC rate limit exceeded for query {query!r} (dataType={data_types}) "
+                    f"after {rate_limit_attempt + 1} attempts"
+                )
+
+            try:
                 response.raise_for_status()
                 return response.json()
             except requests.RequestException as exc:

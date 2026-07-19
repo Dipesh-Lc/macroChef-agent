@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.rag.loaders import load_recipes  # noqa: E402
 from app.services.grounding_job import render_report, run_grounding  # noqa: E402
 
 
@@ -28,9 +29,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sidecar-path", default="data/processed/grounding.jsonl")
     parser.add_argument("--report-path", default="data/processed/grounding_report.md")
+    parser.add_argument(
+        "--only-seeds",
+        action="store_true",
+        help=(
+            "Ground only the 25 hand-authored seed recipes (skip the imported "
+            "corpus) -- a cheap smoke test of the live FDC path, NOT a corpus-wide "
+            "run. Off by default; never used by the production corpus-wide pass."
+        ),
+    )
     args = parser.parse_args()
 
-    report = run_grounding(sidecar_path=args.sidecar_path)
+    if args.only_seeds:
+        seeds = load_recipes()
+        report = run_grounding(sidecar_path=args.sidecar_path, corpus=seeds, seeds=seeds)
+    else:
+        report = run_grounding(sidecar_path=args.sidecar_path)
     markdown = render_report(report)
 
     report_path = Path(args.report_path)

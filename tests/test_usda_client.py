@@ -283,6 +283,111 @@ def test_confirmed_empty_payload_is_cached_and_skips_future_network_calls(tmp_pa
     assert unreachable.calls == 0
 
 
+class StatusSequenceSession:
+    """Serves `responses` (a list of `(payload, status_code)`) in order, one
+    per call; the LAST entry repeats for any call beyond the list's length.
+    Used to simulate FDC's rate-limit signaling (429, or 403 with an
+    OVER_RATE_LIMIT error body) persisting across retries, or clearing after
+    a few attempts."""
+
+    def __init__(self, responses: list[tuple[dict, int]]):
+        self.responses = responses
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        index = min(self.calls - 1, len(self.responses) - 1)
+        payload, status_code = self.responses[index]
+        return FakeResponse(payload, status_code=status_code)
+
+
+_OVER_RATE_LIMIT_BODY = {"error": {"code": "OVER_RATE_LIMIT", "message": "Too many requests"}}
+_INVALID_KEY_403_BODY = {"error": {"code": "API_KEY_INVALID", "message": "bad key"}}
+
+
+def test_persistent_429_raises_rate_limit_error_and_is_never_cached(tmp_path) -> None:
+    from app.services.usda_client import UsdaRateLimitError
+
+    cache = FdcCache(tmp_path / "cache.json")
+    session = StatusSequenceSession([({}, 429)])
+    client = _client(session=session, cache=cache)
+
+    with pytest.raises(UsdaRateLimitError):
+        client.search_food("chicken breast")
+
+    # Bounded retry (_RATE_LIMIT_MAX_ATTEMPTS = 3), not the full ordinary
+    # _MAX_ATTEMPTS=8 transient-failure budget.
+    assert session.calls == 3
+    assert cache.get_payload("chicken breast", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is None
+
+
+def test_persistent_403_over_rate_limit_raises_rate_limit_error(tmp_path) -> None:
+    from app.services.usda_client import UsdaRateLimitError
+
+    cache = FdcCache(tmp_path / "cache.json")
+    session = StatusSequenceSession([(_OVER_RATE_LIMIT_BODY, 403)])
+    client = _client(session=session, cache=cache)
+
+    with pytest.raises(UsdaRateLimitError):
+        client.search_food("chicken breast")
+
+    assert session.calls == 3
+    assert cache.get_payload("chicken breast", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is None
+
+
+def test_403_with_non_rate_limit_error_code_is_not_treated_as_rate_limiting(tmp_path) -> None:
+    """A 403 for an invalid/missing API key (or any other non-OVER_RATE_LIMIT
+    reason) must fall through to the ordinary transient-failure handling
+    (degrade to None after _MAX_ATTEMPTS), NOT the rate-limit fail-loud path
+    -- these are different problems and must not be conflated."""
+    cache = FdcCache(tmp_path / "cache.json")
+    session = StatusSequenceSession([(_INVALID_KEY_403_BODY, 403)])
+    client = _client(session=session, cache=cache)
+
+    match = client.search_food("chicken breast")
+
+    assert match is None
+    assert session.calls == 16  # ordinary _MAX_ATTEMPTS budget on both tiers, not rate-limit raise
+    assert cache.get_payload("chicken breast", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is None
+
+
+def test_rate_limit_recovers_within_bounded_retries(tmp_path) -> None:
+    """A brief rate-limit burst that clears within the bounded retry window
+    must still succeed normally -- confirms the rate-limit path is a retry,
+    not an immediate raise."""
+    cache = FdcCache(tmp_path / "cache.json")
+    session = StatusSequenceSession(
+        [
+            ({}, 429),
+            (_load_fixture("fdc_chicken_breast_search.json"), 200),
+        ]
+    )
+    client = _client(session=session, cache=cache)
+
+    match = client.search_food("chicken breast")
+
+    assert match is not None
+    assert match.macros.calories == 165
+    assert session.calls == 2
+    assert cache.get_payload("chicken breast", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is not None
+
+
+def test_rate_limit_error_does_not_poison_terminal_outcome_classification(tmp_path) -> None:
+    """A `UsdaRateLimitError` must propagate out of `search_food`/
+    `search_food_with_reason` rather than being swallowed into a `None`
+    match -- swallowing it would let a caller (e.g. `grounding_job`)
+    silently record the ingredient as a terminal 'ungrounded' outcome for a
+    reason that has nothing to do with whether the food exists in FDC."""
+    from app.services.usda_client import UsdaRateLimitError
+
+    cache = FdcCache(tmp_path / "cache.json")
+    session = StatusSequenceSession([({}, 429)])
+    client = _client(session=session, cache=cache)
+
+    with pytest.raises(UsdaRateLimitError):
+        client.search_food_with_reason("chicken breast")
+
+
 def test_empty_results_return_none(tmp_path) -> None:
     session = FakeSession(payload=_load_fixture("fdc_empty_search.json"))
     client = UsdaClient(
