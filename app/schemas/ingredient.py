@@ -50,3 +50,20 @@ class Ingredient(BaseModel):
             return self.name
         amount = f"{self.amount:g}"
         return f"{amount} {self.unit} {self.name}" if self.unit else f"{amount} {self.name}"
+
+
+def scale_ingredients(ingredients: list[Ingredient], factor: float) -> list[Ingredient]:
+    """Scale every ingredient's `amount` by `factor` (roadmap item B2, serving
+    scaler). Pure and deterministic display/shopping-list math only -- name,
+    unit, and preparation are left untouched, and an ingredient whose amount
+    is `None` stays `None` rather than having an amount invented. This never
+    touches nutrition grounding and never recomputes `per_serving` macros:
+    per-serving macros are already serving-invariant by definition, so
+    callers only need `per_serving * target_servings` for a batch total,
+    computed separately from this function.
+    """
+    scaled: list[Ingredient] = []
+    for ingredient in ingredients:
+        new_amount = None if ingredient.amount is None else ingredient.amount * factor
+        scaled.append(ingredient.model_copy(update={"amount": new_amount}))
+    return scaled

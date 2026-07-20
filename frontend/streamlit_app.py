@@ -299,6 +299,14 @@ st.markdown(
       letter-spacing: .06em;
       margin-top: .65rem;
     }
+    .ingredient-list { margin: .2rem 0 .4rem; }
+    .ingredient-line {
+      color: var(--macro-text);
+      font-size: .92rem;
+      padding: .2rem 0;
+      border-bottom: 1px solid #33352f;
+    }
+    .ingredient-line:last-child { border-bottom: none; }
     [data-testid="stAlert"] {
       background: #332f23;
       color: var(--macro-text);
