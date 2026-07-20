@@ -1,9 +1,10 @@
 from app.schemas.inventory import ConfirmedIngredient
-from app.schemas.recommendation import RecipeScore
+from app.schemas.recommendation import RecipeScore, TasteProfile
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
 from app.services.nutrition_view import trusted_per_serving
 from app.services.procurement_service import analyze_ingredients
+from app.utils.ingredient_normalizer import normalize_ingredient
 from app.utils.unit_converter import to_grams
 
 
@@ -141,17 +142,49 @@ def preference_score(
     cuisine_preference: str | None = None,
     liked_recipe_ids: set[str] | None = None,
     disliked_recipe_ids: set[str] | None = None,
+    taste_profile: TasteProfile | None = None,
 ) -> float:
     score = 0.5
     preferred = cuisine_preference or (
         user_profile.preferred_cuisines[0] if user_profile.preferred_cuisines else None
     )
-    if preferred and recipe.cuisine and recipe.cuisine.lower() == preferred.lower():
+    cuisine_matched_static_preference = bool(
+        preferred and recipe.cuisine and recipe.cuisine.lower() == preferred.lower()
+    )
+    if cuisine_matched_static_preference:
         score += 0.2
     if liked_recipe_ids and recipe.recipe_id in liked_recipe_ids:
         score += 0.1
     if disliked_recipe_ids and recipe.recipe_id in disliked_recipe_ids:
         score -= 0.2
+
+    # Phase 3 (visible personalization loop): a small, bounded nudge from the
+    # GENERALIZING taste profile derived from this user's feedback history
+    # (app.services.memory_service.derive_taste_profile) -- distinct from the
+    # exact-recipe-id checks above, which only ever re-recognize a recipe the
+    # user already rated. This can fire on a brand-new, never-rated recipe.
+    # Deliberately small (+/-0.05, applied at most once each no matter how
+    # many avoided ingredients or how strong the drift) so this
+    # lower-confidence, inferred signal can never outweigh an explicit
+    # per-recipe like/dislike (+0.1/-0.2) or an explicit stated cuisine
+    # preference (+0.2) above. Ranking/UX only: `taste_profile` is produced
+    # entirely by deterministic code and is never seen or set by the LLM,
+    # and this function stays strictly downstream of, and blind to,
+    # app.services.constraint_engine's safety decisions -- it only ever
+    # re-ranks among candidates the safety filter already passed.
+    if taste_profile:
+        if not cuisine_matched_static_preference and recipe.cuisine:
+            drifted_cuisines = {name.lower() for name in taste_profile.preferred_cuisines}
+            if recipe.cuisine.lower() in drifted_cuisines:
+                score += 0.05
+        avoided = set(taste_profile.avoided_ingredients)
+        if avoided and any(
+            normalize_ingredient(ingredient.name) in avoided
+            for ingredient in recipe.ingredients
+            if ingredient.name
+        ):
+            score -= 0.05
+
     return clamp(score)
 
 
@@ -162,12 +195,18 @@ def score_recipe(
     cuisine_preference: str | None = None,
     liked_recipe_ids: set[str] | None = None,
     disliked_recipe_ids: set[str] | None = None,
+    taste_profile: TasteProfile | None = None,
 ) -> RecipeScore:
     pantry_score, used, missing, mass_coverage = pantry_match_score(recipe, inventory)
     macro_score = macro_fit_score(recipe, user_profile.macro_targets)
     cook_score = time_score(recipe, user_profile.max_cook_time_min)
     pref_score = preference_score(
-        recipe, user_profile, cuisine_preference, liked_recipe_ids, disliked_recipe_ids
+        recipe,
+        user_profile,
+        cuisine_preference,
+        liked_recipe_ids,
+        disliked_recipe_ids,
+        taste_profile,
     )
     final = (
         0.40 * pantry_score

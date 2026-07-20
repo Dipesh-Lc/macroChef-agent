@@ -3,8 +3,14 @@ import pytest
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.nutrition import FoodMacros, GroundingStatus, RecipeNutrition
 from app.schemas.recipe import Recipe
+from app.schemas.recommendation import TasteProfile
 from app.schemas.user import MacroTargets, UserProfile
-from app.services.nutrition_scorer import macro_fit_score, pantry_match_score, score_recipe
+from app.services.nutrition_scorer import (
+    macro_fit_score,
+    pantry_match_score,
+    preference_score,
+    score_recipe,
+)
 
 
 def _grounded(**per_serving) -> RecipeNutrition:
@@ -213,3 +219,76 @@ def test_score_recipe_returns_breakdown() -> None:
 
     assert score.final_score > 0.6
     assert score.macro_fit_score == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 (visible personalization loop): the GENERALIZING taste-profile
+# nudge in preference_score. Distinct from the exact-recipe-id checks (the
+# `liked_recipe_ids`/`disliked_recipe_ids` params, tested implicitly above
+# via score_recipe) -- this fires on a recipe the user has never rated,
+# purely from ingredient/cuisine patterns in `taste_profile`. Must stay
+# small and bounded (never overriding an explicit static cuisine match or an
+# exact-recipe-id signal) -- see app.services.nutrition_scorer.preference_
+# score's inline rationale.
+# ---------------------------------------------------------------------------
+
+
+def test_taste_profile_none_has_no_effect() -> None:
+    recipe = _recipe()
+    profile = UserProfile(user_id="u", macro_targets=MacroTargets(), max_cook_time_min=None)
+
+    assert preference_score(recipe, profile, taste_profile=None) == 0.5
+
+
+def test_taste_profile_avoided_ingredient_lowers_score_by_bounded_amount() -> None:
+    recipe = _recipe()  # ingredients: chicken breast, rice, spinach, bell pepper
+    profile = UserProfile(user_id="u", macro_targets=MacroTargets(), max_cook_time_min=None)
+    taste_profile = TasteProfile(avoided_ingredients=["chicken breast", "rice"])
+
+    score = preference_score(recipe, profile, taste_profile=taste_profile)
+
+    # Both "chicken breast" and "rice" match the avoided set, but the penalty
+    # applies once, not per match -- bounded at -0.05, not -0.10+.
+    assert score == pytest.approx(0.45)
+
+
+def test_taste_profile_drifted_cuisine_boosts_score_by_bounded_amount() -> None:
+    recipe = _recipe(cuisine="Italian")
+    profile = UserProfile(user_id="u", macro_targets=MacroTargets(), max_cook_time_min=None)
+    taste_profile = TasteProfile(preferred_cuisines=["Italian"])
+
+    score = preference_score(recipe, profile, taste_profile=taste_profile)
+
+    assert score == pytest.approx(0.55)
+
+
+def test_taste_profile_drift_does_not_stack_with_static_cuisine_match() -> None:
+    # cuisine_preference already matches (static +0.2) -- the drifted-cuisine
+    # nudge must not ALSO add its +0.05 on top of the same signal.
+    recipe = _recipe(cuisine="Italian")
+    profile = UserProfile(user_id="u", macro_targets=MacroTargets(), max_cook_time_min=None)
+    taste_profile = TasteProfile(preferred_cuisines=["Italian"])
+
+    score = preference_score(
+        recipe, profile, cuisine_preference="Italian", taste_profile=taste_profile
+    )
+
+    assert score == pytest.approx(0.7)
+
+
+def test_taste_profile_never_overrides_explicit_dislike() -> None:
+    # An exact-recipe dislike (-0.2) must still dominate even when the same
+    # recipe also happens to match a drifted-cuisine preference (+0.05).
+    recipe = _recipe(cuisine="Italian")
+    profile = UserProfile(user_id="u", macro_targets=MacroTargets(), max_cook_time_min=None)
+    taste_profile = TasteProfile(preferred_cuisines=["Italian"])
+
+    score = preference_score(
+        recipe,
+        profile,
+        disliked_recipe_ids={recipe.recipe_id},
+        taste_profile=taste_profile,
+    )
+
+    assert score == pytest.approx(0.35)
+    assert score < 0.5

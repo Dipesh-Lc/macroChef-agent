@@ -6,11 +6,12 @@ from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recommendation import MealRecommendation, RejectedRecipe
 from app.services.constraint_engine import validate_recipe
 from app.services.llm_service import explain_recommendation
-from app.services.memory_service import get_user_memory, save_session_summary
+from app.services.memory_service import derive_taste_profile, get_user_memory, save_session_summary
 from app.services.nutrition_scorer import score_recipe
 from app.services.procurement_service import build_shopping_list_for_recipe, merge_shopping_lists
 from app.services.ranking_service import rank_recipes
 from app.services.recipe_retriever import RecipeRetriever
+from app.services.substitution_service import generate_safe_variants
 from app.services.text_inventory_parser import merge_inventory_observations, parse_typed_inventory
 from app.services.vision_service import extract_inventory_from_image
 
@@ -176,6 +177,9 @@ def safety_filter_node(state: MacroChefState | dict):
 
     valid = []
     rejected = list(current.rejected_recipes)
+    # See MacroChefState.rejected_recipe_objects -- kept in lockstep with
+    # `rejected` so substitution_node can recover the full Recipe later.
+    rejected_objects = dict(current.rejected_recipe_objects)
     for recipe in current.candidate_recipes:
         result = validate_recipe(recipe, current.user_profile)
         if result.is_valid:
@@ -188,11 +192,13 @@ def safety_filter_node(state: MacroChefState | dict):
                     reason=result.rejection_reason or "Rejected by hard constraint",
                 )
             )
+            rejected_objects[recipe.recipe_id] = recipe
 
     return state_update(
         current,
         candidate_recipes=valid,
         rejected_recipes=rejected,
+        rejected_recipe_objects=rejected_objects,
         debug_trace=_trace(
             current,
             f"safety_filter_node: {len(valid)} valid, {len(rejected)} total rejected.",
@@ -207,6 +213,9 @@ def fallback_relaxation_node(state: MacroChefState | dict):
 
     valid = []
     rejected = list(current.rejected_recipes)
+    # See MacroChefState.rejected_recipe_objects -- kept in lockstep with
+    # `rejected` so substitution_node can recover the full Recipe later.
+    rejected_objects = dict(current.rejected_recipe_objects)
     recipes = [
         *load_recipes(),
         *RecipeLibraryRepository().list_user_recipes(current.user_id),
@@ -223,11 +232,13 @@ def fallback_relaxation_node(state: MacroChefState | dict):
                     reason=result.rejection_reason or "Rejected by hard constraint",
                 )
             )
+            rejected_objects[recipe.recipe_id] = recipe
 
     if not valid:
         return state_update(
             current,
             rejected_recipes=rejected,
+            rejected_recipe_objects=rejected_objects,
             errors=["No recipes satisfy the allergy, diet, dislike, and time constraints."],
             debug_trace=_trace(current, "fallback_relaxation_node: no safe recipes found."),
         )
@@ -236,6 +247,7 @@ def fallback_relaxation_node(state: MacroChefState | dict):
         current,
         candidate_recipes=valid[:12],
         rejected_recipes=rejected,
+        rejected_recipe_objects=rejected_objects,
         debug_trace=_trace(
             current,
             (
@@ -246,12 +258,75 @@ def fallback_relaxation_node(state: MacroChefState | dict):
     )
 
 
+# RejectedRecipe.reason prefixes produced by constraint_engine.validate_recipe
+# (see its ValidationResult.rejection_reason strings) that indicate an
+# allergy-or-diet rejection specifically -- as opposed to "Contains a
+# disliked ingredient" or "Exceeds maximum cooking time", which are not
+# allergy/diet safety reasons and are deliberately excluded (see the task
+# spec: substitution_node only reads recipes "rejected ... specifically for
+# an allergy or diet reason (not e.g. rejected for macro/time fit)").
+_ALLERGEN_REJECTION_PREFIX = "Contains a user allergen"
+_DIET_REJECTION_PREFIX = "Violates diet type"
+
+
+def substitution_node(state: MacroChefState | dict):
+    """Deterministic substitution engine integration (Phase 3 roadmap item).
+
+    NO SAFETY AUTHORITY of its own -- see app.services.substitution_
+    service's module docstring. For every recipe in `current.rejected_
+    recipes` whose rejection reason is specifically an allergy or diet
+    violation, recovers the full parent Recipe from `current.rejected_
+    recipe_objects` and asks `generate_safe_variants` for every candidate
+    swap that PASSES `constraint_engine.validate_recipe` against the user's
+    FULL profile. Only variants that already passed that re-validation are
+    ever appended to `candidate_recipes`, exactly like any other recipe
+    flowing into nutrition_scoring_node/meal_ranking_node downstream.
+    """
+    current = ensure_state(state)
+    if current.errors or current.user_profile is None:
+        return current.model_dump()
+
+    existing_ids = {recipe.recipe_id for recipe in current.candidate_recipes}
+    new_candidates = list(current.candidate_recipes)
+    variants_added = 0
+
+    for rejected in current.rejected_recipes:
+        reason = rejected.reason or ""
+        if not (reason.startswith(_ALLERGEN_REJECTION_PREFIX) or reason.startswith(_DIET_REJECTION_PREFIX)):
+            continue
+        parent = current.rejected_recipe_objects.get(rejected.recipe_id)
+        if parent is None:
+            continue
+        for variant in generate_safe_variants(parent, current.user_profile):
+            if variant.recipe.recipe_id in existing_ids:
+                continue
+            existing_ids.add(variant.recipe.recipe_id)
+            new_candidates.append(variant.recipe)
+            variants_added += 1
+
+    return state_update(
+        current,
+        candidate_recipes=new_candidates,
+        debug_trace=_trace(
+            current,
+            f"substitution_node: added {variants_added} safety-validated substitution variant(s).",
+        ),
+    )
+
+
 def nutrition_scoring_node(state: MacroChefState | dict):
     current = ensure_state(state)
     if current.errors or current.user_profile is None:
         return current.model_dump()
 
     liked_ids, disliked_ids = get_user_memory(current.user_id)
+    # Phase 3 (visible personalization loop): a GENERALIZING signal derived
+    # from the same feedback history `get_user_memory` above reads exactly --
+    # see app.services.memory_service.derive_taste_profile. Deterministic,
+    # never LLM-authored, never consulted by the safety filter (which already
+    # ran, upstream of this node -- see safety_filter_node/
+    # fallback_relaxation_node above).
+    taste_profile = derive_taste_profile(current.user_id)
     scores = [
         score_recipe(
             recipe,
@@ -260,12 +335,14 @@ def nutrition_scoring_node(state: MacroChefState | dict):
             cuisine_preference=current.cuisine_preference,
             liked_recipe_ids=liked_ids,
             disliked_recipe_ids=disliked_ids,
+            taste_profile=taste_profile,
         )
         for recipe in current.candidate_recipes
     ]
     return state_update(
         current,
         scored_recipes=scores,
+        taste_profile=taste_profile,
         debug_trace=_trace(current, f"nutrition_scoring_node: scored {len(scores)} recipes."),
     )
 

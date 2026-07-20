@@ -8,6 +8,7 @@ from components.inventory_input import render_inventory_input
 from components.profile_form import render_profile_sidebar
 from components.recommendation_cards import render_recommendations
 from components.shopping_list import render_shopping_list
+from components.taste_profile import render_taste_profile
 from session_client import request_with_session
 
 from app.services.analytics import get_analytics
@@ -410,6 +411,7 @@ with planner_tab:
 
         shopping = response_json.get("shopping_list", [])
         render_shopping_list(shopping)
+        render_taste_profile(response_json.get("taste_profile"))
 
         render_recommendations(API_URL, response_json.get("recommendations", []))
 

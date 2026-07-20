@@ -4,7 +4,12 @@ from pydantic import BaseModel, Field
 
 from app.schemas.inventory import ConfirmedIngredient, InventoryObservation
 from app.schemas.recipe import Recipe
-from app.schemas.recommendation import MealRecommendation, RecipeScore, RejectedRecipe
+from app.schemas.recommendation import (
+    MealRecommendation,
+    RecipeScore,
+    RejectedRecipe,
+    TasteProfile,
+)
 from app.schemas.shopping import ShoppingItem
 from app.schemas.user import UserProfile
 
@@ -21,7 +26,18 @@ class MacroChefState(BaseModel):
     meal_type: str | None = None
     candidate_recipes: list[Recipe] = Field(default_factory=list)
     rejected_recipes: list[RejectedRecipe] = Field(default_factory=list)
+    # Full Recipe objects for every entry in `rejected_recipes` above, keyed
+    # by recipe_id -- populated in lockstep by safety_filter_node and
+    # fallback_relaxation_node. RejectedRecipe alone (recipe_id/title/reason)
+    # doesn't carry enough to build a substitution candidate; substitution_
+    # node (app.services.substitution_service.generate_safe_variants) reads
+    # this to recover the complete rejected recipe. Never consulted by
+    # anything safety-relevant -- see substitution_node's own docstring.
+    rejected_recipe_objects: dict[str, Recipe] = Field(default_factory=dict)
     scored_recipes: list[RecipeScore] = Field(default_factory=list)
+    # Set by nutrition_scoring_node (app.services.memory_service.
+    # derive_taste_profile) -- ranking/UX only, see TasteProfile's docstring.
+    taste_profile: TasteProfile | None = None
     final_recommendations: list[MealRecommendation] = Field(default_factory=list)
     shopping_list: list[ShoppingItem] = Field(default_factory=list)
     memory_update: str | None = None

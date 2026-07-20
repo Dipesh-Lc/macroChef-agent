@@ -16,6 +16,7 @@ from app.graph.nodes import (
     procurement_node,
     recipe_retriever_node,
     safety_filter_node,
+    substitution_node,
 )
 from app.graph.state import MacroChefState, ensure_state
 from app.schemas.recommendation import RecommendationRequest, RecommendationResponse
@@ -41,6 +42,11 @@ class SequentialMacroChefGraph:
             if after_fallback(state) == "end":
                 return state
 
+        # Phase 3: deterministic substitution engine, placed after safety_
+        # filter_node (and fallback_relaxation_node when it ran) and before
+        # nutrition_scoring_node -- see app.graph.nodes.substitution_node.
+        state = substitution_node(state)
+
         for node in [
             nutrition_scoring_node,
             meal_ranking_node,
@@ -63,6 +69,11 @@ def build_macrochef_graph():
         graph.add_node("recipe_retriever_node", recipe_retriever_node)
         graph.add_node("safety_filter_node", safety_filter_node)
         graph.add_node("fallback_relaxation_node", fallback_relaxation_node)
+        # Phase 3: deterministic substitution engine -- see app.graph.nodes.
+        # substitution_node's docstring. Wired below (via the "nutrition_
+        # scoring" conditional-edge label) after safety_filter_node/
+        # fallback_relaxation_node, before nutrition_scoring_node.
+        graph.add_node("substitution_node", substitution_node)
         graph.add_node("nutrition_scoring_node", nutrition_scoring_node)
         graph.add_node("meal_ranking_node", meal_ranking_node)
         graph.add_node("chef_explanation_node", chef_explanation_node)
@@ -87,15 +98,16 @@ def build_macrochef_graph():
             after_safety_filter,
             {
                 "fallback_relaxation": "fallback_relaxation_node",
-                "nutrition_scoring": "nutrition_scoring_node",
+                "nutrition_scoring": "substitution_node",
                 "end": END,
             },
         )
         graph.add_conditional_edges(
             "fallback_relaxation_node",
             after_fallback,
-            {"nutrition_scoring": "nutrition_scoring_node", "end": END},
+            {"nutrition_scoring": "substitution_node", "end": END},
         )
+        graph.add_edge("substitution_node", "nutrition_scoring_node")
         graph.add_edge("nutrition_scoring_node", "meal_ranking_node")
         graph.add_edge("meal_ranking_node", "chef_explanation_node")
         graph.add_edge("chef_explanation_node", "procurement_node")
@@ -136,6 +148,7 @@ def run_recommendation_graph(request: RecommendationRequest, user_id: str) -> Re
         inventory_observations=final_state.raw_inventory_observations,
         debug_trace=final_state.debug_trace,
         errors=final_state.errors,
+        taste_profile=final_state.taste_profile,
     )
 
     analytics = get_analytics()

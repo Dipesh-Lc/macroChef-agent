@@ -60,6 +60,23 @@ class RecommendationRequest(BaseModel):
     meal_type: str | None = None
 
 
+class TasteProfile(BaseModel):
+    """Generalizing taste-profile signal derived from a user's own feedback
+    history (Phase 3: visible personalization loop -- see
+    app.services.memory_service.derive_taste_profile for the derivation).
+
+    Ranking/UX only, never a safety signal: this is deliberately blind to,
+    and never consulted by, app.services.constraint_engine. Both fields stay
+    empty (never populated from a single data point) until the deriving
+    user has enough feedback history to clear the minimum-sample-size floor
+    documented alongside derive_taste_profile -- an empty list here always
+    means "no signal yet", never "fabricated from one recipe".
+    """
+
+    avoided_ingredients: list[str] = Field(default_factory=list)
+    preferred_cuisines: list[str] = Field(default_factory=list)
+
+
 class RecommendationResponse(BaseModel):
     recommendations: list[MealRecommendation] = Field(default_factory=list)
     shopping_list: list[ShoppingItem] = Field(default_factory=list)
@@ -67,6 +84,10 @@ class RecommendationResponse(BaseModel):
     inventory_observations: list[InventoryObservation] = Field(default_factory=list)
     debug_trace: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # None (not just an empty TasteProfile) when nutrition_scoring_node never
+    # ran (e.g. the request errored before scoring) -- distinct from "ran but
+    # found no signal yet", which is an empty-but-present TasteProfile.
+    taste_profile: TasteProfile | None = None
 
 
 class FeedbackRequest(BaseModel):
