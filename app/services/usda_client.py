@@ -1011,6 +1011,13 @@ class UsdaClient:
                     "can resume once the hourly quota resets.",
                     query, data_types, rate_limit_attempt + 1,
                 )
+                # Flush BEFORE raising: `FdcCache.set_payload` now batches
+                # disk writes (see its docstring), so everything fetched
+                # earlier in this run may still be sitting unflushed in
+                # memory -- without this, a crash here would lose that
+                # in-memory work and defeat the "re-run resumes for free"
+                # property described above.
+                self._cache.flush()
                 raise UsdaRateLimitError(
                     f"USDA FDC rate limit exceeded for query {query!r} (dataType={data_types}) "
                     f"after {rate_limit_attempt + 1} attempts"

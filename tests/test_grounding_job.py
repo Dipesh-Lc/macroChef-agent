@@ -343,6 +343,112 @@ def test_ungrounded_ingredient_gets_a_fresh_attempt_next_run_not_stuck(tmp_path)
     assert second_report.seed_rows[0].status.value == "grounded"
 
 
+def test_run_grounding_flushes_cache_on_normal_completion(tmp_path) -> None:
+    """A3 prep: `FdcCache.set_payload` batches disk writes and no longer
+    writes on every call (see its module comment) -- `run_grounding` must
+    flush at the end of an ordinary, exception-free run so a corpus small
+    enough to never hit the 50-entry auto-flush threshold still ends up
+    durably on disk."""
+    recipe = _recipe(
+        "r_20", "Chicken Bowl",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=330,
+    )
+    payload = {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": "Chicken breast",
+                "dataType": "SR Legacy",
+                "foodNutrients": [
+                    {"nutrientNumber": "208", "value": 165},
+                    {"nutrientNumber": "203", "value": 31},
+                    {"nutrientNumber": "204", "value": 3.57},
+                    {"nutrientNumber": "205", "value": 0},
+                ],
+            }
+        ]
+    }
+    settings = Settings(FDC_API_KEY="test-key", FDC_BASE_URL="https://api.nal.usda.gov/fdc/v1")
+    cache_path = tmp_path / "fdc_cache.json"
+
+    session = _FlakyThenFixedSession(payload=payload, fail_times=0)
+    client = UsdaClient(
+        settings=settings, session=session, cache=FdcCache(cache_path), sleep=lambda _: None
+    )
+
+    run_grounding(client=client, sidecar_path=tmp_path / "grounding.jsonl", corpus=[recipe], seeds=[recipe])
+
+    # A single grounded ingredient is nowhere near the 50-entry auto-flush
+    # threshold -- this only exists on disk because run_grounding's finally
+    # block flushed it explicitly.
+    assert cache_path.exists()
+    reloaded = FdcCache(cache_path)
+    assert reloaded.get_payload("chicken breast", ["Foundation", "SR Legacy", "Survey (FNDDS)"], 5) is not None
+
+
+def test_run_grounding_flushes_cache_in_finally_even_on_unexpected_exception(tmp_path) -> None:
+    """The finally block must flush on BOTH ordinary completion (see above)
+    AND an unexpected exception mid-loop -- everything fetched before the
+    crash must still be durable, or a re-run couldn't resume from where it
+    left off."""
+    cache_path = tmp_path / "fdc_cache.json"
+    cache = FdcCache(cache_path)
+
+    class _CrashingClientWithCache:
+        """Minimal test double with a real `_cache` (so run_grounding's
+        `getattr(client, "_cache", None)` flush path has something to find)
+        and no `search_food_with_reason` (exercises the coarser fallback
+        path in `_terminal_outcome_for_ingredient` too)."""
+
+        def __init__(self, cache: FdcCache):
+            self._cache = cache
+
+        def search_food(self, name: str, *, preparation: str | None = None):
+            self._cache.set_payload(name, ["Foundation"], 5, {"foods": []})
+            if name == "boom":
+                raise RuntimeError("simulated crash mid-run")
+            return None
+
+    client = _CrashingClientWithCache(cache)
+    recipe_ok = _recipe(
+        "r_a_ok", "OK Recipe", [Ingredient(name="chicken breast", amount=200, unit="g")], calories=200
+    )
+    recipe_boom = _recipe("r_b_boom", "Boom Recipe", [Ingredient(name="boom", amount=200, unit="g")], calories=200)
+
+    with pytest.raises(RuntimeError, match="simulated crash mid-run"):
+        run_grounding(
+            client=client,
+            sidecar_path=tmp_path / "grounding.jsonl",
+            corpus=[recipe_ok, recipe_boom],
+            seeds=[],
+        )
+
+    # The crash happened well under the 50-entry auto-flush threshold --
+    # this is on disk only because of the finally-block flush.
+    assert cache_path.exists()
+    reloaded = FdcCache(cache_path)
+    assert reloaded.get_payload("chicken breast", ["Foundation"], 5) == {"foods": []}
+
+
+def test_run_grounding_flush_is_a_silent_no_op_for_a_client_without_a_cache(tmp_path) -> None:
+    """A caller-supplied test double with no `_cache` attribute at all (e.g.
+    `FakeUsdaClient` throughout this file) must not raise -- the flush is
+    read defensively, matching how `rejection_counts` already is."""
+    recipe = _recipe(
+        "r_21", "Chicken Bowl",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=330,
+    )
+    client = FakeUsdaClient({"chicken breast": _match("chicken breast", calories=165, protein_g=31)})
+
+    report = run_grounding(
+        client=client, sidecar_path=tmp_path / "grounding.jsonl", corpus=[recipe], seeds=[recipe]
+    )
+
+    assert report.seed_rows[0].status.value == "grounded"
+
+
 def test_grounding_never_mutates_the_source_recipe_file(tmp_path) -> None:
     seed_path = tmp_path / "sample_recipes.jsonl"
     seed_path.write_text(

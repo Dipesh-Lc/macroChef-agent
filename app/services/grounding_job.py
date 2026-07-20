@@ -562,12 +562,26 @@ def run_grounding(
     results: dict[str, RecipeNutrition] = {}
     terminal_outcome_counts: Counter[str] = Counter()
     total_ingredient_occurrences = 0
-    for recipe in sorted(corpus, key=lambda r: r.recipe_id):
-        nutrition = compute_recipe_macros(recipe.ingredients, servings=recipe.servings or 1, client=client)
-        results[recipe.recipe_id] = _apply_trust_flags(nutrition)
-        for ingredient in recipe.ingredients:
-            total_ingredient_occurrences += 1
-            terminal_outcome_counts[_terminal_outcome_for_ingredient(ingredient, client)] += 1
+    try:
+        for recipe in sorted(corpus, key=lambda r: r.recipe_id):
+            nutrition = compute_recipe_macros(recipe.ingredients, servings=recipe.servings or 1, client=client)
+            results[recipe.recipe_id] = _apply_trust_flags(nutrition)
+            for ingredient in recipe.ingredients:
+                total_ingredient_occurrences += 1
+                terminal_outcome_counts[_terminal_outcome_for_ingredient(ingredient, client)] += 1
+    finally:
+        # `FdcCache.set_payload` now batches disk writes (A3 prep -- see its
+        # docstring), so the corpus loop above may leave fetched payloads
+        # sitting unflushed in memory. Flushing here in `finally` -- on
+        # ordinary completion AND on any unexpected exception (e.g. a
+        # non-rate-limit crash the loop doesn't otherwise handle) -- is what
+        # makes everything fetched so far durable either way. `getattr`
+        # defensive, matching how `rejection_counts` is read below: callers
+        # (mainly tests) pass test doubles with no real cache at all, and a
+        # missing cache must be a silent no-op here, not an AttributeError.
+        cache = getattr(client, "_cache", None)
+        if cache is not None and hasattr(cache, "flush"):
+            cache.flush()
 
     # The five buckets are constructed to be mutually exclusive and
     # exhaustive over every ingredient occurrence in `corpus` (see the

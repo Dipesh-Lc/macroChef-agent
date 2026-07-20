@@ -12,6 +12,21 @@ logger = get_logger(__name__)
 # just its serialization.
 _SCHEMA_VERSION = 2
 
+# `set_payload` batches disk writes rather than doing a full `json.dumps` +
+# atomic tmp-replace of the whole (potentially very large, ~100MB+) cache
+# file on every single call -- a corpus-wide grounding run makes thousands
+# of fetches in one process, and re-serializing the entire cache per fetch
+# is redundant, multi-hour-scale I/O for no durability benefit beyond what
+# a periodic flush already gives. An in-memory `set_payload` call auto-
+# flushes once every `_AUTO_FLUSH_ENTRIES` pending (unflushed) entries; the
+# accepted tradeoff is losing at most the last `_AUTO_FLUSH_ENTRIES - 1`
+# unflushed entries on a hard kill (power loss, SIGKILL) -- they simply get
+# re-fetched on the next run, same as any other cache miss. Callers that
+# need a durability point earlier than the next auto-flush (e.g. before
+# raising `UsdaRateLimitError`, or at the end of a batch job) call the
+# public `flush()` method explicitly.
+_AUTO_FLUSH_ENTRIES = 50
+
 
 class FdcCache:
     """Disk-backed cache of raw USDA FDC `/foods/search` request/response
@@ -44,11 +59,21 @@ class FdcCache:
     interpreted -- there is nothing valid to carry forward from it (it never
     stored the raw payloads this generation needs), so a cold cache simply
     re-fetches from FDC as needed.
+
+    Write batching (A3 prep): `set_payload` does NOT write to disk on every
+    call -- it updates the in-memory dict and auto-flushes only once every
+    `_AUTO_FLUSH_ENTRIES` pending entries (see that constant's comment).
+    Call `flush()` explicitly for a durability point that can't wait for the
+    next auto-flush (e.g. before a fatal error, or at the end of a run).
     """
 
     def __init__(self, path: str | Path):
         self._path = Path(path)
         self._data: dict[str, Any] | None = None
+        # Count of `set_payload` calls since the last flush -- also doubles
+        # as the dirty flag (`> 0` means there are in-memory writes not yet
+        # on disk). Reset to 0 by `flush()`.
+        self._pending_writes: int = 0
 
     def _empty(self) -> dict[str, Any]:
         return {"_schema_version": _SCHEMA_VERSION, "entries": {}}
@@ -103,10 +128,26 @@ class FdcCache:
         page_size: int,
         payload: dict,
     ) -> None:
+        """Records `payload` in the in-memory cache. Does NOT write to disk
+        immediately -- see the write-batching note on the class docstring --
+        except once every `_AUTO_FLUSH_ENTRIES` pending entries, when it
+        auto-flushes. Call `flush()` for an explicit durability point."""
         key = self._key(search_query, data_types, page_size)
         data = self._load()
         data["entries"][key] = payload
-        self._write(data)
+        self._pending_writes += 1
+        if self._pending_writes >= _AUTO_FLUSH_ENTRIES:
+            self.flush()
+
+    def flush(self) -> None:
+        """Writes any pending (unflushed) in-memory entries to disk, atomic
+        tmp-then-replace as before, then clears the pending count. A no-op
+        (does not touch disk at all) when there is nothing pending -- safe
+        to call at any time, including on a cache with no writes yet."""
+        if self._pending_writes == 0:
+            return
+        self._write(self._data)
+        self._pending_writes = 0
 
     def _write(self, data: dict) -> None:
         try:

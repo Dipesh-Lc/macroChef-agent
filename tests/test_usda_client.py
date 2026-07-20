@@ -388,6 +388,47 @@ def test_rate_limit_error_does_not_poison_terminal_outcome_classification(tmp_pa
         client.search_food_with_reason("chicken breast")
 
 
+class _GenericSucceedsBrandedRateLimitedSession:
+    """Simulates a run where an earlier query already succeeded (and was
+    cached in-memory, unflushed) before a LATER query hits a persistent
+    rate limit: the generic tier always returns an empty-but-valid search
+    result (a real cacheable fact), while the Branded tier always 429s."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        if tuple(params["dataType"]) == ("Branded",):
+            return FakeResponse({}, status_code=429)
+        return FakeResponse({"foods": []})
+
+
+def test_rate_limit_error_flushes_cache_before_propagating(tmp_path) -> None:
+    """A3 prep: `FdcCache.set_payload` batches disk writes and no longer
+    writes on every call (see its module comment) -- so everything fetched
+    earlier in a run that then hits a persistent rate limit must be
+    explicitly flushed before `UsdaRateLimitError` propagates, or a crash
+    here would lose in-memory work a re-run should have been able to resume
+    from for free."""
+    from app.services.usda_client import UsdaRateLimitError
+
+    cache_path = tmp_path / "cache.json"
+    cache = FdcCache(cache_path)
+    session = _GenericSucceedsBrandedRateLimitedSession()
+    client = _client(session=session, cache=cache)
+
+    # This single call's generic-tier fetch succeeds and is cached in
+    # memory; its branded-tier fetch then rate-limits persistently, well
+    # under the 50-entry auto-flush threshold on its own.
+    with pytest.raises(UsdaRateLimitError):
+        client.search_food("chicken breast")
+
+    assert cache_path.exists()  # flushed before the raise, not left in memory only
+    reloaded = FdcCache(cache_path)
+    assert reloaded.get_payload("chicken breast", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) == {"foods": []}
+
+
 def test_empty_results_return_none(tmp_path) -> None:
     session = FakeSession(payload=_load_fixture("fdc_empty_search.json"))
     client = UsdaClient(
@@ -524,10 +565,16 @@ def test_cache_key_distinguishes_by_preparation(tmp_path) -> None:
 def test_disk_cache_round_trips_across_client_instances(tmp_path) -> None:
     cache_path = tmp_path / "cache.json"
     session = FakeSession(payload=_load_fixture("fdc_chicken_breast_search.json"))
+    first_cache = FdcCache(cache_path)
     first_client = UsdaClient(
-        settings=_settings(fdc_api_key="test-key"), session=session, cache=FdcCache(cache_path)
+        settings=_settings(fdc_api_key="test-key"), session=session, cache=first_cache
     )
     first_client.search_food("chicken breast")
+    # `set_payload` batches disk writes and only auto-flushes every 50
+    # pending entries (see FdcCache) -- a single write here would not have
+    # hit disk yet without this explicit flush, so a second FdcCache
+    # instance on the same path (below) wouldn't see it.
+    first_cache.flush()
 
     assert cache_path.exists()
 
