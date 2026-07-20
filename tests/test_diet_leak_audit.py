@@ -60,3 +60,40 @@ def test_ground_truth_flags_real_dairy_curd_alongside_bean_curd() -> None:
     # real dairy ingredient in the same recipe is not hidden by it.
     recipe = _recipe(["bean curd", "cheese curds", "rice"])
     assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["dairy-free"]) is True
+
+
+# --- Systematic ground-truth-vs-production vocabulary diff closure,
+# 2026-07-20 (docs/BACKLOG.md) -- audit-side twins of
+# constraint_engine._LOOKALIKE_EXCLUSIONS' "capon"/"tripe"/"brie" entries.
+# Must never disagree with those production entries, same as the bean-curd
+# pair above.
+
+
+def test_ground_truth_does_not_flag_caponata_for_meat() -> None:
+    recipe = _recipe(["caponata", "rice"])
+    assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["vegetarian"]) is False
+
+
+def test_ground_truth_still_flags_bare_capon_for_meat() -> None:
+    recipe = _recipe(["capon", "rice"])
+    assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["vegetarian"]) is True
+
+
+def test_ground_truth_does_not_flag_striped_bass_for_tripe() -> None:
+    recipe = _recipe(["striped bass", "rice"])
+    assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["vegetarian"]) is False
+
+
+def test_ground_truth_still_flags_bare_tripe() -> None:
+    recipe = _recipe(["tripe", "rice"])
+    assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["vegetarian"]) is True
+
+
+def test_ground_truth_does_not_flag_obrien_potatoes_for_brie() -> None:
+    recipe = _recipe(["o'brien frozen potatoes", "rice"])
+    assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["dairy-free"]) is False
+
+
+def test_ground_truth_still_flags_bare_brie() -> None:
+    recipe = _recipe(["brie cheese", "rice"])
+    assert _ground_truth_violates(recipe, DIET_GROUND_TRUTH["dairy-free"]) is True

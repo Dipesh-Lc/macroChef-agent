@@ -75,6 +75,50 @@ _DAIRY = frozenset(
         # _LOOKALIKE_EXCLUSIONS["curd"] so this addition doesn't
         # over-block soy-based bean-curd rows.
         "curd",
+        # --- 2026-07-20, systematic ground-truth-vs-production vocabulary
+        # diff closure (docs/BACKLOG.md) -- 9 dairy terms confirmed present
+        # in scripts/audit_diet_leaks.py's independent GROUND_TRUTH_DAIRY
+        # ground truth but missing from this production table. Corpus-hit
+        # counts below are measured against the current 3,859-recipe active
+        # corpus (2026-07-20; supersede the 2026-07-19 diff's now-stale
+        # counts, which were taken before A3's re-grounding run and B5 --
+        # corpus composition has since shifted slightly). All 9 are
+        # unambiguously dairy for THIS allergen/dairy-free purpose;
+        # "gruyere"'s SEPARATE, still-open question (is PDO-governed gruyere
+        # vegetarian, i.e. rennet source for the _RENNET_SET_CHEESES
+        # vegetarian check) is out of scope here -- gruyere contains milk
+        # regardless of rennet source, so this addition is correct
+        # independent of that unresolved question (see "Gorgonzola / gruyere
+        # PDO-verification cluster" in docs/BACKLOG.md).
+        #   - "gruyere": a Swiss/French cow's-milk cheese by definition. 8 hits.
+        "gruyere",
+        #   - "provolone": an Italian cow's-milk cheese by definition. 5 hits.
+        "provolone",
+        #   - "creme fraiche": cultured dairy cream by definition. 4 hits.
+        "creme fraiche",
+        #   - "custard": egg-and-MILK (or cream) based dessert/sauce by
+        #     definition; "custard powder" (the corpus's dominant spelling)
+        #     is prepared with milk, not a milk-free product on its own.
+        #     5 hits.
+        "custard",
+        #   - "brie": a French cow's-milk soft cheese by definition. 3 raw
+        #     substring hits, but see _LOOKALIKE_EXCLUSIONS["brie"] below for
+        #     a genuine false-positive this addition would otherwise
+        #     introduce ("O'Brien potatoes" contains the literal substring
+        #     "brie") -- 2 real corpus hits once that carve-out is applied.
+        "brie",
+        #   - "kefir": a fermented MILK drink by definition. 2 hits.
+        "kefir",
+        #   - "camembert": a French cow's-milk soft cheese by definition.
+        #     1 hit.
+        "camembert",
+        #   - "queso": Spanish for "cheese" -- "queso fresco"/"queso"
+        #     generically refers to a dairy cheese in every standard
+        #     culinary sense. 1 hit.
+        "queso",
+        #   - "gouda": a Dutch cow's-milk cheese by definition. 0 corpus
+        #     hits today -- future-import defense only.
+        "gouda",
     }
 )
 
@@ -306,7 +350,18 @@ _CRUSTACEAN = frozenset(
         "shrimp",
     }
 )
-_MOLLUSK = frozenset({"clam", "mussel", "oyster", "scallop", "shellfish"})
+# "calamari"/"octopus"/"squid" are cephalopod mollusks (class Cephalopoda,
+# phylum Mollusca), not crustaceans -- biologically the same broad grouping
+# as clam/mussel/oyster/scallop above, which this codebase already treats as
+# _MOLLUSK beyond the narrower FALCPA/EU Annex II "molluscs" species lists,
+# fail-closed and consistent with those existing entries. Added 2026-07-20
+# (systematic ground-truth-vs-production vocabulary diff closure,
+# docs/BACKLOG.md): squid 3 corpus hits, calamari/octopus 0 (future-import
+# defense), measured against the current 3,859-recipe active corpus. Also
+# added to MEAT_ALIASES below for the independent vegetarian/vegan
+# diet-type check -- same dual-membership pattern as "gelatin"/
+# "worcestershire"/"caviar".
+_MOLLUSK = frozenset({"calamari", "clam", "mussel", "octopus", "oyster", "scallop", "shellfish", "squid"})
 
 _FISH = frozenset(
     {
@@ -357,6 +412,17 @@ _FISH = frozenset(
         "trout",
         "tuna",
         "white fish",
+        # "caviar" is fish roe (sturgeon or other fish species) by definition
+        # -- FALCPA's fish allergen designation and EU Regulation 1169/2011,
+        # Annex II, point 4 ("Fish") both cover roe/caviar as fish-derived.
+        # Added 2026-07-20 (systematic ground-truth-vs-production vocabulary
+        # diff closure, docs/BACKLOG.md): 0 corpus hits today (future-import
+        # defense only, verified against the current 3,859-recipe active
+        # corpus). Also added to MEAT_ALIASES below -- same dual-membership
+        # pattern as "gelatin"/"worcestershire" (independent allergen-table
+        # and vegetarian/vegan diet-type memberships, mirroring that these
+        # two checks share vocabulary but are not the same check).
+        "caviar",
         # Traditional Worcestershire sauce is fermented with anchovies, a
         # fish allergen under FALCPA and under EU Regulation 1169/2011,
         # Annex II, point 4 ("Fish"); FARE (Food Allergy Research &
@@ -521,6 +587,33 @@ MEAT_ALIASES = {
     # substring of "bratwursts" (the corpus's plural spelling). Added
     # 2026-07-19 (A1 revise round, diet-leak audit).
     "bratwurst",
+    # "brisket": a beef primal cut. Added 2026-07-20 (systematic
+    # ground-truth-vs-production vocabulary diff closure, docs/BACKLOG.md):
+    # confirmed against scripts/audit_diet_leaks.py's independent
+    # GROUND_TRUTH_MEAT_POULTRY_FISH ground truth. 8 corpus hits (current
+    # 3,859-recipe active corpus, 2026-07-20), all "beef brisket"/"corned
+    # beef brisket" phrasings that already independently substring-match the
+    # pre-existing bare "beef" term -- measured over-block delta versus the
+    # pre-change vegetarian-passing baseline: 0 (see this task's report).
+    "brisket",
+    # "calamari": the common culinary name for squid (a cephalopod mollusk,
+    # not a crustacean). Also added to ALLERGEN_ALIASES["fish"]'s sibling
+    # _MOLLUSK set below (see that set's inline comment for the taxonomy
+    # citation) -- dual membership mirrors "gelatin"/"worcestershire"/
+    # "caviar". 0 corpus hits today -- future-import defense only.
+    "calamari",
+    # "capon": a castrated rooster, raised specifically for meat -- poultry,
+    # by definition. 0 corpus hits today (future-import defense), but see
+    # _LOOKALIKE_EXCLUSIONS["capon"] below: "capon" is a literal substring of
+    # "caponata" (a vegetarian eggplant dish), so a bare addition here
+    # without that carve-out would wrongly exclude vegetarian caponata rows
+    # once "capon" does appear in a future import.
+    "capon",
+    # "caviar": fish roe by definition. Also added to ALLERGEN_ALIASES["fish"]
+    # above (see that entry's inline comment) -- dual membership mirrors
+    # "gelatin"/"worcestershire". 0 corpus hits today -- future-import
+    # defense only.
+    "caviar",
     "chicken",
     "chorizo",
     "duck",
@@ -533,10 +626,21 @@ MEAT_ALIASES = {
     # above; see that set's inline comment).
     "gelatin",
     "goose",
+    # "grouper": a fish species. The generic bare "fish" term in
+    # ALLERGEN_ALIASES["fish"] only substring-matches ingredient names
+    # literally containing the word "fish" -- a species-name-only row like
+    # "grouper (4 lbs)" needs its own explicit entry. Added 2026-07-20
+    # (systematic ground-truth-vs-production vocabulary diff closure,
+    # docs/BACKLOG.md). 1 corpus hit; measured over-block delta: 0.
+    "grouper",
     "ham",
     "hot dog",
     "lamb",
     "lard",
+    # "mackerel": a fish species, same "generic 'fish' term doesn't catch a
+    # bare species name" reasoning as "grouper" above. Added 2026-07-20.
+    # 2 corpus hits; measured over-block delta: 0.
+    "mackerel",
     # Standard marshmallows are set with gelatin (animal-derived; see the
     # "gelatin" entry above), per the Vegetarian Resource Group's Vegetarian
     # FAQ, which names gelatin as a common hidden non-vegetarian ingredient.
@@ -548,11 +652,37 @@ MEAT_ALIASES = {
     # could drift. Corpus variants ("marshmallow creme"/"cream", "mini"/
     # "miniature marshmallows") all substring-match the bare "marshmallow".
     "marshmallow",
+    # "meatball": a ground-meat preparation by definition (the corpus's only
+    # occurrence, "small meatballs" in Meatball Soup, contains no other
+    # already-covered meat term). Added 2026-07-20 (systematic
+    # ground-truth-vs-production vocabulary diff closure, docs/BACKLOG.md).
+    # 1 corpus hit; measured over-block delta: 0.
+    "meatball",
+    # "octopus": a cephalopod mollusk, same taxonomy note as "calamari"
+    # above -- also added to the sibling _MOLLUSK set below. 0 corpus hits
+    # today -- future-import defense only.
+    "octopus",
     "pancetta",
     "pepperoni",
+    # "perch": a fish species, same "generic 'fish' term doesn't catch a
+    # bare species name" reasoning as "grouper"/"mackerel" above. Added
+    # 2026-07-20. 0 corpus hits today -- future-import defense only.
+    "perch",
+    # "pheasant": game-bird poultry by definition. Added 2026-07-20. 0
+    # corpus hits today -- future-import defense only.
+    "pheasant",
     "pork",
     "prosciutto",
+    # "quail": game-bird poultry by definition. Added 2026-07-20. 0 corpus
+    # hits today -- future-import defense only.
+    "quail",
     "rabbit",
+    # "salami": a cured meat sausage by definition. Added 2026-07-20
+    # (systematic ground-truth-vs-production vocabulary diff closure,
+    # docs/BACKLOG.md). 3 corpus hits; measured over-block delta: 0 (every
+    # corpus salami row already independently fails vegetarian via another
+    # already-covered meat term in the same recipe).
+    "salami",
     "sausage",
     # "sirloin": a beef primal cut. The reverse-arm substring match this
     # enables (a longer recipe term like "sirloin tip roast" containing the
@@ -562,10 +692,40 @@ MEAT_ALIASES = {
     # unrelated "pepper"/"pepperoni" substring collision; see
     # docs/BACKLOG.md for that separate, NOT-fixed-here finding).
     "sirloin",
+    # "squid": a cephalopod mollusk, same taxonomy note as "calamari"/
+    # "octopus" above -- also added to the sibling _MOLLUSK set below. Added
+    # 2026-07-20 (systematic ground-truth-vs-production vocabulary diff
+    # closure, docs/BACKLOG.md). 3 corpus hits; measured over-block delta: 0
+    # (every corpus squid row already independently fails vegetarian via
+    # another already-covered fish/seafood term in the same recipe --
+    # ALLERGEN_ALIASES["fish"]/["shellfish"] already flow into
+    # _VEGETARIAN_EXCLUDED_TERMS, so this addition is defense-in-depth for a
+    # hypothetical future squid-only recipe, not a change in current
+    # coverage).
+    "squid",
     "steak",
     "suet",
+    # "tilapia": a fish species, same "generic 'fish' term doesn't catch a
+    # bare species name" reasoning as "grouper"/"mackerel"/"perch" above.
+    # Added 2026-07-20. 1 corpus hit; measured over-block delta: 0.
+    "tilapia",
+    # "tripe": an offal meat (stomach lining) by definition. 0 corpus hits
+    # today (future-import defense), but see _LOOKALIKE_EXCLUSIONS["tripe"]
+    # below: "tripe" is a literal substring of "striped" -- t-r-i-p-e appears
+    # contiguously inside s-t-r-i-p-e-d (verified character-by-character). A
+    # bare addition here without that carve-out would make any future
+    # "striped bass"/"striped anything" ingredient row wrongly register as
+    # containing tripe, an unrelated, incorrect substring match with no real
+    # tripe content -- the same class of false positive as
+    # "chestnut"/"water chestnut" or "capon"/"caponata". Added 2026-07-20
+    # (systematic ground-truth-vs-production vocabulary diff closure,
+    # docs/BACKLOG.md).
+    "tripe",
     "turkey",
     "veal",
+    # "venison": deer meat by definition. Added 2026-07-20. 0 corpus hits
+    # today -- future-import defense only.
+    "venison",
     "worcestershire",
 }
 HONEY_ALIASES = {"honey"}
@@ -678,6 +838,43 @@ _LOOKALIKE_EXCLUSIONS: dict[str, frozenset[str]] = {
     # correction in scripts/audit_diet_leaks.py (GROUND_TRUTH_FALSE_
     # POSITIVE_PAIRS), which must never disagree with this entry.
     "curd": frozenset({"bean curd", "bean curds"}),
+    # "capon" (added to MEAT_ALIASES 2026-07-20, systematic
+    # ground-truth-vs-production vocabulary diff closure, docs/BACKLOG.md) is
+    # a literal substring of "caponata", a vegetarian eggplant dish (no
+    # capon/poultry content) -- water-chestnut class. 0 "caponata" corpus
+    # rows as of this change (future-import defense, not a measured fix
+    # today), but confirmed as a live landmine that would have wrongly
+    # excluded any future caponata recipe from vegetarian/vegan results.
+    # Mirrored into scripts/audit_diet_leaks.py's
+    # GROUND_TRUTH_FALSE_POSITIVE_PAIRS, which must never disagree with this
+    # entry.
+    "capon": frozenset({"caponata"}),
+    # "tripe" (added to MEAT_ALIASES 2026-07-20, same task) is a literal
+    # substring of "striped" -- t-r-i-p-e appears contiguously inside
+    # s-t-r-i-p-e-d (verified character-by-character) -- so "striped bass"/
+    # any "striped X" ingredient name would otherwise wrongly register as
+    # containing tripe. 0 "striped" corpus rows as of this change
+    # (future-import defense, added preemptively alongside "tripe" itself so
+    # the landmine never goes live even for a day). Mirrored into
+    # scripts/audit_diet_leaks.py's GROUND_TRUTH_FALSE_POSITIVE_PAIRS.
+    "tripe": frozenset({"striped", "striped bass"}),
+    # "brie" (added to _DAIRY 2026-07-20, same task) is a literal substring
+    # of "o'brien" -- b-r-i-e appears contiguously inside o-'-b-r-i-e-n
+    # (verified character-by-character) -- so "O'Brien potatoes" (a diced
+    # hash-brown-style potato product, no dairy content), a REAL, currently
+    # present corpus ingredient (imp_d1c5441716f4524f, "30 Minute Smoked
+    # Sausage and Corn Chowder"), would otherwise wrongly register as
+    # containing brie. Discovered during this change's own over-block
+    # measurement (not part of the original task-spec diff, which only
+    # flagged capon/caponata and tripe/striped) -- same water-chestnut-class
+    # false positive, fixed on the same basis. "obrien" (no apostrophe) is
+    # included defensively too: ingredient names in this corpus are raw
+    # free text with no guaranteed consistent apostrophe/quote-mark usage,
+    # and an apostrophe-free "obrien" spelling would defeat the
+    # apostrophe'd "o'brien" carve-out above without also matching this
+    # entry. Mirrored into scripts/audit_diet_leaks.py's
+    # GROUND_TRUTH_FALSE_POSITIVE_PAIRS.
+    "brie": frozenset({"o'brien", "obrien"}),
 }
 
 

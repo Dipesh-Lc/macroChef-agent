@@ -117,8 +117,24 @@ def _load_corpus(path: Path) -> list[Recipe]:
 #     ingredient alongside bean curd (e.g. "cheese curds") still correctly
 #     flags: the scrub below only strips the false-positive phrase itself,
 #     never a same-named different ingredient's own term.
+#
+# Added 2026-07-20 (systematic ground-truth-vs-production vocabulary diff
+# closure, docs/BACKLOG.md) -- the audit-side twins of
+# constraint_engine._LOOKALIKE_EXCLUSIONS' "capon"/"tripe"/"brie" entries.
+# Must never disagree with those production entries, same as "curd" above:
+#   - "capon" (GROUND_TRUTH_MEAT_POULTRY_FISH) vs "caponata": a vegetarian
+#     eggplant dish, no capon/poultry content.
+#   - "tripe" (GROUND_TRUTH_MEAT_POULTRY_FISH) vs "striped"/"striped bass":
+#     "tripe" is a literal substring of "striped" (t-r-i-p-e inside
+#     s-t-r-i-p-e-d).
+#   - "brie" (GROUND_TRUTH_DAIRY) vs "o'brien"/"obrien": "brie" is a literal
+#     substring of "o'brien" (as in "O'Brien potatoes"), a real corpus
+#     ingredient (imp_d1c5441716f4524f) with no dairy content.
 GROUND_TRUTH_FALSE_POSITIVE_PAIRS: dict[str, frozenset[str]] = {
     "curd": frozenset({"bean curd", "bean curds"}),
+    "capon": frozenset({"caponata"}),
+    "tripe": frozenset({"striped", "striped bass"}),
+    "brie": frozenset({"o'brien", "obrien"}),
 }
 
 

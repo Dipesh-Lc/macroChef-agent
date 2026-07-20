@@ -2194,7 +2194,38 @@ def test_meat_terms_are_superset_of_meat_alias_flesh_words() -> None:
     # MEAT_FLESH_TERMS fully contains -- if constraint_engine.MEAT_ALIASES
     # ever gains a new flesh word without a matching addition here, this
     # test fails loudly instead of the two vocabularies silently drifting.
-    non_flesh_exclusions = {"gelatin", "worcestershire", "marshmallow", "suet", "lard"}
+    #
+    # 2026-07-20 (systematic ground-truth-vs-production vocabulary diff
+    # closure, docs/BACKLOG.md) added 8 more fish/seafood-domain terms to
+    # MEAT_ALIASES: "calamari"/"octopus"/"squid" (cephalopod mollusk meat)
+    # and "caviar" (fish roe, not muscle flesh at all -- same non-flesh
+    # class as gelatin/worcestershire) and "grouper"/"mackerel"/"perch"/
+    # "tilapia" (fish species). Same "different hazard class, fish-side"
+    # reasoning as the pre-existing gelatin/worcestershire exclusions above:
+    # this module already models fish/mollusk/crustacean vocabulary
+    # separately and independently via its own FISH_TERMS/MOLLUSK_TERMS/
+    # CRUSTACEAN_TERMS constants (deliberately NOT imported from
+    # constraint_engine, per this module's own independence rationale), so
+    # these 8 terms belong in that separate domain, not MEAT_FLESH_TERMS.
+    # The remaining 8 new MEAT_ALIASES additions this same change made ARE
+    # genuinely land-animal/poultry flesh ("brisket", "capon", "meatball",
+    # "pheasant", "quail", "salami", "tripe", "venison") and are added to
+    # MEAT_FLESH_TERMS below instead.
+    non_flesh_exclusions = {
+        "gelatin",
+        "worcestershire",
+        "marshmallow",
+        "suet",
+        "lard",
+        "calamari",
+        "caviar",
+        "grouper",
+        "mackerel",
+        "octopus",
+        "perch",
+        "squid",
+        "tilapia",
+    }
     flesh_subset = constraint_engine.MEAT_ALIASES - non_flesh_exclusions
     assert flesh_subset <= MEAT_FLESH_TERMS
 

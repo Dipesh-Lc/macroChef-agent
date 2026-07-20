@@ -322,6 +322,15 @@ _KETJAP_SATISFIER_EXTRAS: frozenset[str] = frozenset(
 # inline citations and docs/BACKLOG.md for the full per-term rationale).
 # `test_meat_terms_are_superset_of_meat_alias_flesh_words` is the tripwire
 # that caught the drift -- required, not optional.
+#
+# Revision round 4 (2026-07-20, systematic ground-truth-vs-production
+# vocabulary diff closure, docs/BACKLOG.md): "brisket"/"capon"/"meatball"/
+# "pheasant"/"quail"/"salami"/"tripe"/"venison" added -- the same tripwire
+# test caught constraint_engine.MEAT_ALIASES's addition of these 8
+# genuinely land-animal/poultry flesh words (plus 8 fish/seafood-domain
+# words -- "calamari"/"caviar"/"grouper"/"mackerel"/"octopus"/"perch"/
+# "squid"/"tilapia" -- which belong in this module's separate FISH_TERMS/
+# MOLLUSK_TERMS domain instead, per the exclusion list in that test).
 MEAT_FLESH_TERMS: frozenset[str] = frozenset(
     {
         "bacon", "beef", "chicken", "chorizo", "duck", "goose", "ham",
@@ -329,6 +338,8 @@ MEAT_FLESH_TERMS: frozenset[str] = frozenset(
         "rabbit", "sausage", "steak", "turkey", "veal",
         "sparerib", "spare rib",
         "bologna", "bratwurst", "sirloin",
+        "brisket", "capon", "meatball", "pheasant", "quail", "salami",
+        "tripe", "venison",
     }
 )
 # Satisfier-only extra (revision round 1, 2026-07-18 ruling): "roast"

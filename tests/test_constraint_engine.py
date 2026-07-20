@@ -1068,3 +1068,192 @@ def test_bare_ham_does_not_block_gluten_allergy() -> None:
     recipe = _recipe(ingredients=["rice", "ham"], allergens=[])
 
     assert not contains_allergen(recipe, ["gluten"])
+
+
+# --- Systematic ground-truth-vs-production vocabulary diff closure,
+# 2026-07-20 (docs/BACKLOG.md) -- 16 meat/poultry/fish terms added to
+# MEAT_ALIASES (anchovies was already a no-op: normalize_ingredient
+# depluralizes it to "anchovy", already a _FISH member) and 9 dairy terms
+# added to _DAIRY, all confirmed against scripts/audit_diet_leaks.py's
+# independent ground truth. See constraint_engine.py's inline citations for
+# the per-term sourcing and corpus-hit counts.
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    [
+        "beef brisket",
+        "salami",
+        "grouper",
+        "mackerel",
+        "small meatballs",
+        "tilapia",
+        "capon",
+        "pheasant",
+        "quail",
+        "tripe",
+        "venison",
+    ],
+)
+def test_new_meat_vocabulary_blocks_vegetarian_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_anchovies_plural_already_a_no_op_still_blocks_vegetarian() -> None:
+    # Confirms the task-spec claim directly: "anchovies" is NOT a separate
+    # MEAT_ALIASES entry -- normalize_ingredient depluralizes it to
+    # "anchovy", already a member of ALLERGEN_ALIASES["fish"], which already
+    # flows into _VEGETARIAN_EXCLUDED_TERMS. This is a pre-existing behavior
+    # pin, not a new addition.
+    recipe = _recipe(ingredients=["rice", "whole anchovies"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("diet_type", ["vegetarian", "vegan"])
+@pytest.mark.parametrize("ingredient", ["squid", "squid rings", "calamari", "octopus"])
+def test_cephalopod_mollusks_block_vegetarian_and_vegan_diet(diet_type: str, ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type=diet_type))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize("ingredient", ["squid", "calamari", "octopus"])
+def test_cephalopod_mollusks_also_block_shellfish_and_seafood_allergy(ingredient: str) -> None:
+    # Dual taxonomy membership: these are cephalopod mollusks (this codebase
+    # already treats clam/mussel/oyster/scallop as _MOLLUSK, beyond the
+    # narrower FALCPA "molluscs" species list), so they must trip BOTH the
+    # vegetarian/vegan diet-type check (via MEAT_ALIASES, tested above) AND
+    # the shellfish/seafood allergen check (via _MOLLUSK) independently.
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["shellfish"])
+    assert contains_allergen(recipe, ["seafood"])
+
+
+def test_caviar_blocks_vegetarian_and_vegan_diet() -> None:
+    recipe = _recipe(ingredients=["rice", "caviar"], allergens=[], diet_tags=[])
+
+    assert not validate_recipe(recipe, _profile(diet_type="vegetarian")).is_valid
+    assert not validate_recipe(recipe, _profile(diet_type="vegan")).is_valid
+
+
+def test_caviar_also_blocks_fish_and_seafood_allergy() -> None:
+    # Dual membership: caviar is fish roe, added to both MEAT_ALIASES (diet
+    # path, tested above) and ALLERGEN_ALIASES["fish"] (allergy path) --
+    # mirrors the existing "gelatin"/"worcestershire" dual-membership
+    # pattern.
+    recipe = _recipe(ingredients=["rice", "caviar"], allergens=[])
+
+    assert contains_allergen(recipe, ["fish"])
+    assert contains_allergen(recipe, ["seafood"])
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    ["gruyere cheese", "provolone cheese", "creme fraiche", "custard powder", "brie cheese", "kefir", "camembert"],
+)
+def test_new_dairy_vocabulary_blocks_dairy_allergy_and_dairy_free_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["dairy"])
+    assert violates_diet_type(recipe, "dairy-free") is True
+
+
+def test_gruyere_blocks_both_dairy_allergy_and_dairy_free_diet() -> None:
+    # Explicit dual-check example requested by the task spec's acceptance
+    # criteria: one dairy term proven to trigger both paths independently.
+    recipe = _recipe(ingredients=["rice", "gruyere cheese"], allergens=[], diet_tags=[])
+
+    assert contains_allergen(recipe, ["dairy"])
+    assert not validate_recipe(recipe, _profile(diet_type="dairy-free")).is_valid
+
+
+# --- "capon"/"caponata" lookalike carve-out ---------------------------------
+# "capon" (a castrated rooster, poultry) is a literal substring of
+# "caponata" (a vegetarian eggplant dish, unrelated). Same water-chestnut-
+# class mechanism, wired identically.
+
+
+def test_caponata_not_blocked_by_vegetarian_diet() -> None:
+    recipe = _recipe(ingredients=["rice", "caponata"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert result.is_valid
+
+
+def test_bare_capon_still_blocks_vegetarian_diet() -> None:
+    recipe = _recipe(ingredients=["rice", "capon"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_real_capon_cannot_hide_behind_caponata_in_same_recipe() -> None:
+    # Per-ingredient-term semantics: a recipe with BOTH the lookalike
+    # ("caponata") AND a real capon ingredient must still be blocked, on the
+    # strength of the real ingredient's own term.
+    recipe = _recipe(ingredients=["caponata", "capon", "rice"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+# --- "tripe"/"striped" lookalike carve-out ----------------------------------
+# "tripe" is a literal substring of "striped" (t-r-i-p-e inside
+# s-t-r-i-p-e-d). Added preemptively alongside "tripe" itself so this
+# landmine never goes live even for a day.
+
+
+@pytest.mark.parametrize("ingredient", ["striped bass", "striped watermelon"])
+def test_striped_ingredients_not_blocked_by_vegetarian_diet_via_tripe(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert result.is_valid
+
+
+def test_bare_tripe_still_blocks_vegetarian_diet() -> None:
+    recipe = _recipe(ingredients=["rice", "tripe"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_real_tripe_cannot_hide_behind_striped_in_same_recipe() -> None:
+    recipe = _recipe(ingredients=["striped bass", "tripe", "rice"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+# --- "brie"/"o'brien" lookalike carve-out (self-discovered during this
+# task's over-block measurement, not part of the original task-spec diff) --
+# "brie" is a literal substring of "o'brien" (b-r-i-e inside o-'-b-r-i-e-n),
+# a real corpus ingredient ("O'Brien potatoes", no dairy content).
+
+
+@pytest.mark.parametrize("ingredient", ["o'brien frozen potatoes", "obrien potatoes"])
+def test_obrien_potatoes_not_blocked_by_dairy_allergy_or_dairy_free_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[], diet_tags=[])
+
+    assert not contains_allergen(recipe, ["dairy"])
+    assert violates_diet_type(recipe, "dairy-free") is False
+
+
+def test_bare_brie_still_blocks_dairy_allergy_and_dairy_free_diet() -> None:
+    recipe = _recipe(ingredients=["rice", "brie cheese"], allergens=[], diet_tags=[])
+
+    assert contains_allergen(recipe, ["dairy"])
+    assert violates_diet_type(recipe, "dairy-free") is True
+
+
+def test_real_brie_cannot_hide_behind_obrien_potatoes_in_same_recipe() -> None:
+    recipe = _recipe(ingredients=["o'brien potatoes", "brie cheese", "rice"], allergens=[])
+
+    assert contains_allergen(recipe, ["dairy"])
