@@ -45,6 +45,14 @@ class Recipe(BaseModel):
     owner_user_id: str | None = None
     is_user_saved: bool = False
     is_active: bool = True
+    # Set at load time (app.rag.loaders.attach_restoration) for recipes that
+    # were quarantined by an earlier import and released back to active by a
+    # later reimport (bucket == "released" in a
+    # data/processed/scraped_archive_reimport_ledger_*.jsonl sidecar) --
+    # drives the "Restored from source" display badge (roadmap item B6).
+    # Purely a display flag: never read by constraint_engine, scoring, or
+    # nutrition, and never set by the LLM.
+    restored_from_quarantine: bool = False
 
     @field_validator("ingredients", mode="after")
     @classmethod

@@ -25,6 +25,23 @@ def _macro_badge(recipe: dict) -> str:
     return base
 
 
+def _restored_badge(recipe: dict) -> str:
+    # Deterministic display-only flag set by app.rag.loaders.attach_restoration
+    # from the A1 corpus-rebuild reimport ledger (recipe_id tagged
+    # bucket == "released") -- never decided or worded by the LLM. Purely
+    # informational: absent for every recipe that wasn't recovered from
+    # quarantine, present (fixed copy, nothing recipe-derived interpolated)
+    # for the ~981 that were. See roadmap item B6.
+    if not recipe.get("restored_from_quarantine"):
+        return ""
+    return (
+        '<span class="restored-badge" '
+        'title="Recovered from an earlier import\'s quarantine after the '
+        '2026-07-19 corpus rebuild verified it against the original recipe '
+        'page.">Restored from source</span>'
+    )
+
+
 def _score_tile(label: str, value: float) -> str:
     return f"""
     <div class="score-tile">
@@ -85,6 +102,7 @@ def render_recommendations(api_url: str, recommendations: list[dict]) -> None:
                       <div class="recipe-meta">
                         {escape(recipe.get('cuisine') or 'Any cuisine')} | {escape(recipe.get('meal_type') or 'meal')} | {recipe.get('cook_time_min') or '?'} min
                       </div>
+                      {_restored_badge(recipe)}
                     </div>
                     <div class="macro-badge">{escape(_macro_badge(recipe))}</div>
                   </div>

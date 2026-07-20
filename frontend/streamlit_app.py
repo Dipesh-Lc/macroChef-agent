@@ -255,6 +255,17 @@ st.markdown(
       white-space: nowrap;
       font-size: .82rem;
     }
+    .restored-badge {
+      display: inline-flex;
+      align-items: center;
+      margin-top: .4rem;
+      color: #f3d49a;
+      border: 1px solid #7b653d;
+      background: var(--macro-warning);
+      border-radius: 999px;
+      padding: .18rem .62rem;
+      font-size: .78rem;
+    }
     .score-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
