@@ -366,9 +366,71 @@ _MOLLUSK = frozenset({"calamari", "clam", "mussel", "octopus", "oyster", "scallo
 _FISH = frozenset(
     {
         "anchovy",
+        # "catfish"/"swordfish": fish species. Found 2026-07-20 (this task,
+        # "derive_allergen_labels natural-language robustness" Part B --
+        # corpus-wide sweep of common fish species against _FISH's then
+        # current contents, prompted by an advisor review's bass/sea-bass
+        # finding -- see this task's report for the factual correction that
+        # "sea bass" was already present in _FISH at the commit the review
+        # cited). 4 corpus hits each (current 3,884-recipe active corpus,
+        # 2026-07-20; catfish: "catfish fillets"/"catfish fillets (4 oz.
+        # each)"; swordfish: "swordfish fillets"/"fresh swordfish steaks"/
+        # "swordfish steaks or 6 salmon steaks"/"swordfish steaks... or 4
+        # tuna steaks..."). Measured delta: 0 on both -- every one of these 8
+        # occurrences was ALREADY correctly detected before this addition,
+        # because "catfish"/"swordfish" both literally CONTAIN the bare
+        # "fish" substring already in this set ("cat"+"fish",
+        # "sword"+"fish"), so the pre-existing bare "fish" term already
+        # substring-matches them. This addition is pure vocabulary
+        # completeness/label-accuracy (so `derive_allergen_labels`'s output
+        # names the specific species rather than relying on a coincidental
+        # substring match), not a new detection -- reported honestly as 0
+        # delta rather than overclaiming a safety fix, matching this
+        # project's "measure, don't assume" discipline. No collision risk:
+        # neither is a substring of any other corpus ingredient name.
+        "catfish",
+        "swordfish",
         "cod",
         "fish",
         "flounder",
+        # "grouper": a fish species. Found 2026-07-20 (this task, same sweep
+        # as catfish/swordfish above). 1 corpus hit (current 3,884-recipe
+        # active corpus): imp_096552b6325d5645 "Sopa Leao Velloso", ingredient
+        # "grouper (4 lbs)". Measured delta: a GENUINE 1-recipe under-block
+        # fix, not redundant -- that recipe's only other seafood ingredients
+        # are shrimp/mussels/clams/crabmeat/lobster (crustacean/mollusk), so
+        # it was already correctly blocked for "shellfish"/"crustacean"/
+        # "seafood" allergies but NOT for a "fish"-only allergy (a materially
+        # different, narrower allergen category) before this addition -- this
+        # is exactly the missed-real-fish-content class of gap the advisor
+        # review's (factually incorrect, re: sea bass specifically) finding
+        # was pointing at, confirmed real here instead. No collision risk:
+        # "grouper" is not a substring of any other corpus ingredient name.
+        "grouper",
+        # "mackerel": a fish species. Found 2026-07-20 (same sweep). 2 corpus
+        # hits (current 3,884-recipe active corpus): imp_388d3cea0e235e0b
+        # "Fish En Escabeche" ("...or 1 lb mackerel fillet...", alongside
+        # "haddock fillets", already caught) and imp_d3b6dcc2b0af528b
+        # "Brittany Mixed Fish Soup" ("Flounder, mackerel, cod, or haddock",
+        # alongside "fish"/"flounder"/"cod"/"haddock", already caught).
+        # Measured delta: 0 -- both occurrences are redundant with an
+        # already-matching _FISH term in the same ingredient row/recipe, pure
+        # vocabulary completeness. No collision risk found.
+        "mackerel",
+        # "perch": a fish species. Found 2026-07-20 (same sweep). 0 corpus
+        # hits today (checked against the active corpus, the quarantine
+        # sidecar, and the seed set) -- future-import defense only, same
+        # basis as this task's other 0-hit MEAT_ALIASES/_FISH additions (see
+        # "venison"/"quail"/"pheasant" etc. below). No collision risk found
+        # (0 hits means nothing to collide with today).
+        "perch",
+        # "tilapia": a fish species. Found 2026-07-20 (same sweep). 1 corpus
+        # hit (current 3,884-recipe active corpus): imp_4e2b084f47675396
+        # "Fish Fillets", ingredient "fish fillet (any kind-I used Tilapia)".
+        # Measured delta: 0 -- the same ingredient row already contains the
+        # bare word "fish" directly, so this was already correctly detected;
+        # pure vocabulary completeness. No collision risk found.
+        "tilapia",
         # Gelatin and isinglass: a documented fail-closed POLICY CHOICE, not a
         # claim that gelatin is usually fish -- mainstream US retail gelatin
         # (e.g. Knox, Jell-O) is porcine/bovine, and FALCPA requires the
@@ -928,11 +990,34 @@ def _recipe_safety_terms(recipe: Recipe) -> set[str]:
 
 def derive_allergen_labels(ingredient_names: list[str]) -> list[str]:
     """Deterministically derive which ALLERGEN_ALIASES keys a set of ingredient
-    names implies, using the same membership table as contains_allergen. This
-    is the reverse direction: given ingredients, produce labels (used for
-    imported/candidate recipes' `allergens` field and for Chroma index
-    metadata) rather than given an allergy, test membership. Never trust a
-    source-provided allergen field for imports — derive it here instead.
+    names implies, using the same membership table AND the same matching
+    mechanism as contains_allergen. This is the reverse direction: given
+    ingredients, produce labels (used for imported/candidate recipes'
+    `allergens` field and for Chroma index metadata) rather than given an
+    allergy, test membership. Never trust a source-provided allergen field
+    for imports — derive it here instead.
+
+    SUBSTRING-CONSISTENT WITH contains_allergen (docs/BACKLOG.md,
+    "`derive_allergen_labels` natural-language robustness"): a prior version
+    of this function did EXACT-SET membership matching (tuned for the old
+    atomized CSV's single-word ingredient names), so it silently under-
+    covered natural-language ingredient text with descriptor clauses or "X or
+    Y" alternatives (e.g. "2 eggs, slightly beaten") that contains_allergen's
+    own substring matching already handles correctly. This version reuses
+    `_expand_allergen_terms` and `_any_term_matches` — the exact same two
+    primitives `contains_allergen` calls — per candidate ALLERGEN_ALIASES
+    key, plus the same bare-nut-word compensation `contains_allergen` applies
+    (see `_BARE_NUT_WORD`/`_BARE_NUT_TRIGGER_VOCABULARY` below — required so
+    a bare, unqualified "nuts" ingredient row derives "tree nut"/"peanut"/
+    "nuts" here exactly as it is blocked there; that compensation is NOT
+    reachable via ordinary substring matching alone, only via the
+    word-boundary check). This makes the CLOSED-LOOP INVARIANT hold by
+    construction: for every ingredient list and every allergen key L, `L in
+    derive_allergen_labels(names)` iff `contains_allergen(recipe_with_these_
+    ingredient_names, [L])` is True — see the corpus-wide property test in
+    test_constraint_engine.py. Zero changes to contains_allergen itself: this
+    function only ever calls the same already-tested primitives, never
+    modifies them.
 
     Deliberately returns every matching ALLERGEN_ALIASES key as-is (e.g. both
     "dairy" and "milk" if either fires — their alias sets are identical, so
@@ -943,13 +1028,19 @@ def derive_allergen_labels(ingredient_names: list[str]) -> list[str]:
     test coverage backing that choice — a needless risk in an allergen-safety
     path. Callers needing metadata-flag membership (recipe_indexing_service)
     only ever check the 8 canonical keys directly, so this is a drop-in,
-    behavior-preserving replacement for the equivalent inline logic it lifts.
+    superset-only replacement for the prior exact-set logic (see acceptance
+    criterion 1 in the backlog entry above: new labels are always a superset
+    of what the exact-set version derived, verified corpus-wide).
     """
     terms = _normalized_terms(ingredient_names)
+    has_bare_nut_word = _ingredient_names_have_bare_nut_word(ingredient_names)
     labels: set[str] = set()
-    for allergen_key, aliases in ALLERGEN_ALIASES.items():
-        alias_terms = _normalized_terms(aliases)
-        if allergen_key in terms or terms & alias_terms:
+    for allergen_key in ALLERGEN_ALIASES:
+        expanded_terms = _expand_allergen_terms([allergen_key])
+        matched = _any_term_matches(terms, expanded_terms)
+        if not matched and expanded_terms & _BARE_NUT_TRIGGER_VOCABULARY and has_bare_nut_word:
+            matched = True
+        if matched:
             labels.add(allergen_key)
     return sorted(labels)
 
@@ -1071,6 +1162,24 @@ _BARE_NUT_TRIGGER_VOCABULARY = _normalized_terms(_TREE_NUT | _PEANUT)
 
 def _recipe_has_bare_nut_word(recipe: Recipe) -> bool:
     return any(_BARE_NUT_WORD.search(item.name) for item in recipe.ingredients)
+
+
+def _ingredient_names_have_bare_nut_word(ingredient_names: list[str]) -> bool:
+    """Same word-boundary bare-"nut"/"nuts" check as `_recipe_has_bare_nut_word`
+    directly above, applied to raw ingredient-name strings instead of
+    `Recipe.ingredients` items -- `derive_allergen_labels` takes raw names,
+    not a `Recipe`, and it needs this exact check (not a re-derivation) to
+    stay substring-consistent with `contains_allergen`'s own bare-nut
+    compensation OR-arm (see `contains_allergen` below): a bare, unqualified
+    "nuts" ingredient row (16 real corpus recipes, e.g. "Applesauce Cake") is
+    caught by `contains_allergen(recipe, ["tree nut"])`/(["peanut"]) ONLY via
+    that second OR-arm, never via ordinary substring matching -- so without
+    this helper, `derive_allergen_labels` would silently miss the "tree
+    nut"/"nuts"/"peanut" labels for those recipes even though
+    `contains_allergen` correctly blocks them, breaking both the `new_labels
+    ⊇ old_labels` superset guarantee and the closed-loop invariant.
+    """
+    return any(_BARE_NUT_WORD.search(name) for name in ingredient_names if name)
 
 
 def contains_allergen(recipe: Recipe, allergies: list[str]) -> bool:

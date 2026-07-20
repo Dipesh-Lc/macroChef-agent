@@ -390,7 +390,110 @@ were pre-registered before anyone saw a result.
   quarantines individually cured at source, see
   `data/processed/quarantine_history/manual_release_adjudication_20260719T070200Z.md`).
 
-- **FULL TREATMENT: `derive_allergen_labels` natural-language robustness**
+- **FULL TREATMENT: `derive_allergen_labels` natural-language robustness —
+  DONE 2026-07-20** (advisor-consulted design, executed this task; commit
+  message prefix "A1 backlog / derive_allergen_labels substring-consistency
+  + fish-allergen coverage fix"). `derive_allergen_labels`
+  (`app/services/constraint_engine.py`) now reuses the exact same two
+  primitives `contains_allergen` calls (`_expand_allergen_terms`,
+  `_any_term_matches`), plus the same bare-nut-word compensation
+  (`_ingredient_names_have_bare_nut_word`, mirroring
+  `_recipe_has_bare_nut_word`), per candidate `ALLERGEN_ALIASES` key, instead
+  of exact-set membership matching. **Verified corpus-wide (3,884 active
+  recipes, 2026-07-20), not sampled:** (1) superset regression check: 0
+  recipes lost a label versus the pre-fix exact-set baseline; (2) closed-loop
+  invariant (`L in derive_allergen_labels(ingredient_names)` iff
+  `contains_allergen(recipe, [L])`, isolated to ingredient-name-driven
+  matching — see the discovered artifact note below): 0 violations across
+  every recipe x every `ALLERGEN_ALIASES` key; (3) aggregate label-gain:
+  2,779 recipes gained >=1 label, 0 recipes lost any label; (4) quarantine
+  churn from `title_ingredient_integrity.py`/`instructions_ingredient_
+  integrity.py` (both OR-arm against `recipe.allergens`): 0 newly flagged, 0
+  newly released — no surprise, matches the fail-safe expectation; (5) one
+  corpus-wide Chroma reindex run (`scripts/backfill_recipe_library.py` ->
+  `RecipeIndexingService().rebuild_index_clean`): 3,884 indexed = 3,859
+  active imported + 25 seed, parity confirmed; (6) `contains_allergen`
+  itself: zero behavioral changes (only reused, never modified) — full
+  pytest green, `evaluate_demo_set.py` allergy_violation_rate 0.000.
+  **Discovered artifact (documented, not fixed, out of scope):** testing the
+  closed-loop invariant against a recipe's LIVE, not-yet-backfilled
+  `recipe.allergens` field (rather than isolating to ingredient names) surfaces
+  34 (pre-fix) / 166 (post-fix, in-memory self-consistent backfill) apparent
+  mismatches, all traced to one pre-existing, unrelated mechanism:
+  `_recipe_safety_terms` unions ingredient names WITH `recipe.allergens`
+  text, and the literal label string `"shellfish"` contains the substring
+  `"fish"` — so any recipe whose *label* says "shellfish" trivially also
+  satisfies a bare "fish" substring check via that label text alone,
+  independent of real fish content. This is a separate, pre-existing
+  property of `contains_allergen`/`_recipe_safety_terms` (present before this
+  task, out of scope to touch per this task's hard constraints) — not a new
+  gap. `data/processed/imported_recipes.jsonl`'s `allergens` field itself was
+  deliberately NOT backfilled as part of this task (that's `scripts/
+  backfill_allergen_labels.py`'s job, run historically as its own dedicated
+  commit — see commit `06db836`) — a natural follow-up if the metadata-display
+  benefit is wanted in the live served corpus; the Chroma index's
+  `contains_<allergen>` boolean metadata flags already reflect the new
+  derivation today regardless, since `recipe_indexing_service._recipe_
+  allergen_terms` calls `derive_allergen_labels` live at index time.
+
+  **Part B, folded into the same task — fish-species vocabulary sweep**
+  (`_FISH` in `app/services/constraint_engine.py`): an advisor review of item
+  2 (vocabulary gap closure, commit `d200acb`) claimed `_FISH` was missing
+  `bass`/`sea bass` and that a real corpus recipe (`imp_aa6c99eae4fd5f58`,
+  "Sea Bass in a Sesame Seaweed Spaetzle Crust", ingredient "filets of fresh
+  sea bass") was under-blocked for fish allergy. **Factual correction,
+  confirmed via `git log -p -S'"sea bass"'`:** `"sea bass"` has been a member
+  of `_FISH` since commit `4bf2377` (2026-07-17) — before item 2 and before
+  this task — and `contains_allergen(recipe, ["fish"])` already returned
+  `True` for that exact recipe prior to any change in this task. The review's
+  specific claim does not hold; bare `"bass"` was never added (by design —
+  see the existing inline comment on why the two-word phrase is pinned
+  instead) and still isn't. A broader sweep (this task, same rigor as item
+  2's own additions) found a REAL, analogous, measured gap instead: `_FISH`
+  added `catfish`, `swordfish`, `grouper`, `mackerel`, `perch`, `tilapia` —
+  `grouper` is a genuine 1-recipe under-block fix (`imp_096552b6325d5645`
+  "Sopa Leao Velloso": grouper alongside shrimp/mussels/clams/crabmeat/
+  lobster — was correctly blocked for shellfish/crustacean/seafood allergies
+  but NOT for a fish-only allergy before this fix); `catfish`/`swordfish` (4
+  corpus hits each) and `tilapia` (1 hit) measured 0 delta (already
+  indirectly caught via the pre-existing bare `"fish"` term — both species
+  names literally contain the substring "fish", and the tilapia row's own
+  ingredient text separately says "fish fillet"); `mackerel` (2 hits)
+  measured 0 delta (both rows already carry another `_FISH` term); `perch` (0
+  corpus hits) is future-import defense only, matching item 2's own 0-hit
+  precedent. No collision risk found for any of the six terms (verified
+  against the full active corpus, quarantine sidecar, and seed set).
+
+- **New, standalone: `recipe.allergens` self-reference in
+  `_recipe_safety_terms` creates a "shellfish implies fish" false-positive
+  artifact** (`app/services/constraint_engine.py`, `_recipe_safety_terms` /
+  `contains_allergen`). Discovered 2026-07-20 during the
+  `derive_allergen_labels` substring-consistency task's corpus-wide
+  invariant testing (see the DONE entry directly above for the full
+  measurement: 34/166 apparent "invariant violations", all this one root
+  cause). Mechanism: `_recipe_safety_terms` unions ingredient names WITH
+  `recipe.allergens` text, and the literal label string `"shellfish"`
+  contains the substring `"fish"` — so `contains_allergen(recipe,
+  ["fish"])` can return `True` purely because the recipe's OWN, ALREADY-SET
+  `allergens` field says `"shellfish"`, independent of any real fish
+  ingredient. Direction is fail-safe (over-block, not under-block) so it is
+  NOT a release blocker, but it is an unintentional-looking side effect of
+  composing raw label strings into the same term pool as ingredient names,
+  not a designed rule ("shellfish" and "fish" are legitimately different
+  allergen categories — a shrimp-only recipe should not display as
+  containing fish). Out of scope for the task that found it (hard
+  constraint: zero changes to `contains_allergen`). Options for a future
+  pass: (a) leave as documented, accepted fail-safe behavior; (b) exclude
+  `recipe.allergens` from `_recipe_safety_terms`'s candidate pool entirely
+  and rely solely on ingredient-name substring matching (would need a full
+  safety-benchmark re-run to confirm no under-block regression, since some
+  existing passing cases might depend on this same union for an unrelated,
+  legitimate reason); (c) scope the union more narrowly. No pre-registered
+  criteria yet — needs its own FULL TREATMENT consult given it touches
+  `contains_allergen`.
+
+- **`derive_allergen_labels` natural-language robustness — ORIGINAL FINDING
+  (superseded by the DONE entry directly above; kept for history).**
   (`app/services/constraint_engine.py:553`). Found during task A1's
   scraped-archive re-import (run `20260719T061239Z`, corpus generation
   before the run that actually landed). `derive_allergen_labels` does
@@ -599,7 +702,39 @@ were pre-registered before anyone saw a result.
   terms and these could be released on the same cure basis as the
   Kellogg's Rice Krispies rows already fixed automatically).
 - **FULL TREATMENT: systematic ground-truth-vs-production vocabulary
-  diff** (2026-07-19, spun out of the MEAT_ALIASES gap fix above).
+  diff — CLOSED 2026-07-20, commit `d200acb`** ("A1 backlog / vocabulary gap
+  closure: close the systematic ground-truth-vs-production vocabulary
+  diff."). All 17 meat/poultry/fish gaps and 9 dairy gaps listed below were
+  added to `MEAT_ALIASES`/`_DAIRY`/`_FISH`/`_MOLLUSK`
+  (`app/services/constraint_engine.py`), with the `capon`/`caponata` and
+  `tripe`/`striped` collision landmines carved out via
+  `_LOOKALIKE_EXCLUSIONS` (plus a third, `brie`/`o'brien`, discovered during
+  that change's own over-block measurement) — see commit `d200acb` for the
+  full diff and `tests/test_constraint_engine.py`/`tests/
+  test_diet_leak_audit.py` for the regression coverage. Measured over-block
+  delta versus the pre-change passing baseline: 0 for every term in the
+  corpus at that time.
+  **Follow-up correction (2026-07-20, `derive_allergen_labels`
+  substring-consistency task, same day):** an advisor review of `d200acb`
+  claimed `_FISH` was still missing `bass`/`sea bass`, citing a specific
+  corpus recipe (`imp_aa6c99eae4fd5f58`, "filets of fresh sea bass") as a
+  live under-block. That specific claim was FACTUALLY INCORRECT — `"sea
+  bass"` was already a member of `_FISH` since an earlier commit,
+  `4bf2377` (2026-07-17), predating `d200acb` itself; `contains_allergen`
+  already correctly blocked that exact recipe for fish allergy before
+  `d200acb` ever ran. This was a blind spot shared by both production and
+  the audit's own ground truth (`GROUND_TRUTH_MEAT_POULTRY_FISH` also never
+  listed bare `"bass"`/`"sea bass"` as a gap, since the diff run below never
+  flagged it — it wasn't actually missing). The broader review-prompted
+  sweep DID find a real, different gap in the SAME `_FISH` set: `grouper`,
+  `mackerel`, `perch`, `tilapia` (species already present in this diff's own
+  `GROUND_TRUTH_MEAT_POULTRY_FISH` / `MEAT_ALIASES`, per the numbers below,
+  but never carried over to `_FISH` itself) plus `catfish`/`swordfish` — all
+  six added in the `derive_allergen_labels` substring-consistency task's
+  commit; see that task's report / the entry above in this file for the
+  measured deltas (one genuine 1-recipe under-block fix, `grouper`; the rest
+  measured 0 delta, already redundantly covered).
+  Original diff findings, preserved for history (2026-07-19, spun out of the MEAT_ALIASES gap fix above).
   `scripts/audit_diet_leaks.py`'s independent `GROUND_TRUTH_MEAT_POULTRY_
   FISH`/`GROUND_TRUTH_DAIRY`/`GROUND_TRUTH_GLUTEN` sets are the
   hand-authored ground truth the diet-leak audit checks production

@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from app.schemas.ingredient import Ingredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets, UserProfile
-from app.rag.loaders import load_recipes
+from app.rag.loaders import load_corpus, load_recipes
 from app.services.constraint_engine import (
     ALLERGEN_ALIASES,
     contains_allergen,
@@ -1257,3 +1257,200 @@ def test_real_brie_cannot_hide_behind_obrien_potatoes_in_same_recipe() -> None:
     recipe = _recipe(ingredients=["o'brien potatoes", "brie cheese", "rice"], allergens=[])
 
     assert contains_allergen(recipe, ["dairy"])
+
+
+# --- `derive_allergen_labels` substring-consistency (docs/BACKLOG.md,
+# "`derive_allergen_labels` natural-language robustness") ------------------
+#
+# derive_allergen_labels used to do EXACT-SET membership matching (tuned for
+# the old atomized CSV's single-word ingredient names), so it silently
+# under-covered natural-language ingredient text with descriptor clauses
+# ("2 eggs, slightly beaten") or "X or Y" alternatives -- unlike
+# contains_allergen, which substring-matches directly. These tests pin the
+# fix: substring-consistent, natural-language ingredient text now derives the
+# same labels contains_allergen would block on.
+
+
+def test_derive_allergen_labels_handles_descriptor_clause() -> None:
+    # "2 eggs, slightly beaten" -- exact-set matching against a normalized
+    # "egg"/"eggs" token would miss this; substring matching against the raw
+    # ingredient text does not.
+    labels = derive_allergen_labels(["2 eggs, slightly beaten"])
+
+    assert "egg" in labels
+    assert "eggs" in labels
+
+
+def test_derive_allergen_labels_handles_or_alternative_clause() -> None:
+    labels = derive_allergen_labels(["1/2 cup butter or 1/2 cup margarine, softened"])
+
+    assert "dairy" in labels
+    assert "milk" in labels
+
+
+def test_derive_allergen_labels_handles_bare_nuts_ingredient() -> None:
+    # Compensating case (see _ingredient_names_have_bare_nut_word in
+    # constraint_engine.py): a bare, unqualified "nuts" ingredient row is
+    # caught by contains_allergen only via its word-boundary bare-nut
+    # compensation, not ordinary substring matching -- derive_allergen_labels
+    # must reproduce that exact compensation to stay substring-consistent.
+    labels = derive_allergen_labels(["flour", "nuts"])
+
+    assert "tree nut" in labels
+    assert "peanut" in labels
+    assert "nuts" in labels
+    assert "nut" in labels
+
+
+def test_derive_allergen_labels_bare_nuts_does_not_imply_gluten() -> None:
+    # Safe-control tripwire: the bare-nut compensation must stay scoped to
+    # the tree-nut/peanut vocabulary only (via _BARE_NUT_TRIGGER_VOCABULARY),
+    # never leak into an unrelated key like gluten.
+    labels = derive_allergen_labels(["olive oil", "nuts"])
+
+    assert "gluten" not in labels
+
+
+def _derive_allergen_labels_exact_set_baseline(ingredient_names: list[str]) -> list[str]:
+    """Reconstruction of the EXACT-SET matching algorithm derive_allergen_labels
+    used before this task (commit d200acb and earlier) -- kept here ONLY as a
+    regression baseline for the corpus-wide superset test below (pre-registered
+    acceptance criterion 1, docs/BACKLOG.md: `new_labels ⊇ old_labels` for
+    every recipe). Never imported by production code; do not "simplify" this
+    to call the real `derive_allergen_labels` -- that would make the
+    regression test vacuous.
+    """
+    from app.services.constraint_engine import _normalized_terms
+
+    terms = _normalized_terms(ingredient_names)
+    labels: set[str] = set()
+    for allergen_key, aliases in ALLERGEN_ALIASES.items():
+        alias_terms = _normalized_terms(aliases)
+        if allergen_key in terms or terms & alias_terms:
+            labels.add(allergen_key)
+    return sorted(labels)
+
+
+_FULL_CORPUS = load_corpus()
+
+
+@pytest.mark.skipif(not _FULL_CORPUS, reason="corpus not present")
+def test_derive_allergen_labels_is_corpuswide_superset_of_exact_set_baseline() -> None:
+    """Pre-registered acceptance criterion 1: for every recipe in the full
+    corpus, the new substring-consistent derivation must never LOSE a label
+    the old exact-set derivation found -- zero regressions, verified across
+    every recipe (3,884 as of this task, 2026-07-20), not a sample."""
+    violations = []
+    for recipe in _FULL_CORPUS:
+        names = [item.name for item in recipe.ingredients]
+        old_labels = set(_derive_allergen_labels_exact_set_baseline(names))
+        new_labels = set(derive_allergen_labels(names))
+        if not old_labels.issubset(new_labels):
+            violations.append((recipe.recipe_id, old_labels - new_labels))
+
+    assert violations == [], f"{len(violations)} recipes lost a label: {violations[:10]}"
+
+
+@pytest.mark.skipif(not _FULL_CORPUS, reason="corpus not present")
+def test_derive_allergen_labels_closed_loop_invariant_across_full_corpus() -> None:
+    """Pre-registered acceptance criterion 3: for every recipe and every
+    ALLERGEN_ALIASES key L, `L in derive_allergen_labels(ingredient_names)`
+    iff `contains_allergen(recipe, [L])`.
+
+    Isolated to ingredient-name-driven matching (recipe.allergens is cleared
+    on the copy tested here). Why: contains_allergen's live safety-term pool
+    (`_recipe_safety_terms`) unions ingredient names WITH `recipe.allergens`
+    itself -- a separate, pre-existing, documented design choice this task
+    must not change (HARD CONSTRAINT: zero behavioral changes to
+    contains_allergen). That self-reference creates a known, pre-existing,
+    orthogonal artifact: the literal allergen label "shellfish" contains the
+    substring "fish", so a recipe whose *label* already says "shellfish"
+    trivially also satisfies a bare "fish" substring check via that label
+    text alone, regardless of any real fish ingredient -- unrelated to (and
+    would falsely fail) the actual property this task fixes: natural-language
+    INGREDIENT-NAME substring consistency. Clearing `recipe.allergens`
+    isolates exactly that property. Measured, not assumed: with this
+    isolation, zero violations across the full corpus; without it (using the
+    corpus's live, not-yet-backfilled `allergens` field), 34 apparent
+    "violations" appear, and after an in-memory self-consistent backfill,
+    166 -- every single one attributable to this same shellfish/fish
+    substring artifact (verified by inspection), none a new gap introduced
+    by this task. See this task's report for the full measurement.
+    """
+    violations = []
+    for recipe in _FULL_CORPUS:
+        names = [item.name for item in recipe.ingredients]
+        new_labels = set(derive_allergen_labels(names))
+        isolated = recipe.model_copy(deep=True)
+        isolated.allergens = []
+        for key in ALLERGEN_ALIASES:
+            derived = key in new_labels
+            live = contains_allergen(isolated, [key])
+            if derived != live:
+                violations.append((recipe.recipe_id, key, derived, live))
+
+    assert violations == [], f"{len(violations)} invariant violations: {violations[:10]}"
+
+
+# --- Part B: fish-species vocabulary sweep (docs/BACKLOG.md, same task) ---
+#
+# An advisor review of item 2 ("vocabulary gap closure", commit d200acb)
+# claimed _FISH was missing "bass"/"sea bass" and that a real corpus recipe
+# ("filets of fresh sea bass") was under-blocked for fish allergy. FACTUAL
+# CORRECTION (this task's report): "sea bass" was already a member of _FISH
+# as of commit 4bf2377 (2026-07-17), well before item 2 and before this
+# task -- contains_allergen(recipe, ["fish"]) already returned True for that
+# exact corpus recipe (imp_aa6c99eae4fd5f58) before any change in this task.
+# The review's specific bass/sea-bass claim does not hold. A broader sweep
+# (this task) DID find a real, analogous, measured gap instead: "grouper"
+# (1 real corpus recipe, genuine under-block) plus "catfish"/"swordfish"/
+# "mackerel"/"tilapia" (0 measured delta, already redundantly covered) and
+# "perch" (0 corpus hits, future-import defense) -- fixed here.
+
+
+def test_sea_bass_already_blocked_fish_allergy_before_this_task() -> None:
+    # Tripwire for the factual correction above -- pinned so a future
+    # refactor can't silently regress this already-working case.
+    recipe = _recipe(ingredients=["rice", "filets of fresh sea bass"], allergens=[])
+
+    assert contains_allergen(recipe, ["fish"])
+
+
+def test_grouper_blocks_fish_allergy_alongside_shellfish() -> None:
+    # Real corpus case: imp_096552b6325d5645 "Sopa Leao Velloso" -- grouper
+    # plus shrimp/mussels/clams/crabmeat/lobster. Before this addition, a
+    # fish-only allergy (distinct from shellfish/crustacean) was NOT blocked
+    # despite real grouper content -- the genuine under-block this addition
+    # fixes.
+    recipe = _recipe(
+        ingredients=[
+            "grouper (4 lbs)",
+            "shrimp (in shell)",
+            "mussels or 24 clams in shell",
+            "crabmeat",
+            "lobster meat",
+        ],
+        allergens=[],
+    )
+
+    assert contains_allergen(recipe, ["fish"])
+    assert contains_allergen(recipe, ["shellfish"])
+    assert contains_allergen(recipe, ["crustacean"])
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    ["catfish fillets", "swordfish steaks", "mackerel fillet", "fish fillet (any kind-I used Tilapia)"],
+)
+def test_new_fish_species_terms_block_fish_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["fish"])
+
+
+def test_bare_perch_blocks_fish_allergy_future_import_defense() -> None:
+    # 0 corpus hits today -- future-import defense, same basis as this
+    # module's other 0-hit additions.
+    recipe = _recipe(ingredients=["rice", "perch fillet"], allergens=[])
+
+    assert contains_allergen(recipe, ["fish"])
