@@ -97,6 +97,18 @@ def _analyze(recipe: Recipe, inventory: list[ConfirmedIngredient]) -> list[Ingre
     return results
 
 
+def analyze_ingredients(recipe: Recipe, inventory: list[ConfirmedIngredient]) -> list[IngredientMatchResult]:
+    """Public per-ingredient match results, aligned 1:1 (same order, same length)
+    with `recipe.ingredients`.
+
+    The fine-grained sibling of `split_used_and_missing` for callers that need
+    more than a flattened name list -- e.g. `nutrition_scorer.pantry_match_score`,
+    which pairs each result back up with its source `Ingredient` to weight the
+    score by mass rather than by count.
+    """
+    return _analyze(recipe, inventory)
+
+
 def split_used_and_missing(
     recipe: Recipe, inventory: list[ConfirmedIngredient]
 ) -> tuple[list[str], list[str]]:
@@ -107,7 +119,7 @@ def split_used_and_missing(
     """
     used: list[str] = []
     missing: list[str] = []
-    for result in _analyze(recipe, inventory):
+    for result in analyze_ingredients(recipe, inventory):
         if result.status in ("satisfied", "present_uncompared"):
             used.append(result.name)
         else:

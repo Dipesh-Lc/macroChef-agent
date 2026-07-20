@@ -1,3 +1,5 @@
+import pytest
+
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.nutrition import FoodMacros, GroundingStatus, RecipeNutrition
 from app.schemas.recipe import Recipe
@@ -98,32 +100,104 @@ def test_macro_fit_neutral_when_grounded_but_flagged() -> None:
 
 
 def test_calculates_pantry_match_correctly() -> None:
+    # All four ingredients are bare name-only strings (no amount/unit), so
+    # none of them can resolve to grams -- this is the pure count-fallback
+    # path (mass_coverage == 0.0), and the score is identical to the old
+    # name-count formula: 2 used / 4 total = 0.5.
     recipe = _recipe()
     inventory = [
         ConfirmedIngredient(name="chicken breast"),
         ConfirmedIngredient(name="rice"),
     ]
 
-    score, used, missing = pantry_match_score(recipe, inventory)
+    score, used, missing, mass_coverage = pantry_match_score(recipe, inventory)
 
     assert score == 0.5
     assert used == ["chicken breast", "rice"]
     assert missing == ["spinach", "bell pepper"]
+    assert mass_coverage == 0.0
 
 
 def test_pantry_used_missing_amount_aware() -> None:
     # Enough chicken, but short on rice -> rice counts as missing despite being present.
+    # Both ingredients are gram-denominated (fully convertible), so this is the
+    # pure mass-weighted path: 500 g used chicken / 800 g total = 0.625, NOT
+    # the old 1/2 == 0.5 name-count value.
     recipe = _recipe(ingredients=["500 g chicken breast", "300 g rice"])
     inventory = [
         ConfirmedIngredient(name="chicken breast", amount=600, unit="g"),
         ConfirmedIngredient(name="rice", amount=100, unit="g"),
     ]
 
-    score, used, missing = pantry_match_score(recipe, inventory)
+    score, used, missing, mass_coverage = pantry_match_score(recipe, inventory)
 
     assert used == ["chicken breast"]
     assert missing == ["rice"]
-    assert score == 0.5
+    assert score == 0.625
+    assert mass_coverage == 1.0
+
+
+def test_pantry_mass_weighting_disagrees_with_old_name_count() -> None:
+    # Three cheap 5 g spices are present (would dominate the old name-count
+    # score: 3/4 == 0.75), but the recipe's one heavy 500 g protein is
+    # missing. Mass-weighting must score this LOW, not high -- this is the
+    # exact bug B5 fixes.
+    recipe = _recipe(
+        ingredients=["500 g chicken breast", "5 g salt", "5 g pepper", "5 g garlic powder"]
+    )
+    inventory = [
+        ConfirmedIngredient(name="salt", amount=5, unit="g"),
+        ConfirmedIngredient(name="pepper", amount=5, unit="g"),
+        ConfirmedIngredient(name="garlic powder", amount=5, unit="g"),
+    ]
+
+    score, used, missing, mass_coverage = pantry_match_score(recipe, inventory)
+
+    old_name_count_score = len(used) / len(recipe.ingredients)
+    assert old_name_count_score == 0.75
+    assert mass_coverage == 1.0
+    assert missing == ["chicken breast"]
+    # 15 g used / 515 g total.
+    assert score == pytest.approx(15 / 515)
+    assert score < old_name_count_score
+
+
+def test_pantry_match_fallback_when_nothing_convertible() -> None:
+    # No ingredient has an amount at all -> nothing resolves to grams, so the
+    # score must fall all the way back to the old pure name-count formula,
+    # and mass_coverage must report 0.0 so callers can see the score isn't
+    # actually mass-grounded.
+    recipe = _recipe(ingredients=["chicken breast", "rice", "spinach"])
+    inventory = [ConfirmedIngredient(name="chicken breast"), ConfirmedIngredient(name="rice")]
+
+    score, used, missing, mass_coverage = pantry_match_score(recipe, inventory)
+
+    assert mass_coverage == 0.0
+    assert score == pytest.approx(2 / 3)
+    assert used == ["chicken breast", "rice"]
+    assert missing == ["spinach"]
+
+
+def test_pantry_match_mixed_convertible_and_unconvertible() -> None:
+    # Two gram-denominated ingredients (chicken used, rice missing) blend with
+    # two bare unconvertible ones (spinach used, bell pepper missing).
+    # Convertible pool: 400 g used / 500 g total = 0.8, weight 2/4 = 0.5.
+    # Unconvertible pool: 1 used / 2 total = 0.5, weight 2/4 = 0.5.
+    # Blended: 0.5*0.8 + 0.5*0.5 = 0.65.
+    recipe = _recipe(
+        ingredients=["400 g chicken breast", "100 g rice", "spinach", "bell pepper"]
+    )
+    inventory = [
+        ConfirmedIngredient(name="chicken breast", amount=400, unit="g"),
+        ConfirmedIngredient(name="spinach"),
+    ]
+
+    score, used, missing, mass_coverage = pantry_match_score(recipe, inventory)
+
+    assert used == ["chicken breast", "spinach"]
+    assert missing == ["rice", "bell pepper"]
+    assert mass_coverage == 0.5
+    assert score == pytest.approx(0.65)
 
 
 def test_score_recipe_returns_breakdown() -> None:

@@ -11,6 +11,13 @@ from app.schemas.user import UserProfile
 class RecipeScore(BaseModel):
     recipe_id: str
     pantry_match_score: float = Field(ge=0, le=1)
+    # Fraction of `pantry_match_score`'s ingredient count that was actually
+    # weighed in grams (via app.utils.unit_converter.to_grams) rather than
+    # falling back to count-based scoring -- the pantry-scoring analog of
+    # RecipeNutrition.coverage. 0.0 means the score above is the old pure
+    # name-count formula (nothing on the recipe resolved to a mass); 1.0 means
+    # it's pure mass-weighted. See nutrition_scorer.pantry_match_score.
+    pantry_mass_coverage: float = Field(ge=0, le=1, default=0.0)
     macro_fit_score: float = Field(ge=0, le=1)
     time_score: float = Field(ge=0, le=1)
     preference_score: float = Field(ge=0, le=1)
