@@ -207,3 +207,59 @@ def test_missing_macro_targets_returns_422(monkeypatch: pytest.MonkeyPatch) -> N
     response = client.post("/plan/day", json=payload)
 
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /plan/shopping-list (roadmap item B4).
+# ---------------------------------------------------------------------------
+
+
+def test_shopping_list_endpoint_aggregates_across_plan_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    recipe_a = Recipe(
+        recipe_id="a",
+        title="Recipe A",
+        servings=1,
+        ingredients=[{"name": "tofu", "amount": 200, "unit": "g"}],
+        instructions=["Cook."],
+    )
+    recipe_b = Recipe(
+        recipe_id="b",
+        title="Recipe B",
+        servings=1,
+        ingredients=[{"name": "tofu", "amount": 150, "unit": "g"}],
+        instructions=["Cook."],
+    )
+    monkeypatch.setattr(routes_day_planner_module, "load_corpus", lambda: [recipe_a, recipe_b])
+
+    client = _client()
+    payload = {
+        "plan": {
+            "items": [
+                {"recipe_id": "a", "title": "Recipe A", "servings": 1},
+                {"recipe_id": "b", "title": "Recipe B", "servings": 2},
+            ],
+            "meals_planned": 3,
+            "trusted_pool_size": 2,
+            "total_calories": 0,
+            "total_protein_g": 0,
+            "total_carbs_g": 0,
+            "total_fat_g": 0,
+            "total_fiber_g": 0,
+            "target_calories": 0,
+            "target_protein_g": 0,
+            "calories_relative_error": 0,
+            "protein_relative_error": 0,
+            "within_tolerance": True,
+        },
+        "inventory": [{"name": "tofu", "amount": 100, "unit": "g"}],
+    }
+
+    response = client.post("/plan/shopping-list", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["shopping_list"]) == 1
+    item = body["shopping_list"][0]
+    assert item["name"] == "tofu"
+    assert item["amount"] == pytest.approx(400.0)  # (200 + 2*150) - 100
+    assert item["unit"] == "g"

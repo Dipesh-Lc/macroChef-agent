@@ -1,10 +1,16 @@
 from fastapi import APIRouter, HTTPException
 
 from app.rag.loaders import load_corpus
-from app.schemas.day_plan import DayPlanRequest, DayPlanResponse
+from app.schemas.day_plan import (
+    DayPlanRequest,
+    DayPlanResponse,
+    ShoppingListRequest,
+    ShoppingListResponse,
+)
 from app.schemas.recommendation import RejectedRecipe
 from app.services.constraint_engine import validate_recipe
 from app.services.day_planner import assemble_day_plan, assemble_plan
+from app.services.procurement_service import build_shopping_list_for_plan
 
 router = APIRouter(prefix="/plan", tags=["day-planner"])
 
@@ -62,3 +68,25 @@ def plan_day(request: DayPlanRequest) -> DayPlanResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return DayPlanResponse(plan=plan, rejected_recipes=rejected)
+
+
+@router.post("/shopping-list", response_model=ShoppingListResponse)
+def plan_shopping_list(request: ShoppingListRequest) -> ShoppingListResponse:
+    """B4: shopping-list aggregation across an already-assembled DayPlan.
+
+    NOT a safety endpoint: `request.plan` was already safety-cleared by
+    POST /plan/day (every recipe_id in `plan.items` passed
+    constraint_engine.validate_recipe there); this endpoint does pure
+    quantity arithmetic (app.services.procurement_service.
+    build_shopping_list_for_plan) against the full corpus looked up by id,
+    and makes no allergy/diet decision of its own -- see that function's
+    docstring for the servings-scaling and merge logic.
+    """
+    all_recipes = load_corpus()
+    recipe_lookup = {
+        recipe.recipe_id: recipe
+        for recipe in all_recipes
+        if recipe.recipe_id in {item.recipe_id for item in request.plan.items}
+    }
+    shopping_list = build_shopping_list_for_plan(request.plan, recipe_lookup, request.inventory)
+    return ShoppingListResponse(shopping_list=shopping_list)

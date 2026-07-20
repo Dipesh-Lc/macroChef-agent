@@ -12,6 +12,8 @@ silent "have enough", so callers can surface that the amount wasn't verified.
 from dataclasses import dataclass
 from typing import Literal
 
+from app.schemas.day_plan import DayPlan
+from app.schemas.ingredient import Ingredient, scale_ingredients
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recipe import Recipe
 from app.schemas.shopping import ShoppingItem
@@ -201,3 +203,109 @@ def merge_shopping_lists(items: list[ShoppingItem]) -> list[ShoppingItem]:
             )
         )
     return merged
+
+
+def build_shopping_list_for_plan(
+    plan: DayPlan,
+    recipe_lookup: dict[str, Recipe],
+    inventory: list[ConfirmedIngredient],
+) -> list[ShoppingItem]:
+    """Aggregate a shopping list across every `PlanItem` in a `DayPlan`
+    (roadmap item B4).
+
+    Scale factor (confirmed against app.services.day_planner and
+    app.services.grounding_job): `PlanItem.servings` is a COUNT OF SERVINGS
+    of that recipe selected into the plan -- `_build_day_plan` sums
+    `trusted_per_serving(recipe).calories * count` -- while `Recipe.
+    ingredients` is written for the WHOLE recipe as authored, which yields
+    `recipe.servings` servings (see grounding_job.py's
+    `compute_recipe_macros(recipe.ingredients, servings=recipe.servings)`,
+    the same divisor used to produce `per_serving`). So the amount-scaling
+    factor from as-written ingredients to "ingredients needed for
+    `item.servings` servings" is `item.servings / (recipe.servings or 1)`,
+    NOT `item.servings` alone (which would over-scale any recipe whose
+    `servings` != 1). A `PlanItem` whose `recipe_id` isn't in `recipe_lookup`
+    is skipped, never fabricated.
+
+    IMPORTANT deviation from the naive "call build_shopping_list_for_recipe
+    per PlanItem, then merge_shopping_lists the results" composition: that
+    naive approach double-counts pantry availability whenever two recipes in
+    the same plan share an ingredient and the pantry covers each recipe's
+    INDIVIDUAL need but not their SUM -- `_analyze` compares each recipe's
+    need against the full, undepleted inventory independently, so an
+    ingredient can be "satisfied" (shortfall 0) against recipe A and
+    "satisfied" again against recipe B even though the pantry only actually
+    has enough for one of them. merge_shopping_lists then sums those
+    (wrong) per-recipe shortfalls, which are BOTH artificially low --
+    breaking the roadmap's reconciliation gate ("list quantities equal plan
+    requirements minus pantry, exactly"). See the worked failing case this
+    caught in tests/test_procurement_service.py's B4 tests.
+
+    The fix: combine every PlanItem's scaled ingredient requirements into
+    ONE consolidated need per (normalized) ingredient name BEFORE any pantry
+    comparison, then run pantry reconciliation exactly once (a single
+    `build_shopping_list_for_recipe` call against a synthetic combined-need
+    Recipe) -- reusing `_analyze`'s existing grams-based comparison and
+    `present_uncompared`/`missing`/`short` semantics unmodified. This is the
+    only aggregation logic B4 adds; the actual pantry comparison and
+    shortfall/status computation still come entirely from `_analyze` via
+    `build_shopping_list_for_recipe`, and per-ingredient contributing-recipe
+    titles are reattached afterward for display.
+    """
+    grams_by_name: dict[str, float | None] = {}
+    display_unit_by_name: dict[str, str | None] = {}
+    fallback_ingredient_by_name: dict[str, Ingredient] = {}
+    titles_by_name: dict[str, list[str]] = {}
+
+    for plan_item in plan.items:
+        recipe = recipe_lookup.get(plan_item.recipe_id)
+        if recipe is None:
+            continue
+        factor = plan_item.servings / (recipe.servings or 1)
+        for ingredient in scale_ingredients(recipe.ingredients, factor):
+            key = normalize_ingredient(ingredient.name)
+            if not key:
+                continue
+            titles_by_name.setdefault(key, [])
+            if recipe.title not in titles_by_name[key]:
+                titles_by_name[key].append(recipe.title)
+
+            if key not in fallback_ingredient_by_name:
+                fallback_ingredient_by_name[key] = ingredient
+                display_unit_by_name[key] = ingredient.unit
+                grams_by_name[key] = 0.0
+
+            grams = to_grams(ingredient.amount, ingredient.unit, name=ingredient.name)
+            if grams is None or grams_by_name[key] is None:
+                # Once any contributor's need can't be converted to grams,
+                # the true combined total is unknown -- fall back below
+                # rather than silently under/over-counting it.
+                grams_by_name[key] = None
+            else:
+                grams_by_name[key] += grams
+
+    combined_ingredients: list[Ingredient] = []
+    for key, grams in grams_by_name.items():
+        if grams is None:
+            # Not every contribution was quantity-comparable -- fall back to
+            # the first contributor's raw (name, amount, unit) so the
+            # existing present_uncompared / missing-without-amount paths in
+            # _analyze still apply rather than fabricating a combined number.
+            combined_ingredients.append(fallback_ingredient_by_name[key])
+            continue
+        unit = display_unit_by_name[key]
+        per_unit = to_grams(1, unit, name=key) if unit else None
+        if per_unit:
+            combined_ingredients.append(Ingredient(name=key, amount=grams / per_unit, unit=unit))
+        else:
+            combined_ingredients.append(Ingredient(name=key, amount=grams, unit="g"))
+
+    plan_recipe = Recipe(recipe_id="__plan__", title="Day Plan", ingredients=combined_ingredients)
+    items = build_shopping_list_for_recipe(plan_recipe, inventory)
+
+    attributed: list[ShoppingItem] = []
+    for item in items:
+        titles = titles_by_name.get(item.name)
+        reason = f"Needed for {', '.join(sorted(titles))}" if titles else item.reason
+        attributed.append(item.model_copy(update={"reason": reason}))
+    return attributed

@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 
+from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recommendation import RejectedRecipe
+from app.schemas.shopping import ShoppingItem
 from app.schemas.user import UserProfile
 
 
@@ -98,3 +100,22 @@ class DayPlanResponse(BaseModel):
     # RecommendationResponse.rejected_recipes (app.schemas.recommendation)
     # so a caller (and a reviewer) can verify the safety filter actually ran.
     rejected_recipes: list[RejectedRecipe] = Field(default_factory=list)
+
+
+class ShoppingListRequest(BaseModel):
+    """Wire contract for POST /plan/shopping-list (roadmap item B4).
+
+    `plan` is an already-assembled DayPlan (its recipe_ids were already
+    safety-cleared by /plan/day's constraint_engine.validate_recipe pass --
+    this endpoint makes no new safety decision, it only does quantity
+    arithmetic, so it takes no user_profile and never re-filters). `inventory`
+    is the pantry to reconcile against, same shape POST /plan/day's caller
+    already has on hand from app.api.routes_inventory.
+    """
+
+    plan: DayPlan
+    inventory: list[ConfirmedIngredient] = Field(default_factory=list)
+
+
+class ShoppingListResponse(BaseModel):
+    shopping_list: list[ShoppingItem] = Field(default_factory=list)
