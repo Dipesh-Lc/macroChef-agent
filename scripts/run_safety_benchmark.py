@@ -104,6 +104,7 @@ from app.rag.loaders import load_corpus  # noqa: E402
 from app.schemas.library import RecipeDiscoveryRequest  # noqa: E402
 from app.schemas.recommendation import RecommendationRequest  # noqa: E402
 from app.schemas.user import MacroTargets, UserProfile  # noqa: E402
+from app.services.substitution_service import generate_safe_variants  # noqa: E402
 
 Z_95 = 1.959963984540054  # two-sided 95% CI critical value
 
@@ -301,6 +302,59 @@ def _check_pinned_recipes(
     return served, notes
 
 
+def _check_substitution_attack(
+    case: BenchmarkCase, profile: UserProfile
+) -> tuple[list[JudgedRecipe], list[str]]:
+    """Phase 3 (deterministic substitution engine) testability hook,
+    analogous to `_check_pinned_recipes` above but for `category ==
+    "substitution_attack"` cases specifically: directly invokes the
+    production `app.services.substitution_service.generate_safe_variants`
+    against each of `case.pinned_recipe_ids`' real corpus recipes (the
+    PARENT recipe a substitution attack targets), under the case's own
+    profile -- bypassing retrieval AND bypassing whatever `safety_filter_
+    node` would have done first, so this benchmark exercises the REAL
+    re-validation gate (`constraint_engine.validate_recipe`, called from
+    inside `generate_safe_variants` itself -- see that module's docstring)
+    deterministically, rather than relying on non-deterministic retrieval
+    to happen to surface a rescued variant.
+
+    Every variant `generate_safe_variants` returns has ALREADY passed
+    `validate_recipe` against `profile` (that is the whole point of this
+    module's safety architecture) -- so every variant found here is added
+    to the served set unconditionally, exactly mirroring what would happen
+    if `substitution_node` ran for real in the graph. `notes` records how
+    many variants were found (zero is a normal, expected, and often
+    CORRECT outcome -- see e.g. the cross-allergen-trap case, where zero
+    variants is the passing result).
+    """
+    notes: list[str] = []
+    served: list[JudgedRecipe] = []
+    if case.category != "substitution_attack" or not case.pinned_recipe_ids:
+        return served, notes
+
+    corpus = _corpus_by_id()
+    for recipe_id in case.pinned_recipe_ids:
+        parent = corpus.get(recipe_id)
+        if parent is None:
+            notes.append(
+                f"substitution-attack pinned recipe {recipe_id!r} was not found in the "
+                "loaded corpus (app.rag.loaders.load_corpus) -- it could not be direct-checked."
+            )
+            continue
+        variants = generate_safe_variants(parent, profile)
+        notes.append(
+            f"substitution-attack check for parent {recipe_id!r} ({parent.title!r}): "
+            f"generate_safe_variants produced {len(variants)} validate_recipe-passing variant(s)."
+        )
+        for variant in variants:
+            served.append(
+                _judged_from_ingredients(
+                    variant.recipe.recipe_id, variant.recipe.title, variant.recipe.ingredients
+                )
+            )
+    return served, notes
+
+
 def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
     """Runs one case through every real MacroChef surface `case.surfaces`
     declares, collects every recipe that would actually be served, and asks
@@ -348,6 +402,10 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
             pinned_served, pinned_notes = _check_pinned_recipes(case, profile)
             served.extend(pinned_served)
             notes.extend(pinned_notes)
+
+            subst_served, subst_notes = _check_substitution_attack(case, profile)
+            served.extend(subst_served)
+            notes.extend(subst_notes)
         else:
             notes.append("pinned-recipe direct check skipped: no valid UserProfile could be built.")
 

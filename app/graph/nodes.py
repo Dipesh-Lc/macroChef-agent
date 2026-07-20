@@ -213,9 +213,21 @@ def fallback_relaxation_node(state: MacroChefState | dict):
 
     valid = []
     rejected = list(current.rejected_recipes)
-    # See MacroChefState.rejected_recipe_objects -- kept in lockstep with
-    # `rejected` so substitution_node can recover the full Recipe later.
-    rejected_objects = dict(current.rejected_recipe_objects)
+    # Deliberately NOT populating rejected_recipe_objects here (unlike
+    # safety_filter_node) -- see substitution_node's docstring: the task
+    # spec scopes substitution to recipes "rejected BY safety_filter_node"
+    # specifically, which retrieval bounds to ~14 candidates. This node's
+    # own scan is over the ENTIRE recipe corpus (thousands of recipes) when
+    # triggered; feeding all of those into rejected_recipe_objects would
+    # make substitution_node do O(corpus) work on every such request --
+    # confirmed as a real, severe slowdown during this task's own testing
+    # (a single 381-case benchmark run did not complete in 20+ minutes with
+    # this wired in). Bounding to safety_filter_node's own small rejected
+    # set keeps substitution_node's cost independent of corpus size, at the
+    # cost of never attempting a rescue for a recipe ONLY seen via this
+    # broader fallback scan -- an accepted, documented scope limit (see
+    # docs/BACKLOG.md), not a silent gap: this only ever means a missed
+    # rescue opportunity, never an unsafe one.
     recipes = [
         *load_recipes(),
         *RecipeLibraryRepository().list_user_recipes(current.user_id),
@@ -232,13 +244,11 @@ def fallback_relaxation_node(state: MacroChefState | dict):
                     reason=result.rejection_reason or "Rejected by hard constraint",
                 )
             )
-            rejected_objects[recipe.recipe_id] = recipe
 
     if not valid:
         return state_update(
             current,
             rejected_recipes=rejected,
-            rejected_recipe_objects=rejected_objects,
             errors=["No recipes satisfy the allergy, diet, dislike, and time constraints."],
             debug_trace=_trace(current, "fallback_relaxation_node: no safe recipes found."),
         )
@@ -247,7 +257,6 @@ def fallback_relaxation_node(state: MacroChefState | dict):
         current,
         candidate_recipes=valid[:12],
         rejected_recipes=rejected,
-        rejected_recipe_objects=rejected_objects,
         debug_trace=_trace(
             current,
             (

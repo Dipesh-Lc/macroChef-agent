@@ -981,3 +981,154 @@ were pre-registered before anyone saw a result.
   unbounded slow memory growth across anonymous sessions. Fine for the pinned
   single-replica topology with restarts; note it alongside the existing single-replica
   entry in the Deploy / infra section rather than as a separate concern.
+
+## Deterministic substitution engine (Phase 3)
+
+See `app/services/substitution_service.py`'s module docstring for the full
+account of what was found and deferred; summarized here with enough detail
+to act on:
+
+- **Corpus-wide substitution coverage.** `SUBSTITUTION_EDGES` is a
+  hand-curated ~10-edge starter set (dairy, peanut, gluten/wheat, egg,
+  vegetarian/vegan gelatin+honey+broth). Deferred: a systematic pass over
+  the active corpus's most common rejected-ingredient classes (mirroring
+  `scripts/audit_diet_leaks.py`'s methodology) to find the highest-value
+  next edges to add, plus expanding beyond the current allergen/diet
+  coverage (e.g. sesame, tree nut).
+- **"X or Y" alternative ingredient rows.** `_matching_edges` matches a row
+  as-is; a row like "butter or margarine" is not parsed into alternatives
+  and only matches if the literal substring happens to be present. Explicitly
+  out of scope for v1 per the task spec.
+- **Context-sensitivity (e.g. butter in pastry vs. sauté).** The
+  `butter -> olive oil` edge's citation already discloses this limitation
+  (works for sautéing/cooking, not for laminated pastry/creaming-method
+  baking) rather than silently overclaiming. A context-aware version would
+  need to read the recipe's own instructions/technique, not just its
+  ingredient list -- deferred.
+- **Multi-ingredient/ratio-aware swaps.** v1 is equal-measure, single-
+  ingredient-at-a-time only (per the task spec). Two edges' citations
+  disclose a real ratio mismatch: `egg -> ground flaxseed` (real ratio is 1
+  tbsp flaxseed + 3 tbsp water per egg, not equal-measure) and
+  `gelatin -> agar agar` (agar gels more strongly per unit volume than
+  gelatin). Neither is a safety concern (over/under-gelled or
+  under-bound is a texture problem, not an allergen one), but a future
+  ratio-aware pass should special-case these two first.
+- **`_LOOKALIKE_EXCLUSIONS`-style carve-out for compound "X milk"/"X cream"/
+  "X pasta" terms in `app/services/constraint_engine.py`.** Discovered
+  while curating this task's edges (see `substitution_service.py`'s module
+  docstring for the full list): `ALLERGEN_ALIASES["dairy"]`'s bare "milk"/
+  "cream"/"butter" terms and `ALLERGEN_ALIASES["wheat"]`'s bare "pasta"
+  term substring-match INSIDE plant-based/gluten-free compound names that
+  are not actually dairy/wheat ("oat milk", "coconut cream", "coconut
+  milk", "gluten-free pasta", "rice pasta" all self-flag). This is the
+  SAME false-positive shape `_LOOKALIKE_EXCLUSIONS` already fixes for
+  "water chestnut"/"romano bean"/"bean curd"/"caponata"/"striped bass"/
+  "o'brien" -- a genuinely different food that happens to contain the
+  allergen term as a literal substring, not real ambiguity that should
+  resolve toward blocking. NOT fixed here: `constraint_engine.py` is
+  explicitly off-limits for this task, and this is a FULL TREATMENT,
+  safety-adjacent change (touches allergen matching) that needs its own
+  advisor consult -- candidate carve-outs, once picked up: `{"milk":
+  frozenset({"oat milk", "soy milk", "almond milk", "coconut milk", "rice
+  milk", "cashew milk", "hemp milk", "pea milk"})}`, `{"cream": frozenset
+  ({"coconut cream"})}`, `{"pasta": frozenset({"gluten-free pasta", "rice
+  pasta", "chickpea pasta", "lentil pasta", "corn pasta", "quinoa
+  pasta"})}` -- each needs the same per-(term, recipe_term) pairwise
+  verification the existing table's entries document (a real dairy/wheat
+  ingredient alongside a lookalike in the SAME recipe must not have its own
+  match suppressed; see that table's module comment).
+- **`tree nut`/`nuts`/`nut` ALLERGEN_ALIASES keys' literal-substring
+  collision with "coconut".** Also discovered during this task's curation
+  (`derive_allergen_labels(["coconut"])` returns `["nut", "nuts"]`, and any
+  bare "nut"/"nuts" user allergy string reaches this same match): the bare
+  ALLERGEN_ALIASES key "nut" (added this session for the bare-singular-noun
+  fix) is expanded as an ordinary substring term by `derive_allergen_labels`/
+  `contains_allergen` when the ALLERGEN_ALIASES KEY itself is "nut"/"nuts"
+  (as opposed to reaching the tree-nut/peanut vocabulary through an alias
+  expansion), and "nut" is a literal substring of "coconut" (co-co-NUT).
+  Over-cautious (coconut is not FALCPA/EU-listed as one of the enumerated
+  tree nuts), not unsafe -- but wide-reaching (every "coconut ..."
+  ingredient in the corpus). Not fixed here (constraint_engine.py
+  off-limits); flagging because it affected which substitute names could be
+  curated in this task (no coconut-based dairy substitute could be added
+  without also picking up this flag) and is likely to surprise a future
+  editor. Needs its own advisor consult (is this drift from the "nut"
+  singular-key fix intentional/acceptable, or a regression to fix?) before
+  any change.
+- **`soy sauce -> tamari`/`egg -> flax egg` are impossible under the current
+  vocabulary, by design of pre-existing (unrelated) fail-closed policies.**
+  `SYNONYMS` maps both "tamari" and "gluten free tamari" to "soy sauce"
+  (`app/utils/ingredient_normalizer.py`, a deliberate, documented
+  fail-closed choice -- see `_WHEAT`'s comment in `constraint_engine.py`),
+  so tamari can never clear this system's gluten check under any name; "flax
+  egg" contains the literal substring "egg" and self-triggers the very
+  allergen it exists to avoid. This task substituted `coconut aminos` and
+  `ground flaxseed` respectively instead (see `substitution_service.py`'s
+  module docstring for the full verification) -- not a gap, just recorded
+  here so a future editor doesn't "fix" the naming back to the more
+  obvious-looking one without re-discovering why it can't work.
+- **`sour cream <-> Greek yogurt` and `heavy cream -> coconut cream/milk`
+  edges were dropped, not built.** Both original_terms and the naive
+  substitute name are members of `ALLERGEN_ALIASES["dairy"]` under the
+  current vocabulary (Greek yogurt is an explicit `_DAIRY` member; "cream"/
+  "milk" are bare `_DAIRY` terms substring-matching every coconut-cream/
+  coconut-milk naming), so no honest `resolves` claim could be curated for
+  either pairing without failing the mandatory curation-invariant test (by
+  design -- the test caught this, it is not a test bug). If the
+  `_LOOKALIKE_EXCLUSIONS`-style carve-out above ever lands, revisit
+  `heavy cream -> coconut cream`/`coconut milk` then; `sour cream <->
+  Greek yogurt` has no path forward under this vocabulary at all (both are
+  genuinely, unambiguously dairy) and would need a different constraint
+  key entirely (e.g. a "lactose" allergy this project doesn't model) to
+  ever mean something for allergy/diet resolution.
+- **`_EDGE_MATCH_EXCLUSIONS` in `substitution_service.py` is a small,
+  hand-curated list (currently just "butter" vs. "peanut/almond/cashew/
+  cocoa/apple/sunflower(-seed) butter"), not a general fix.** Softer
+  cross-matching cases were found and deliberately left unaddressed: the
+  `milk -> oat drink`/`soy drink` edges also match "buttermilk" (a distinct
+  product; swapping it for a plain plant milk is not absurd the way
+  "peanut butter -> olive oil" is, so this was judged lower-priority, not
+  ignored by oversight). Extend `_EDGE_MATCH_EXCLUSIONS` if a future case
+  surfaces a real problem from this.
+
+## Day planner (B3, macro-targeted day planning)
+
+- **Enumeration-scaling trigger, pre-registered.** `app/services/day_planner.py`
+  (`_enumerate_multisets`, called from `assemble_plan`) does exhaustive
+  `combinations_with_replacement` enumeration over the trusted candidate
+  pool — correct and fast at today's pool size (~15: C(18,4)=3,060 for
+  K=4), but it is O(pool^K) and does not scale. **Trigger: when the
+  trusted pool (`app.services.nutrition_view.trusted_per_serving` count,
+  see the "CRUX FINDING" in `day_planner.py`'s module docstring) exceeds
+  ~200 recipes, exhaustive K=4 enumeration (C(203,4)≈68M) becomes too slow
+  — replace the enumerator then, not before.** The module is deliberately
+  structured (enumerate-then-score, `_enumerate_multisets` isolated) so the
+  swap to a smarter search (branch-and-bound or DP over a discretized
+  macro-space) only has to replace that one function; `assemble_plan`/
+  `assemble_day_plan`/`assemble_remaining_meal`'s public signatures and the
+  `DayPlan` schema (`app/schemas/day_plan.py`) should not need to change.
+- **Continuous/fractional serving scaling (deliberately deferred from v1).**
+  `app/services/day_planner.py` selects only whole recipe servings by
+  design — see the module docstring's "WHOLE-SERVINGS ONLY (v1)" section.
+  Continuous scaling could reuse `app.schemas.ingredient.scale_ingredients`
+  (roadmap item B2) to let a recipe contribute a fractional serving toward
+  a target. Explicitly NOT done in B3 because it would make the
+  +/-10%/+/-15% tolerance gate trivially satisfiable for almost any target
+  (any target becomes "reachable" by scaling a single recipe to fit
+  exactly), gutting the point of `scripts/evaluate_day_planner.py`'s
+  feasibility numbers. If this is picked up later: keep whole-servings
+  mode available too (report both), and re-register a new tolerance/eval
+  design with the advisor before shipping continuous scaling — this is a
+  FULL TREATMENT change, not mechanical.
+- **Honest technical note for the orchestrator/human (not a code change):**
+  the day planner's real-world usefulness is capped by the trusted pool
+  size, not by the algorithm. As of the A3 corpus (3,878 recipes,
+  2026-07-20), `trusted_per_serving` returns a real number for exactly 15
+  recipes — everything else is PARTIAL (undercounts, silently excluded) or
+  UNGROUNDED. `scripts/evaluate_day_planner.py`'s "realistic-round" bucket
+  measured 3/4 (75%) feasibility against that 15-recipe pool on this run;
+  that number moves only if/when overall grounding coverage (A2/A3-class
+  work) improves the trusted-pool size, not by touching
+  `app/services/day_planner.py`. No marketing claim about this feature
+  should describe it as covering "the corpus" (3,878 recipes) — it
+  currently operates over the ~15-recipe trusted subset only.

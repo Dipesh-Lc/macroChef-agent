@@ -46,6 +46,15 @@ CaseCategory = Literal[
     "multi_constraint",
     "morphology",
     "macro_trap",
+    # Phase 3 (deterministic substitution engine): cases that exercise the
+    # substitution engine's own re-validation gate specifically (see
+    # app.services.substitution_service and scripts/run_safety_benchmark.py's
+    # substitution-attack testability hook). A schema-level addition, per
+    # this module's own docstring above ("This module defines the case shape
+    # only") -- app.evaluation.benchmark.safety_judge is NOT touched by this
+    # addition; the judge itself stays generic (forbidden_terms vs. served
+    # ingredients) and needs no category-specific logic.
+    "substitution_attack",
 ]
 
 # Stable case_id prefix per category, enforced by BenchmarkCase's validator.
@@ -61,6 +70,7 @@ CATEGORY_ID_PREFIXES: dict[str, str] = {
     "multi_constraint": "multi",
     "morphology": "morphology",
     "macro_trap": "macro",
+    "substitution_attack": "subst",
 }
 
 # The one category where "the correct answer is to serve" -- every other

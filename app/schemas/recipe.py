@@ -53,6 +53,13 @@ class Recipe(BaseModel):
     # Purely a display flag: never read by constraint_engine, scoring, or
     # nutrition, and never set by the LLM.
     restored_from_quarantine: bool = False
+    # Deterministic, templated description of a swap this recipe represents
+    # (e.g. "Swapped peanut butter -> sunflower seed butter (peanut-safe).
+    # macro impact: ..."), set only by app.services.substitution_service.
+    # _build_variant_recipe for a recipe whose source_type == "substitution_
+    # variant" -- never LLM-authored (see that module's docstring). None for
+    # every ordinary (non-variant) recipe.
+    substitution_note: str | None = None
 
     @field_validator("ingredients", mode="after")
     @classmethod
