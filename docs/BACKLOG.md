@@ -1090,6 +1090,22 @@ to act on:
   "peanut butter -> olive oil" is, so this was judged lower-priority, not
   ignored by oversight). Extend `_EDGE_MATCH_EXCLUSIONS` if a future case
   surfaces a real problem from this.
+- **Variant recipe titles never updated by `_build_variant_recipe`.**
+  `app/services/substitution_service.py`'s `_build_variant_recipe` function
+  (the core builder for serving-time ingredient swaps) deliberately leaves
+  `Recipe.title` unchanged — it swaps only `ingredients`/`allergens`/`nutrition`/
+  `source_type`/`substitution_note`, never the title. This caused all 4 new
+  safety-benchmark judge flags in the Phase 3 task (subst_001/005/006/009,
+  `data/evaluation/adjudication_20260720T184648Z.md`): the judge's title-
+  substring check saw the old allergen name still present in the title (e.g.
+  "Hershey's Chewy Peanut Bars") even though the actual served ingredient list
+  had been independently confirmed clean (peanut butter swapped to sunflower-
+  seed butter). All 4 flags were adjudicated **JUDGE_FP** (confirmed by two
+  independent advisor reviews) — this is a real, if non-safety, UX/labeling
+  gap, not a safety defect. Deferred fix: deterministic, templated title
+  annotation (e.g. append "(peanut-safe variant)" to `Recipe.title` when a
+  substitution is applied), explicitly NOT built reactively just to silence
+  a judge flag — it's a real UX improvement deferred to a future pass.
 
 ## Day planner (B3, macro-targeted day planning)
 
