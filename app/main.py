@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes_day_planner import router as day_planner_router
 from app.api.routes_feedback import router as feedback_router
 from app.api.routes_health import router as health_router
 from app.api.routes_inventory import router as inventory_router
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(recommendations_router)
     app.include_router(library_router)
     app.include_router(feedback_router)
+    app.include_router(day_planner_router)
 
     @app.on_event("startup")
     def _startup() -> None:
