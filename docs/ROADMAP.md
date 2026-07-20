@@ -78,13 +78,14 @@ ingredients convert to grams.
   Fixes the latent `"cooked"`-stripping density bug as a side effect.
   *Eval gate:* unit tests against the cited reference values; corpus-wide
   conversion-rate stat before/after.
-- **A3. Re-ground nutrition corpus-wide** via `scripts/ground_corpus.py`
-  (USDA FDC, cached, `FDC_API_KEY` already provisioned). Baseline to beat:
-  grounded 0.4% / partial 59.2% (grounding_report.md). "Grounded %"
-  becomes a real, displayable metric.
-  *Eval gate:* macro-computation accuracy measured against the 25
-  hand-authored seed recipes as ground truth; publish the number in the
-  grounding report.
+- **A3. Re-ground nutrition corpus-wide — DONE 2026-07-20:** partial 85.8% /
+  ungrounded 13.8% / kcal median abs relative error 16.1% (see
+  `data/processed/grounding_report.md` and pre-A3 baseline
+  `data/processed/grounding_report_pre_A3_baseline.md`). Corpus-wide
+  grounding (3878 recipes) via `scripts/ground_corpus.py` (USDA FDC, cached,
+  `FDC_API_KEY` already provisioned). Pre-A3 baseline was grounded 0.4% /
+  partial 59.2% (on the pre-A1 4,263-recipe corpus); the current run is on
+  the A1-rebuilt 3,878-recipe corpus with unit coverage 76.14%.
 
 ### Stage B — Features that make it actually useful (each ships with an eval)
 
