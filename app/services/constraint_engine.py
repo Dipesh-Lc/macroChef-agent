@@ -384,6 +384,20 @@ ALLERGEN_ALIASES = {
     # source set (see those sets' inline comments for the citation behind
     # each addition; no new citations are introduced by this union).
     "nuts": _TREE_NUT | _PEANUT,
+    # "nut" (singular): same union, same object, as "nuts" -- mirrors the
+    # existing "peanut"/"peanuts" and "dairy"/"milk" duplicate-key pattern
+    # above. Added 2026-07-20 (direction-aware lookalike matching, revise
+    # round 1) so a bare singular "nut" allergy string actually reaches the
+    # nut vocabulary via _expand_allergen_terms: normalize_ingredient("nut")
+    # does not depluralize an already-singular word, so without this key a
+    # "nut" allergy had no route into _TREE_NUT | _PEANUT at all (unlike
+    # "nuts", which normalizes/matches straight to this same key). See the
+    # _BARE_NUT_TRIGGER_VOCABULARY comment near contains_allergen for the
+    # under-block regression this closes. INDEX_ALLERGENS
+    # (recipe_indexing_service.py) enumerates its own fixed 8-key list for
+    # Chroma metadata and does not iterate ALLERGEN_ALIASES keys, so this
+    # addition changes no indexed metadata field.
+    "nut": _TREE_NUT | _PEANUT,
     "wheat": _WHEAT,
     # "malt" (barley-derived) and "rye" are gluten but not wheat -- added
     # only at this composition, not in _WHEAT. Same for "krispies"/"cereal"
@@ -830,7 +844,32 @@ def _recipe_contains_any_term(recipe: Recipe, terms: set[str]) -> bool:
 # "shellfish" term is a member of both _MOLLUSK and, via composition, the
 # "crustacean" key.
 _BARE_NUT_WORD = re.compile(r"\bnuts?\b", re.IGNORECASE)
-_BARE_NUT_ALLERGY_KEYS = frozenset({"tree nut", "nuts", "peanut", "peanuts"})
+
+# UNDER-BLOCK REGRESSION FIX (2026-07-20, direction-aware lookalike matching,
+# revise round 1): the trigger for the bare-nut-word check above must fire on
+# a *semantic* condition, not a hardcoded list of literal allergy-string
+# spellings. The prior version matched `{allergy.lower().strip() for allergy
+# in allergies}` (the RAW, unnormalized allergy strings) against a hardcoded
+# frozenset of exact spellings ({"tree nut", "nuts", "peanut", "peanuts"}).
+# UserProfile.allergies is genuine free text (app/schemas/user.py) with no
+# upstream canonicalization, so that raw-string check silently missed every
+# spelling variant _expand_allergen_terms already knows how to normalize:
+# plural "tree nuts", case variants ("Tree Nuts"), and the bare singular
+# "nut" -- confirmed as a real regression by advisor review reproducing
+# directly against the pre-fix baseline (4a97b80~1). Bare "nuts"/"nut"/
+# "tree nut"/"peanut"/"peanuts" ingredient rows must be caught for BOTH
+# singular and plural, any-case allergy spellings -- see
+# derivative_022/023/025/026/028 and hidden_023..028 in the benchmark case
+# set, which document that expectation.
+#
+# Fixed by reusing _expand_allergen_terms (the SAME normalization every other
+# allergen check in this module already goes through -- no second
+# normalization path) and checking membership in the nut ingredient
+# vocabulary instead of literal allergy spellings. "nut" (singular) is now
+# its own ALLERGEN_ALIASES key (see that dict) precisely so
+# _expand_allergen_terms(["nut"]) reaches this vocabulary the same way
+# _expand_allergen_terms(["nuts"]) already did.
+_BARE_NUT_TRIGGER_VOCABULARY = _normalized_terms(_TREE_NUT | _PEANUT)
 
 
 def _recipe_has_bare_nut_word(recipe: Recipe) -> bool:
@@ -838,10 +877,10 @@ def _recipe_has_bare_nut_word(recipe: Recipe) -> bool:
 
 
 def contains_allergen(recipe: Recipe, allergies: list[str]) -> bool:
-    if _recipe_contains_any_term(recipe, _expand_allergen_terms(allergies)):
+    expanded_terms = _expand_allergen_terms(allergies)
+    if _recipe_contains_any_term(recipe, expanded_terms):
         return True
-    requested = {allergy.lower().strip() for allergy in allergies}
-    if requested & _BARE_NUT_ALLERGY_KEYS and _recipe_has_bare_nut_word(recipe):
+    if expanded_terms & _BARE_NUT_TRIGGER_VOCABULARY and _recipe_has_bare_nut_word(recipe):
         return True
     return False
 

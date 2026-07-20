@@ -986,6 +986,34 @@ def test_bare_nuts_ingredient_blocks_tree_nut_and_peanut_allergy() -> None:
 
 
 @pytest.mark.parametrize(
+    "allergy",
+    ["tree nuts", "Tree Nuts", "nut"],
+)
+def test_bare_nuts_ingredient_blocks_free_text_allergy_spelling_variants(allergy: str) -> None:
+    # UNDER-BLOCK REGRESSION FIX (direction-aware lookalike matching, revise
+    # round 1): the prior version of the bare-nut compensation matched the
+    # RAW, unnormalized allergy string against a hardcoded literal frozenset
+    # ({"tree nut", "nuts", "peanut", "peanuts"}), so it only fired for
+    # those exact spellings -- missing plural "tree nuts", case variants
+    # ("Tree Nuts"), and the bare singular "nut", even though
+    # UserProfile.allergies is genuine free text with no upstream
+    # canonicalization (app/schemas/user.py) and real users type all of
+    # these. Confirmed as a real regression by advisor review reproducing
+    # directly against the pre-fix baseline (4a97b80~1):
+    #   bare "nuts" + allergies=["tree nut"]  -> True  (already correct)
+    #   bare "nuts" + allergies=["tree nuts"] -> False (WRONG, pre-fix)
+    #   bare "nuts" + allergies=["Tree Nuts"] -> False (WRONG, pre-fix)
+    #   bare "nuts" + allergies=["nut"]       -> False (WRONG, pre-fix)
+    # Each of the three cases here must now return True. See
+    # test_bare_nuts_ingredient_blocks_tree_nut_and_peanut_allergy above for
+    # the already-passing "tree nut"/"nuts" spellings this test deliberately
+    # does not re-cover.
+    recipe = _recipe(ingredients=["flour", "nuts"], allergens=[])
+
+    assert contains_allergen(recipe, [allergy])
+
+
+@pytest.mark.parametrize(
     "ingredient",
     ["butternut squash", "water chestnut", "chestnut puree", "nutmeg", "coconut, flaked", "walnut", "peanuts"],
 )

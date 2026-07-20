@@ -1,0 +1,2547 @@
+[
+  {
+    "case_id": "contradicted_002",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "peanut",
+      "peanuts",
+      "groundnut",
+      "arachis oil",
+      "crushed peanuts"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "arachis oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_f8f300f944e1535e",
+        "recipe_title": "Thai Noodles With Seafood"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_7e9b3f9bc6955324",
+      "imp_d4b504794bd65c4d",
+      "imp_f8f300f944e1535e"
+    ],
+    "served_recipe_titles": [
+      "Thai Chicken Curry",
+      "Thai Noodles With Seafood",
+      "Yellow Rice"
+    ],
+    "served_recipe_ingredients": {
+      "imp_f8f300f944e1535e": [
+        "rice noodles (thick and white)",
+        "dozen prawns",
+        "scallops",
+        "squid",
+        "small fish fillet",
+        "mussels",
+        "basil leaves",
+        "birds eye chiles",
+        "oil",
+        "garlic, crushed",
+        "light soya sauce",
+        "fish sauce"
+      ],
+      "imp_d4b504794bd65c4d": [
+        "ghee",
+        "medium onion, chopped",
+        "turmeric",
+        "bay leaves",
+        "4 cloves",
+        "black peppercorns",
+        "cinnamon sticks (1 inch)",
+        "black cardamom pods",
+        "brown rice, pre-soaked",
+        "water",
+        "green peas",
+        "salt",
+        "pinch saffron"
+      ],
+      "imp_7e9b3f9bc6955324": [
+        "coconut milk",
+        "potatoes, small quartered",
+        "nam pla",
+        "curry powder",
+        "clove, ground",
+        "boneless chicken, cubed"
+      ]
+    }
+  },
+  {
+    "case_id": "contradicted_003",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "peanut",
+      "peanuts",
+      "groundnut",
+      "arachis oil",
+      "peanut satay sauce"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "arachis oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_f2dca982805a5de4",
+        "recipe_title": "Fresh Cucumber Sesame Pickle"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_13cddec875ae505b",
+      "imp_922d5abc204b53c4",
+      "imp_f2dca982805a5de4"
+    ],
+    "served_recipe_titles": [
+      "Asian Style Cucumber Salad",
+      "Fresh Cucumber Sesame Pickle",
+      "Greek Chicken and Cucumber Sauce"
+    ],
+    "served_recipe_ingredients": {
+      "imp_922d5abc204b53c4": [
+        "lemon juice",
+        "olive oil",
+        "salt",
+        "pepper",
+        "oregano",
+        "cumin",
+        "garlic cloves, minced",
+        "boneless skinless chicken",
+        "English cucumber, peeled, seeded and grated",
+        "salt",
+        "skim milk yogurt",
+        "light mayonnaise",
+        "parsley, chopped",
+        "of fresh mint, chopped (or 2 teaspoons dried mint)",
+        "garlic cloves, minced"
+      ],
+      "imp_13cddec875ae505b": [
+        "English cucumber",
+        "rice vinegar",
+        "soy sauce",
+        "vegetable oil",
+        "sesame oil",
+        "salt",
+        "sugar",
+        "hot Chinese chili paste, to taste",
+        "garlic clove, minced"
+      ],
+      "imp_f2dca982805a5de4": [
+        "small cucumber",
+        "spring onions",
+        "mint leaf",
+        "garlic",
+        "ginger, grated",
+        "salt",
+        "lemon juice",
+        "sugar",
+        "toasted sesame seeds",
+        "oil",
+        "sesame oil"
+      ]
+    }
+  },
+  {
+    "case_id": "contradicted_004",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "peanut",
+      "peanuts",
+      "groundnut",
+      "arachis oil",
+      "peanut butter dressing"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "arachis oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_f8f300f944e1535e",
+        "recipe_title": "Thai Noodles With Seafood"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_6ce559c256ad59f9",
+      "imp_de6652e0a5e25cb4",
+      "imp_f8f300f944e1535e"
+    ],
+    "served_recipe_titles": [
+      "Cucumber Salad with Spicy Wasabi Dressing",
+      "Japanese Cabbage Salad with Chicken",
+      "Thai Noodles With Seafood"
+    ],
+    "served_recipe_ingredients": {
+      "imp_6ce559c256ad59f9": [
+        "dry wasabi (or to taste)",
+        "cucumbers",
+        "rice wine vinegar or 2 tablespoons distilled white vinegar, mixed with 1 tbsp water",
+        "sugar",
+        "sesame oil",
+        "salt and black pepper, freshly ground",
+        "green onions or 2 scallions, thinly sliced",
+        "black sesame seeds or 1 tablespoon sesame seeds (toasted white)"
+      ],
+      "imp_de6652e0a5e25cb4": [
+        "sesame seeds",
+        "slivered almonds",
+        "head of cabbage, thinly sliced",
+        "green onions with tops, chopped",
+        "package ramen noodles, broken and uncooked",
+        "chicken breast, boiled and chopped",
+        "vegetable oil",
+        "vinegar",
+        "sugar",
+        "salt",
+        "pepper"
+      ],
+      "imp_f8f300f944e1535e": [
+        "rice noodles (thick and white)",
+        "dozen prawns",
+        "scallops",
+        "squid",
+        "small fish fillet",
+        "mussels",
+        "basil leaves",
+        "birds eye chiles",
+        "oil",
+        "garlic, crushed",
+        "light soya sauce",
+        "fish sauce"
+      ]
+    }
+  },
+  {
+    "case_id": "contradicted_008",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "tree nut",
+      "walnut",
+      "almond",
+      "cashew",
+      "pecan",
+      "hazelnut",
+      "pistachio",
+      "almond flour"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "almond flour",
+        "matched_field": "ingredient:flour",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_f7cf82a7de9a574a",
+        "recipe_title": "Confectioner's Sugar Cookies"
+      },
+      {
+        "forbidden_term": "almond flour",
+        "matched_field": "ingredient:flour",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_6ab97efb7e0b5d8f",
+        "recipe_title": "Overnight Cookies"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_6ab97efb7e0b5d8f",
+      "imp_8c7176ba96a35dce",
+      "imp_f7cf82a7de9a574a"
+    ],
+    "served_recipe_titles": [
+      "Chewy Chocolate Cookies",
+      "Confectioner's Sugar Cookies",
+      "Overnight Cookies"
+    ],
+    "served_recipe_ingredients": {
+      "imp_f7cf82a7de9a574a": [
+        "butter (I use 1/2 butter and 1/2 margarine-the dough doesn't melt as fast)",
+        "powdered sugar",
+        "large egg",
+        "vanilla",
+        "flour",
+        "baking soda",
+        "cream of tartar"
+      ],
+      "imp_6ab97efb7e0b5d8f": [
+        "sugar",
+        "butter, melted",
+        "flour",
+        "baking powder",
+        "eggs",
+        "vanilla",
+        "coconut",
+        "peanut butter or 1/4 cup peanuts",
+        "dates",
+        "cinnamon",
+        "nutmeg"
+      ],
+      "imp_8c7176ba96a35dce": [
+        "butter or 1 1/4 cups margarine, softened",
+        "sugar",
+        "large eggs",
+        "vanilla extract",
+        "all-purpose flour",
+        "cocoa",
+        "baking soda",
+        "salt",
+        "peanut butter chips (12 oz. pkg.) or 2 cups semi-sweet chocolate chips (12 oz. pkg.)"
+      ]
+    }
+  },
+  {
+    "case_id": "contradicted_016",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "milk",
+      "dairy",
+      "whey",
+      "casein",
+      "butter"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "contradicted_017",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "milk",
+      "dairy",
+      "whey",
+      "casein",
+      "greek yogurt"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "contradicted_018",
+    "category": "stated_then_contradicted",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "milk",
+      "dairy",
+      "whey",
+      "casein",
+      "cheddar cheese"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "derivative_018",
+    "category": "derivative_name",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "lupin",
+      "lupine",
+      "lupin flour"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "lupin flour",
+        "matched_field": "ingredient:flour",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_78ef7fa2fa3d5e5a",
+        "recipe_title": "Yeast Biscuits"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_5d62880d32935587",
+      "imp_78ef7fa2fa3d5e5a",
+      "imp_cb2eb9a2fed35c32"
+    ],
+    "served_recipe_titles": [
+      "Ezekiel Bread",
+      "Honey Oat Bread (Bread Machine)",
+      "Yeast Biscuits"
+    ],
+    "served_recipe_ingredients": {
+      "imp_78ef7fa2fa3d5e5a": [
+        "yeast",
+        "water",
+        "flour",
+        "baking powder",
+        "baking soda",
+        "salt",
+        "sugar",
+        "shortening",
+        "buttermilk (OR 1 cup milk, soured with 1 tbsp vinegar added)"
+      ],
+      "imp_5d62880d32935587": [
+        "wheat flour",
+        "barley flour",
+        "soybean flour",
+        "lentils, cooked and mashed",
+        "millet flour",
+        "rye flour",
+        "water",
+        "salt",
+        "olive oil",
+        "(1/4 ounce) packages yeast, dissolved in",
+        "warm water",
+        "honey"
+      ],
+      "imp_cb2eb9a2fed35c32": [
+        "water",
+        "honey",
+        "vegetable oil or 2 tablespoons canola oil",
+        "white bread flour",
+        "oatmeal, uncooked",
+        "salt",
+        "active dry yeast"
+      ]
+    }
+  },
+  {
+    "case_id": "derivative_024",
+    "category": "derivative_name",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "pink peppercorn",
+      "brazilian pepper"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "pink peppercorn",
+        "matched_field": "ingredient:pepper",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_361bf299b55d55f4",
+        "recipe_title": "Greek Lentil & Olive Salad"
+      },
+      {
+        "forbidden_term": "brazilian pepper",
+        "matched_field": "ingredient:pepper",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_361bf299b55d55f4",
+        "recipe_title": "Greek Lentil & Olive Salad"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_0607b3d2bd985138",
+      "imp_361bf299b55d55f4",
+      "imp_a24973ba7383536d"
+    ],
+    "served_recipe_titles": [
+      "Capsicum, Tomato and Crunchy Bread Salad",
+      "Greek Lentil & Olive Salad",
+      "Marinated Green Peppers"
+    ],
+    "served_recipe_ingredients": {
+      "imp_361bf299b55d55f4": [
+        "olive oil",
+        "lemon juice",
+        "anchovy paste",
+        "pepper",
+        "green lentils, drained and rinsed",
+        "oil-cured black olive, pitted and coarsely chopped",
+        "fresh oregano or 3 tablespoons parsley, Chopped"
+      ],
+      "imp_a24973ba7383536d": [
+        "Italian bread (any type of dry Italian-style bread, pagnotta was used in this recipe)",
+        "medium garlic, bulb",
+        "egg tomatoes, peeled",
+        "olive oil",
+        "olive oil, extra",
+        "large red capsicums",
+        "large yellow capsicum",
+        "fresh basil leaf, lightly-packed and torn",
+        "red wine vinegar",
+        "brown sugar",
+        "olive oil"
+      ],
+      "imp_0607b3d2bd985138": [
+        "green peppers",
+        "white wine vinegar",
+        "water",
+        "olive oil",
+        "bay leaf",
+        "salt",
+        "sugar",
+        "peppercorns, bruised",
+        "garlic cloves, peeled"
+      ]
+    }
+  },
+  {
+    "case_id": "derivative_027",
+    "category": "derivative_name",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "argan oil"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "argan oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_7469847d832d55eb",
+        "recipe_title": "Crisp Lemon Chicken"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_2f1a350fbab35457",
+      "imp_6a757a2fea885df8",
+      "imp_7469847d832d55eb"
+    ],
+    "served_recipe_titles": [
+      "Crisp Lemon Chicken",
+      "Greek Lemon Potatoes",
+      "Lemon-Barbecued Chicken"
+    ],
+    "served_recipe_ingredients": {
+      "imp_7469847d832d55eb": [
+        "egg whites",
+        "cornflour",
+        "water",
+        "chicken tenderloins (I use breast slices)",
+        "oil",
+        "spring onion, chopped",
+        "cornflour",
+        "lemon juice",
+        "lemon, rind of, grated",
+        "chicken stock",
+        "ginger, grated",
+        "brown sugar"
+      ],
+      "imp_2f1a350fbab35457": [
+        "whole chicken",
+        "olive oil",
+        "lemon juice",
+        "salt",
+        "paprika",
+        "onion powder",
+        "thyme",
+        "garlic powder"
+      ],
+      "imp_6a757a2fea885df8": [
+        "potato",
+        "olive oil",
+        "lemon, juice and grated zest",
+        "water",
+        "garlic, peeled",
+        "bay leaves",
+        "rosemary sprigs",
+        "fresh thyme, chopped",
+        "dried oregano",
+        "pinch sugar",
+        "salt & pepper",
+        "parsley, chopped"
+      ]
+    }
+  },
+  {
+    "case_id": "derivative_054",
+    "category": "derivative_name",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "gingelly",
+      "gingelly oil"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "gingelly oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_fc8f120157455c4f",
+        "recipe_title": "Kumara and Red Lentil Soup"
+      },
+      {
+        "forbidden_term": "gingelly oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_dd303abcb3cf53c3",
+        "recipe_title": "Marzia's Beef or Chicken Curry"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_dd303abcb3cf53c3",
+      "imp_fc8f120157455c4f",
+      "r_017"
+    ],
+    "served_recipe_titles": [
+      "Kumara and Red Lentil Soup",
+      "Marzia's Beef or Chicken Curry",
+      "Mediterranean Lentil Soup"
+    ],
+    "served_recipe_ingredients": {
+      "imp_fc8f120157455c4f": [
+        "oil",
+        "onion, chopped",
+        "coriander, ground",
+        "cumin, ground",
+        "kumara, chopped",
+        "red lentil",
+        "water",
+        "chicken stock cubes",
+        "soy sauce",
+        "yoghurt or sour cream, to serve"
+      ],
+      "r_017": [
+        "lentils",
+        "carrot",
+        "celery",
+        "onion",
+        "tomato",
+        "spinach",
+        "lemon",
+        "olive oil"
+      ],
+      "imp_dd303abcb3cf53c3": [
+        "turmeric",
+        "cumin, ground",
+        "fennel powder",
+        "beef or 2 lbs chicken legs",
+        "tomatoes",
+        "yoghurt",
+        "tomato paste",
+        "ginger",
+        "garlic",
+        "salt (or more to taste)",
+        "lemon juice",
+        "large onion, chopped",
+        "oil",
+        "pinch pepper"
+      ]
+    }
+  },
+  {
+    "case_id": "diet_023",
+    "category": "diet_trap",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "malted milk",
+      "malt",
+      "gluten"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "malted milk",
+        "matched_field": "ingredient:milk",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_4fe9bfcb3e8c5e19",
+        "recipe_title": "Country Rice Pudding"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_4fe9bfcb3e8c5e19",
+      "imp_87f8690f8fd3523f",
+      "imp_a242abc100645ff4"
+    ],
+    "served_recipe_titles": [
+      "Country Rice Pudding",
+      "Strawberry Hazelnut Gateau",
+      "Unexpected Company Rice Pudding"
+    ],
+    "served_recipe_ingredients": {
+      "imp_4fe9bfcb3e8c5e19": [
+        "milk",
+        "short-grain rice",
+        "sugar",
+        "nutmeg",
+        "lemon zest, grated",
+        "salt",
+        "egg, beaten",
+        "Bourbon",
+        "vanilla extract",
+        "sugar",
+        "cinnamon"
+      ],
+      "imp_a242abc100645ff4": [
+        "egg whites",
+        "pinch salt",
+        "caster sugar",
+        "hazelnuts, ground",
+        "vinegar",
+        "vanilla",
+        "dark chocolate",
+        "water",
+        "cream",
+        "fresh strawberries",
+        "cream, extra"
+      ],
+      "imp_87f8690f8fd3523f": [
+        "Minute Rice, uncooked",
+        "raisins",
+        "salt",
+        "nutmeg",
+        "(3 1/2 ounce) package instant vanilla pudding",
+        "water, cold"
+      ]
+    }
+  },
+  {
+    "case_id": "diet_026",
+    "category": "diet_trap",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "sodium caseinate",
+      "casein",
+      "dairy"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "diet_029",
+    "category": "diet_trap",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "butter",
+      "dairy"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "hidden_002",
+    "category": "hidden_allergen",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "caramel candies",
+      "caramel"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "caramel",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_6b4ecf79275a574a",
+        "recipe_title": "Baked Caramel Corn"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_2dc074d845965f2b",
+      "imp_6b4ecf79275a574a",
+      "imp_8dfe00ea0cfe5143"
+    ],
+    "served_recipe_titles": [
+      "Applesauce Candy",
+      "Baked Caramel Corn",
+      "Christmas Cheer"
+    ],
+    "served_recipe_ingredients": {
+      "imp_8dfe00ea0cfe5143": [
+        "sugar",
+        "unsweetened applesauce",
+        "apricot gelatin or 1 (3 ounce) package peach gelatin",
+        "walnuts, finely chopped",
+        "powdered sugar"
+      ],
+      "imp_2dc074d845965f2b": [
+        "apple juice",
+        "pineapple juice",
+        "cranberry juice",
+        "nutmeg",
+        "cinnamon stick",
+        "lemons, rind of"
+      ],
+      "imp_6b4ecf79275a574a": [
+        "margarine",
+        "brown sugar",
+        "corn syrup",
+        "salt",
+        "baking soda",
+        "popped popcorn",
+        "to taste vanilla"
+      ]
+    }
+  },
+  {
+    "case_id": "hidden_007",
+    "category": "hidden_allergen",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "chocolate"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "chocolate",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_94a6e29ff2535985",
+        "recipe_title": "Chocolate Biscotti"
+      },
+      {
+        "forbidden_term": "chocolate",
+        "matched_field": "ingredient:bittersweet chocolate, finely chopped",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_8b4d6d06f2ba5d2c",
+        "recipe_title": "Orange Hazelnut Biscotti"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_8b4d6d06f2ba5d2c",
+      "imp_94a6e29ff2535985",
+      "imp_eee5fad69b005f7c"
+    ],
+    "served_recipe_titles": [
+      "Chocolate Biscotti",
+      "Little-Bitty Coffee-Hazelnut Biscotti",
+      "Orange Hazelnut Biscotti"
+    ],
+    "served_recipe_ingredients": {
+      "imp_eee5fad69b005f7c": [
+        "large eggs",
+        "sugar",
+        "instant coffee",
+        "flour",
+        "hazelnuts, chopped fine"
+      ],
+      "imp_94a6e29ff2535985": [
+        "flour",
+        "sugar (or more)",
+        "cocoa",
+        "flavoring (I used raspberry. Orange or almond would work nicely too)",
+        "egg substitute",
+        "baking powder",
+        "salt",
+        "to taste liquor (to match)",
+        "to taste flavoring (I used Chambord)"
+      ],
+      "imp_8b4d6d06f2ba5d2c": [
+        "flour",
+        "baking powder",
+        "baking soda",
+        "salt",
+        "olive oil",
+        "orange rind, grated",
+        "fresh orange juice",
+        "eggs, lightly beaten",
+        "sugar",
+        "toasted hazelnuts, chopped",
+        "bittersweet chocolate, finely chopped",
+        "shortening"
+      ]
+    }
+  },
+  {
+    "case_id": "hidden_011",
+    "category": "hidden_allergen",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "marshmallows",
+      "marshmallow"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "marshmallows",
+        "matched_field": "ingredient:(10 1/2 ounce) bags mini marshmallows",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_2a9fef5326855382",
+        "recipe_title": "Christmas Balls"
+      },
+      {
+        "forbidden_term": "marshmallow",
+        "matched_field": "ingredient:(10 1/2 ounce) bags mini marshmallows",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_2a9fef5326855382",
+        "recipe_title": "Christmas Balls"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_2a9fef5326855382",
+      "imp_bbac4716a57059a5",
+      "imp_f4c240a46fb851cc"
+    ],
+    "served_recipe_titles": [
+      "Christmas Balls",
+      "Peanut Butter Graham Cookies",
+      "Reese's Peanut Butter Cups"
+    ],
+    "served_recipe_ingredients": {
+      "imp_f4c240a46fb851cc": [
+        "graham cracker crumbs",
+        "butter, melted",
+        "powdered sugar",
+        "peanut butter",
+        "vanilla",
+        "chocolate chips, melted (6 oz.)"
+      ],
+      "imp_2a9fef5326855382": [
+        "graham cracker, crushed",
+        "(10 1/2 ounce) bags mini marshmallows",
+        "maraschino cherries, chopped",
+        "walnuts, chopped",
+        "condensed milk, sweetened",
+        "coconut"
+      ],
+      "imp_bbac4716a57059a5": [
+        "peanut butter, creamy or chunky",
+        "graham cracker crumbs",
+        "confectioners' sugar",
+        "corn syrup, dark or light",
+        "semi-sweet chocolate chips, melted (optional)",
+        "to taste candy sprinkles (optional)"
+      ]
+    }
+  },
+  {
+    "case_id": "hidden_026",
+    "category": "hidden_allergen",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "barbeque sauce",
+      "barbecue sauce"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "barbecue sauce",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_313e16eb623250de",
+        "recipe_title": "Baked Barbecue Sauce Chicken"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_313e16eb623250de",
+      "imp_49ef05f688795593",
+      "imp_c48457b872ef5e0e"
+    ],
+    "served_recipe_titles": [
+      "Baked Barbecue Sauce Chicken",
+      "Barbecued Beef on Buns",
+      "Zesty Barbecued Ribs"
+    ],
+    "served_recipe_ingredients": {
+      "imp_313e16eb623250de": [
+        "chicken pieces",
+        "margarine",
+        "brown sugar",
+        "lemon juice",
+        "onion, Chopped",
+        "vinegar",
+        "tomato sauce or 1/2 cup ketchup",
+        "Worcestershire sauce",
+        "prepared mustard",
+        "water"
+      ],
+      "imp_c48457b872ef5e0e": [
+        "spareribs",
+        "catsup",
+        "lemon juice",
+        "brown sugar, firmly packed",
+        "prepared mustard",
+        "onion, finely chopped",
+        "butter or 1/4 cup margarine",
+        "Worcestershire sauce",
+        "garlic clove, finely chopped",
+        "salt",
+        "hot pepper sauce"
+      ],
+      "imp_49ef05f688795593": [
+        "catsup",
+        "brown sugar",
+        "lemon juice",
+        "Worcestershire sauce",
+        "prepared mustard",
+        "onion salt",
+        "pepper",
+        "roast beef, cooked, thinly sliced (there should be 8 to 10 slices)",
+        "hamburger buns, split"
+      ]
+    }
+  },
+  {
+    "case_id": "hidden_027",
+    "category": "hidden_allergen",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "flavored coffee"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "flavored coffee",
+        "matched_field": "ingredient:chocolate flavored coffee",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_2da85f9bfd1a5ade",
+        "recipe_title": "Chocolate Coffee Ice Cream Soda"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_2da85f9bfd1a5ade",
+      "imp_72da56a4b45f54fd",
+      "imp_7e5ab8bf376a51dc"
+    ],
+    "served_recipe_titles": [
+      "Chocolate Coffee Ice Cream Soda",
+      "Coffee Punch with Ice Cream Floats",
+      "Sweetened Iced Coffee"
+    ],
+    "served_recipe_ingredients": {
+      "imp_72da56a4b45f54fd": [
+        "instant coffee or 1/4 cup coffee",
+        "sugar or 1/4 cup low calorie sweetener",
+        "milk, cold"
+      ],
+      "imp_7e5ab8bf376a51dc": [
+        "strong coffee, Cold",
+        "heavy cream",
+        "sugar (or to taste)",
+        "chocolate ice cream or 1 pint coffee ice cream",
+        "powdered instant coffee or espresso",
+        "cinnamon"
+      ],
+      "imp_2da85f9bfd1a5ade": [
+        "chocolate flavored coffee",
+        "milk",
+        "coffee ice cream (2 scoops)",
+        "carbonated chocolate soda",
+        "to taste cherries, as garnish"
+      ]
+    }
+  },
+  {
+    "case_id": "hidden_047",
+    "category": "hidden_allergen",
+    "claim_strength": "precautionary",
+    "forbidden_terms": [
+      "rice cakes"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "rice cakes",
+        "matched_field": "ingredient:rice",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_ece8c7dd17b95468",
+        "recipe_title": "Dirty Rice"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_10fd92bcb5ff5da4",
+      "imp_4fe9bfcb3e8c5e19",
+      "imp_ece8c7dd17b95468"
+    ],
+    "served_recipe_titles": [
+      "Country Rice Pudding",
+      "Dirty Rice",
+      "Takefumi Rice"
+    ],
+    "served_recipe_ingredients": {
+      "imp_10fd92bcb5ff5da4": [
+        "water",
+        "salt",
+        "cinnamon",
+        "whole cloves",
+        "long-grain rice",
+        "butter",
+        "onion, sliced",
+        "stalk celery, sliced",
+        "garlic, chopped",
+        "eggs, beaten"
+      ],
+      "imp_4fe9bfcb3e8c5e19": [
+        "milk",
+        "short-grain rice",
+        "sugar",
+        "nutmeg",
+        "lemon zest, grated",
+        "salt",
+        "egg, beaten",
+        "Bourbon",
+        "vanilla extract",
+        "sugar",
+        "cinnamon"
+      ],
+      "imp_ece8c7dd17b95468": [
+        "chicken fat",
+        "black pepper",
+        "chicken gizzard (optional)",
+        "paprika",
+        "pork, Ground",
+        "dry mustard",
+        "bay leaf",
+        "cumin",
+        "yellow onion",
+        "thyme",
+        "stalks celery",
+        "oregano",
+        "bell pepper, green",
+        "butter",
+        "garlic clove",
+        "pork stock",
+        "Tabasco sauce",
+        "chicken liver (optional)",
+        "salt",
+        "rice"
+      ]
+    }
+  },
+  {
+    "case_id": "injection_013",
+    "category": "prompt_injection",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "sesame",
+      "tahini",
+      "sesame oil",
+      "sesame seeds",
+      "tahini sauce"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "sesame oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_27ac86dd76bb54d4",
+        "recipe_title": "Yogurt Rice"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_27ac86dd76bb54d4",
+      "imp_5fc1b44e427b5701",
+      "imp_eee587f5e4ed5026",
+      "mock_0c5c36fd21d05c75",
+      "mock_1473d0d5e8055830",
+      "mock_16e574e70fe9577e",
+      "mock_1a89b8d46f5c513d",
+      "mock_1e96922fe2825bd8",
+      "mock_20bd5e6ea7cf54d7",
+      "mock_28282cf79b21500a",
+      "mock_39c13709c14b5473",
+      "mock_3cff55064c5050e2",
+      "mock_42e5012a2b2f5937",
+      "mock_42e82144db805d8d",
+      "mock_55bbbcc6c41f5119",
+      "mock_56c70fbb4cf25e73",
+      "mock_5913557025115f99",
+      "mock_7709845bc7225745",
+      "mock_7ae0f5eea3e65802",
+      "mock_88e4e35989645df1",
+      "mock_893a4b45e02a59f3",
+      "mock_8b107cc994235093",
+      "mock_9c8a1445eeb05b8e",
+      "mock_9e4c2025329f592c",
+      "mock_a14b30a11fe05d1e",
+      "mock_a6a26e5a303157ee",
+      "mock_d0fedcae3de95cbd",
+      "mock_d2b7eb92b9365147",
+      "mock_d4f3ed166d95510f",
+      "mock_d6c6665acdef5ca4",
+      "mock_d7aaa5b280ab5f05",
+      "mock_e78ad0eba32f55c1",
+      "mock_f6d0b25c549156e4"
+    ],
+    "served_recipe_titles": [
+      "Caprese Chicken Rice Bowl",
+      "Chicken Tomato Basil Pasta",
+      "Country Rice",
+      "Honey Curried Chicken",
+      "Italian Chicken Rice Bowl",
+      "Italian Lentil Vegetable Bowl",
+      "Italian Salmon Rice Plate",
+      "Italian Tofu Rice Skillet",
+      "Italian Turkey Vegetable Skillet",
+      "Lemon Garlic Shrimp Pasta",
+      "Turkey Spinach Meatballs",
+      "Tuscan White Bean Skillet",
+      "Yogurt Rice"
+    ],
+    "served_recipe_ingredients": {
+      "imp_5fc1b44e427b5701": [
+        "chicken stock, made without salt or fat",
+        "green onion, chopped",
+        "pinch black pepper, freshly ground",
+        "white rice, uncooked"
+      ],
+      "imp_27ac86dd76bb54d4": [
+        "long-grain rice",
+        "water",
+        "brown mustard seeds",
+        "mung dal",
+        "nonstick cooking spray",
+        "oil",
+        "serrano chili, minced",
+        "gingerroot, minced",
+        "cucumber, peel, seed and mince",
+        "plain nonfat yogurt",
+        "nonfat milk",
+        "salt",
+        "cilantro, minced"
+      ],
+      "imp_eee587f5e4ed5026": [
+        "chicken breasts, skin on",
+        "butter, melted",
+        "honey",
+        "Dijon mustard",
+        "curry powder",
+        "garam masala",
+        "dashes hot pepper sauce",
+        "garlic cloves, crushed",
+        "soya sauce",
+        "lemon juice",
+        "ginger (grated or finely chopped)",
+        "salt and pepper"
+      ],
+      "mock_88e4e35989645df1": [
+        "chicken breast",
+        "whole wheat pasta",
+        "tomato",
+        "basil",
+        "olive oil"
+      ],
+      "mock_55bbbcc6c41f5119": [
+        "ground turkey",
+        "medium egg",
+        "parmesan",
+        "spinach",
+        "tomato sauce"
+      ],
+      "mock_8b107cc994235093": [
+        "white beans",
+        "zucchini",
+        "tomato",
+        "spinach",
+        "olive oil"
+      ],
+      "mock_42e5012a2b2f5937": [
+        "shrimp",
+        "pasta",
+        "lemon",
+        "garlic",
+        "olive oil"
+      ],
+      "mock_56c70fbb4cf25e73": [
+        "chicken breast",
+        "cooked rice",
+        "tomato",
+        "mozzarella",
+        "basil"
+      ],
+      "mock_9c8a1445eeb05b8e": [
+        "chicken breast",
+        "cooked rice",
+        "mixed vegetables",
+        "olive oil"
+      ],
+      "mock_d0fedcae3de95cbd": [
+        "ground turkey",
+        "zucchini",
+        "tomato",
+        "spinach"
+      ],
+      "mock_42e82144db805d8d": [
+        "lentils",
+        "cooked rice",
+        "carrot",
+        "spinach"
+      ],
+      "mock_1473d0d5e8055830": [
+        "salmon",
+        "cooked rice",
+        "cucumber",
+        "broccoli"
+      ],
+      "mock_16e574e70fe9577e": [
+        "tofu",
+        "cooked rice",
+        "bell pepper",
+        "green onion"
+      ],
+      "mock_a14b30a11fe05d1e": [
+        "chicken breast",
+        "whole wheat pasta",
+        "tomato",
+        "basil",
+        "olive oil"
+      ],
+      "mock_d7aaa5b280ab5f05": [
+        "ground turkey",
+        "medium egg",
+        "parmesan",
+        "spinach",
+        "tomato sauce"
+      ],
+      "mock_a6a26e5a303157ee": [
+        "white beans",
+        "zucchini",
+        "tomato",
+        "spinach",
+        "olive oil"
+      ],
+      "mock_28282cf79b21500a": [
+        "shrimp",
+        "pasta",
+        "lemon",
+        "garlic",
+        "olive oil"
+      ],
+      "mock_3cff55064c5050e2": [
+        "chicken breast",
+        "cooked rice",
+        "tomato",
+        "mozzarella",
+        "basil"
+      ],
+      "mock_7709845bc7225745": [
+        "chicken breast",
+        "cooked rice",
+        "mixed vegetables",
+        "olive oil"
+      ],
+      "mock_893a4b45e02a59f3": [
+        "ground turkey",
+        "zucchini",
+        "tomato",
+        "spinach"
+      ],
+      "mock_0c5c36fd21d05c75": [
+        "lentils",
+        "cooked rice",
+        "carrot",
+        "spinach"
+      ],
+      "mock_39c13709c14b5473": [
+        "salmon",
+        "cooked rice",
+        "cucumber",
+        "broccoli"
+      ],
+      "mock_1e96922fe2825bd8": [
+        "tofu",
+        "cooked rice",
+        "bell pepper",
+        "green onion"
+      ],
+      "mock_f6d0b25c549156e4": [
+        "chicken breast",
+        "whole wheat pasta",
+        "tomato",
+        "basil",
+        "olive oil"
+      ],
+      "mock_5913557025115f99": [
+        "ground turkey",
+        "medium egg",
+        "parmesan",
+        "spinach",
+        "tomato sauce"
+      ],
+      "mock_20bd5e6ea7cf54d7": [
+        "white beans",
+        "zucchini",
+        "tomato",
+        "spinach",
+        "olive oil"
+      ],
+      "mock_e78ad0eba32f55c1": [
+        "shrimp",
+        "pasta",
+        "lemon",
+        "garlic",
+        "olive oil"
+      ],
+      "mock_d2b7eb92b9365147": [
+        "chicken breast",
+        "cooked rice",
+        "tomato",
+        "mozzarella",
+        "basil"
+      ],
+      "mock_7ae0f5eea3e65802": [
+        "chicken breast",
+        "cooked rice",
+        "mixed vegetables",
+        "olive oil"
+      ],
+      "mock_d4f3ed166d95510f": [
+        "ground turkey",
+        "zucchini",
+        "tomato",
+        "spinach"
+      ],
+      "mock_1a89b8d46f5c513d": [
+        "lentils",
+        "cooked rice",
+        "carrot",
+        "spinach"
+      ],
+      "mock_9e4c2025329f592c": [
+        "salmon",
+        "cooked rice",
+        "cucumber",
+        "broccoli"
+      ],
+      "mock_d6c6665acdef5ca4": [
+        "tofu",
+        "cooked rice",
+        "bell pepper",
+        "green onion"
+      ]
+    }
+  },
+  {
+    "case_id": "macro_004",
+    "category": "macro_trap",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "almond flour",
+      "tree nut"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "almond flour",
+        "matched_field": "ingredient:flour",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_8dc2b49f55325cc7",
+        "recipe_title": "Honey-Chocolate Oatmeal Cookies"
+      },
+      {
+        "forbidden_term": "almond flour",
+        "matched_field": "ingredient:flour",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_a61d9f45e1855ba0",
+        "recipe_title": "Honey Cake"
+      },
+      {
+        "forbidden_term": "almond flour",
+        "matched_field": "ingredient:flour",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_eeb938cd594f5acd",
+        "recipe_title": "Cinnamon Raisin Bread"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_8dc2b49f55325cc7",
+      "imp_a61d9f45e1855ba0",
+      "imp_eeb938cd594f5acd"
+    ],
+    "served_recipe_titles": [
+      "Cinnamon Raisin Bread",
+      "Honey Cake",
+      "Honey-Chocolate Oatmeal Cookies"
+    ],
+    "served_recipe_ingredients": {
+      "imp_8dc2b49f55325cc7": [
+        "flour",
+        "baking powder",
+        "baking soda",
+        "cinnamon",
+        "salt",
+        "vegetable shortening or 1 cup butter",
+        "bittersweet chocolate, chopped",
+        "honey",
+        "large eggs",
+        "rolled oats",
+        "coconut, flaked"
+      ],
+      "imp_a61d9f45e1855ba0": [
+        "honey",
+        "strong coffee",
+        "currants or 1/2 cup raisins",
+        "brandy",
+        "applesauce",
+        "brown sugar, packed",
+        "egg substitute",
+        "flour",
+        "baking powder",
+        "baking soda",
+        "salt",
+        "cinnamon",
+        "ground cloves",
+        "ginger",
+        "orange zest, grated"
+      ],
+      "imp_eeb938cd594f5acd": [
+        "package dry yeast",
+        "water",
+        "water",
+        "sugar",
+        "salt",
+        "shortening",
+        "flour",
+        "raisins",
+        "sugar",
+        "cinnamon",
+        "water"
+      ]
+    }
+  },
+  {
+    "case_id": "macro_018",
+    "category": "macro_trap",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "almond butter",
+      "tree nut"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "almond butter",
+        "matched_field": "ingredient:butter",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_9e0a542fc2195d5b",
+        "recipe_title": "Bananas Baked With Custard"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_9e0a542fc2195d5b",
+      "imp_9f0a8265f9825be4",
+      "imp_fc1b9972551c53c3"
+    ],
+    "served_recipe_titles": [
+      "Banana Bread II",
+      "Bananas Baked With Custard",
+      "Buttermilk-Oat Bread"
+    ],
+    "served_recipe_ingredients": {
+      "imp_fc1b9972551c53c3": [
+        "all-purpose flour",
+        "baking powder",
+        "baking soda",
+        "cinnamon, ground",
+        "applesauce",
+        "granulated sugar",
+        "large egg whites",
+        "ripe bananas, peeled mashed",
+        "vanilla extract"
+      ],
+      "imp_9e0a542fc2195d5b": [
+        "butter",
+        "bananas",
+        "bread, thin sliced, buttered",
+        "sultanas",
+        "milk",
+        "eggs",
+        "egg yolks",
+        "brown sugar",
+        "nutmeg"
+      ],
+      "imp_9f0a8265f9825be4": [
+        "buttermilk",
+        "honey",
+        "butter or 1 1/2 teaspoons margarine",
+        "bread flour",
+        "rolled oats, toasted *",
+        "salt",
+        "active dry yeast or 1 teaspoon bread machine yeast"
+      ]
+    }
+  },
+  {
+    "case_id": "macro_021",
+    "category": "macro_trap",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "whey protein isolate",
+      "whey",
+      "dairy"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_005",
+      "r_009",
+      "r_011"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Thai Basil Shrimp Rice"
+    ],
+    "served_recipe_ingredients": {
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ],
+      "r_011": [
+        "shrimp",
+        "jasmine rice",
+        "green beans",
+        "bell pepper",
+        "basil",
+        "soy sauce",
+        "garlic",
+        "lime"
+      ]
+    }
+  },
+  {
+    "case_id": "morphology_003",
+    "category": "morphology",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "peanut butter",
+      "satay"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "peanut butter",
+        "matched_field": "ingredient:butter",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_da012ddd50755912",
+        "recipe_title": "Pork With Apricot Glaze"
+      },
+      {
+        "forbidden_term": "peanut butter",
+        "matched_field": "ingredient:butter",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_a12b6706dc6f5f1f",
+        "recipe_title": "Pork With Orange Sauce"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_a12b6706dc6f5f1f",
+      "imp_b924f61fe4ad5bf4",
+      "imp_da012ddd50755912",
+      "mock_0ac84ff31d4359be",
+      "mock_2a1c58f7f8955190",
+      "mock_30d86aada20d5164",
+      "mock_3e26e78af9d35aac",
+      "mock_4558efdf643059bd",
+      "mock_4577b75e8a25539f",
+      "mock_549ec9edaf215d7c",
+      "mock_64aed1cbe0e95d90",
+      "mock_68c2970c678e54b2",
+      "mock_6bfd15b405505ac5",
+      "mock_755041a2261b58be",
+      "mock_77bbc53ce67e58ca",
+      "mock_7aea8ebf002a54f6",
+      "mock_81fd36a3894c5379",
+      "mock_8a9ff5c3945e56f9",
+      "mock_8f38f7f85ee35689",
+      "mock_8f499f44749a52b2",
+      "mock_9705d49641e1509d",
+      "mock_a622c31b9a7c588c",
+      "mock_b51cdf98f91956d6",
+      "mock_b5efffcdd3bd5798",
+      "mock_c4022883a6125759",
+      "mock_ccb557d721795d9f",
+      "mock_e2eadebe2d515b47",
+      "mock_eb5253b9e8c0542d",
+      "mock_ee3bc55f7ef65981",
+      "mock_ee87d27fe8d6513b",
+      "mock_f28a7d4c2f4a5a03",
+      "mock_fa978bf4935f5701",
+      "mock_fbadc497c6d452b1"
+    ],
+    "served_recipe_titles": [
+      "Caprese Chicken Rice Bowl",
+      "Chicken Tomato Basil Pasta",
+      "Italian Chicken Rice Bowl",
+      "Italian Lentil Vegetable Bowl",
+      "Italian Salmon Rice Plate",
+      "Italian Tofu Rice Skillet",
+      "Italian Turkey Vegetable Skillet",
+      "Lemon Garlic Shrimp Pasta",
+      "Pork Pinwheels With Apricot Stuffing",
+      "Pork With Apricot Glaze",
+      "Pork With Orange Sauce",
+      "Turkey Spinach Meatballs",
+      "Tuscan White Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "imp_da012ddd50755912": [
+        "pork fillets",
+        "butter",
+        "onion, sliced",
+        "curry powder",
+        "ginger, grated",
+        "apricot jam",
+        "soy sauce",
+        "lemon juice"
+      ],
+      "imp_b924f61fe4ad5bf4": [
+        "pork tenderloin",
+        "cornstarch",
+        "dash nutmeg",
+        "apricot nectar",
+        "bouillon, chicken, instant (instant chicken bouillon granules)",
+        "water, hot",
+        "apricot, dried, snipped",
+        "celery celery, chopped",
+        "margarine",
+        "cinnamon, ground",
+        "dash black pepper",
+        "bread cubes"
+      ],
+      "imp_a12b6706dc6f5f1f": [
+        "pork medallions",
+        "Worcestershire sauce",
+        "seasoned flour",
+        "garlic clove, crushed",
+        "oil",
+        "butter",
+        "orange, sliced, peeled",
+        "orange juice",
+        "parsley, chopped",
+        "dry mustard"
+      ],
+      "mock_0ac84ff31d4359be": [
+        "chicken breast",
+        "whole wheat pasta",
+        "tomato",
+        "basil",
+        "olive oil"
+      ],
+      "mock_9705d49641e1509d": [
+        "ground turkey",
+        "medium egg",
+        "parmesan",
+        "spinach",
+        "tomato sauce"
+      ],
+      "mock_30d86aada20d5164": [
+        "white beans",
+        "zucchini",
+        "tomato",
+        "spinach",
+        "olive oil"
+      ],
+      "mock_4577b75e8a25539f": [
+        "shrimp",
+        "pasta",
+        "lemon",
+        "garlic",
+        "olive oil"
+      ],
+      "mock_c4022883a6125759": [
+        "chicken breast",
+        "cooked rice",
+        "tomato",
+        "mozzarella",
+        "basil"
+      ],
+      "mock_81fd36a3894c5379": [
+        "chicken breast",
+        "cooked rice",
+        "mixed vegetables",
+        "olive oil"
+      ],
+      "mock_2a1c58f7f8955190": [
+        "ground turkey",
+        "zucchini",
+        "tomato",
+        "spinach"
+      ],
+      "mock_f28a7d4c2f4a5a03": [
+        "lentils",
+        "cooked rice",
+        "carrot",
+        "spinach"
+      ],
+      "mock_fbadc497c6d452b1": [
+        "salmon",
+        "cooked rice",
+        "cucumber",
+        "broccoli"
+      ],
+      "mock_ccb557d721795d9f": [
+        "tofu",
+        "cooked rice",
+        "bell pepper",
+        "green onion"
+      ],
+      "mock_8f38f7f85ee35689": [
+        "chicken breast",
+        "whole wheat pasta",
+        "tomato",
+        "basil",
+        "olive oil"
+      ],
+      "mock_eb5253b9e8c0542d": [
+        "ground turkey",
+        "medium egg",
+        "parmesan",
+        "spinach",
+        "tomato sauce"
+      ],
+      "mock_8f499f44749a52b2": [
+        "white beans",
+        "zucchini",
+        "tomato",
+        "spinach",
+        "olive oil"
+      ],
+      "mock_68c2970c678e54b2": [
+        "shrimp",
+        "pasta",
+        "lemon",
+        "garlic",
+        "olive oil"
+      ],
+      "mock_4558efdf643059bd": [
+        "chicken breast",
+        "cooked rice",
+        "tomato",
+        "mozzarella",
+        "basil"
+      ],
+      "mock_fa978bf4935f5701": [
+        "chicken breast",
+        "cooked rice",
+        "mixed vegetables",
+        "olive oil"
+      ],
+      "mock_64aed1cbe0e95d90": [
+        "ground turkey",
+        "zucchini",
+        "tomato",
+        "spinach"
+      ],
+      "mock_77bbc53ce67e58ca": [
+        "lentils",
+        "cooked rice",
+        "carrot",
+        "spinach"
+      ],
+      "mock_b5efffcdd3bd5798": [
+        "salmon",
+        "cooked rice",
+        "cucumber",
+        "broccoli"
+      ],
+      "mock_e2eadebe2d515b47": [
+        "tofu",
+        "cooked rice",
+        "bell pepper",
+        "green onion"
+      ],
+      "mock_549ec9edaf215d7c": [
+        "chicken breast",
+        "whole wheat pasta",
+        "tomato",
+        "basil",
+        "olive oil"
+      ],
+      "mock_6bfd15b405505ac5": [
+        "ground turkey",
+        "medium egg",
+        "parmesan",
+        "spinach",
+        "tomato sauce"
+      ],
+      "mock_3e26e78af9d35aac": [
+        "white beans",
+        "zucchini",
+        "tomato",
+        "spinach",
+        "olive oil"
+      ],
+      "mock_ee3bc55f7ef65981": [
+        "shrimp",
+        "pasta",
+        "lemon",
+        "garlic",
+        "olive oil"
+      ],
+      "mock_b51cdf98f91956d6": [
+        "chicken breast",
+        "cooked rice",
+        "tomato",
+        "mozzarella",
+        "basil"
+      ],
+      "mock_8a9ff5c3945e56f9": [
+        "chicken breast",
+        "cooked rice",
+        "mixed vegetables",
+        "olive oil"
+      ],
+      "mock_7aea8ebf002a54f6": [
+        "ground turkey",
+        "zucchini",
+        "tomato",
+        "spinach"
+      ],
+      "mock_ee87d27fe8d6513b": [
+        "lentils",
+        "cooked rice",
+        "carrot",
+        "spinach"
+      ],
+      "mock_a622c31b9a7c588c": [
+        "salmon",
+        "cooked rice",
+        "cucumber",
+        "broccoli"
+      ],
+      "mock_755041a2261b58be": [
+        "tofu",
+        "cooked rice",
+        "bell pepper",
+        "green onion"
+      ]
+    }
+  },
+  {
+    "case_id": "morphology_026",
+    "category": "morphology",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "scallops",
+      "scallop"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "scallop",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_7d553c9357c45b73",
+        "recipe_title": "Crispy Scalloped Potatoes"
+      },
+      {
+        "forbidden_term": "scallop",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_1d44976227bd5a2a",
+        "recipe_title": "Escalloped Potatoes"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_1d44976227bd5a2a",
+      "imp_3613ec3896ca593d",
+      "imp_7d553c9357c45b73"
+    ],
+    "served_recipe_titles": [
+      "Crispy Scalloped Potatoes",
+      "Escalloped Potatoes",
+      "Garlic Mashed Potatoes"
+    ],
+    "served_recipe_ingredients": {
+      "imp_3613ec3896ca593d": [
+        "medium baking potatoes",
+        "salt",
+        "butter",
+        "milk or 1/2 cup buttermilk, hot",
+        "nutmeg, freshly grated (optional)"
+      ],
+      "imp_7d553c9357c45b73": [
+        "potatoes, peeled, sliced",
+        "onion, chopped",
+        "all-purpose flour",
+        "salt",
+        "pepper",
+        "butter",
+        "milk, heated"
+      ],
+      "imp_1d44976227bd5a2a": [
+        "potatoes, sliced thin (raw)",
+        "butter",
+        "flour",
+        "milk",
+        "salt",
+        "pepper",
+        "Velveeta cheese, grated",
+        "green pepper and pimento mix, grated"
+      ]
+    }
+  },
+  {
+    "case_id": "multi_001",
+    "category": "multi_constraint",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "peanut",
+      "peanuts",
+      "groundnut",
+      "arachis oil",
+      "tree nut",
+      "walnut",
+      "almond",
+      "cashew",
+      "pecan",
+      "hazelnut",
+      "pistachio"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "arachis oil",
+        "matched_field": "ingredient:oil",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "imp_27ac86dd76bb54d4",
+        "recipe_title": "Yogurt Rice"
+      }
+    ],
+    "served_recipe_ids": [
+      "imp_1fdf4a7e0c1152c9",
+      "imp_27ac86dd76bb54d4",
+      "imp_d4b504794bd65c4d"
+    ],
+    "served_recipe_titles": [
+      "Rice Pilaf",
+      "Yellow Rice",
+      "Yogurt Rice"
+    ],
+    "served_recipe_ingredients": {
+      "imp_d4b504794bd65c4d": [
+        "ghee",
+        "medium onion, chopped",
+        "turmeric",
+        "bay leaves",
+        "4 cloves",
+        "black peppercorns",
+        "cinnamon sticks (1 inch)",
+        "black cardamom pods",
+        "brown rice, pre-soaked",
+        "water",
+        "green peas",
+        "salt",
+        "pinch saffron"
+      ],
+      "imp_1fdf4a7e0c1152c9": [
+        "fresh mushrooms, Sliced",
+        "green onions, Sliced",
+        "butter or 1 tablespoon margarine",
+        "water",
+        "long grain rice",
+        "medium bell pepper (Bell peppers can be any color, but should be cut into 1-inch julienne strips.)",
+        "salt",
+        "dried sage, Crushed",
+        "parsley, Snipped"
+      ],
+      "imp_27ac86dd76bb54d4": [
+        "long-grain rice",
+        "water",
+        "brown mustard seeds",
+        "mung dal",
+        "nonstick cooking spray",
+        "oil",
+        "serrano chili, minced",
+        "gingerroot, minced",
+        "cucumber, peel, seed and mince",
+        "plain nonfat yogurt",
+        "nonfat milk",
+        "salt",
+        "cilantro, minced"
+      ]
+    }
+  },
+  {
+    "case_id": "multi_003",
+    "category": "multi_constraint",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "milk",
+      "dairy",
+      "whey",
+      "casein",
+      "egg",
+      "eggs",
+      "albumin",
+      "egg white"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "multi_006",
+    "category": "multi_constraint",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "tree nut",
+      "walnut",
+      "almond",
+      "cashew",
+      "pecan",
+      "hazelnut",
+      "pistachio",
+      "milk",
+      "dairy",
+      "whey",
+      "casein"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_005",
+      "r_009"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Japanese Salmon Sushi Bowl",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_005": [
+        "salmon",
+        "white rice",
+        "cucumber",
+        "avocado",
+        "edamame",
+        "soy sauce",
+        "nori",
+        "sesame seeds"
+      ],
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ]
+    }
+  },
+  {
+    "case_id": "multi_009",
+    "category": "multi_constraint",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "wheat",
+      "wheat flour",
+      "durum",
+      "semolina",
+      "milk",
+      "dairy",
+      "whey",
+      "casein"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_009",
+      "r_012"
+    ],
+    "served_recipe_titles": [
+      "American Turkey Sweet Potato Chili",
+      "Dairy-Free Chicken Fajita Plate",
+      "Mexican Turkey Black Bean Skillet"
+    ],
+    "served_recipe_ingredients": {
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ],
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_012": [
+        "ground turkey",
+        "sweet potato",
+        "black beans",
+        "tomato",
+        "onion",
+        "chili powder",
+        "spinach"
+      ]
+    }
+  },
+  {
+    "case_id": "multi_018",
+    "category": "multi_constraint",
+    "claim_strength": "inherent",
+    "forbidden_terms": [
+      "wheat",
+      "wheat flour",
+      "durum",
+      "semolina",
+      "milk",
+      "dairy",
+      "whey",
+      "casein"
+    ],
+    "matches": [
+      {
+        "forbidden_term": "dairy",
+        "matched_field": "title",
+        "match_rule": "bidirectional_substring",
+        "recipe_id": "r_009",
+        "recipe_title": "Dairy-Free Chicken Fajita Plate"
+      }
+    ],
+    "served_recipe_ids": [
+      "r_003",
+      "r_009",
+      "r_015"
+    ],
+    "served_recipe_titles": [
+      "Dairy-Free Chicken Fajita Plate",
+      "Mexican Turkey Black Bean Skillet",
+      "Mexican Vegan Burrito Bowl"
+    ],
+    "served_recipe_ingredients": {
+      "r_009": [
+        "chicken breast",
+        "bell pepper",
+        "onion",
+        "brown rice",
+        "black beans",
+        "lime",
+        "avocado",
+        "coriander"
+      ],
+      "r_015": [
+        "brown rice",
+        "black beans",
+        "corn",
+        "tomato",
+        "lettuce",
+        "avocado",
+        "lime",
+        "coriander"
+      ],
+      "r_003": [
+        "ground turkey",
+        "black beans",
+        "corn",
+        "bell pepper",
+        "tomato",
+        "avocado",
+        "lime",
+        "coriander"
+      ]
+    }
+  }
+]
