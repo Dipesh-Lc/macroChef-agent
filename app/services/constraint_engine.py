@@ -1,3 +1,5 @@
+import re
+
 from app.schemas.recommendation import ValidationResult
 from app.schemas.recipe import Recipe
 from app.schemas.user import NO_RESTRICTION_DIET_TYPES, UserProfile
@@ -417,14 +419,40 @@ ALLERGEN_ALIASES = {
     #     applied consistently even though this one case is a real,
     #     measured, known false positive). Measured over-block: 28 corpus
     #     rows total (2026-07-19), gluten-constrained users only -- see
-    #     docs/BACKLOG.md for the full row-by-row list. Do NOT add
-    #     "rice krispies"/"grape-nuts"/"corn flakes" as their own compound
-    #     terms: bidirectional substring matching's reverse arm would then
-    #     match bare "rice"/"grape"/"corn" ingredient rows corpus-wide --
-    #     see docs/BACKLOG.md's "direction-aware lookalike" entry (promoted
-    #     to load-bearing priority by this finding) for the mechanism that
-    #     would be needed to add those safely.
-    "gluten": _WHEAT | {"barley", "malt", "rye", "krispies", "cereal"},
+    #     docs/BACKLOG.md for the full row-by-row list.
+    #   - "corn flakes", "post toasties", "rice krispies", "grape-nuts":
+    #     precise compound brand-cereal terms, added 2026-07-19 (direction-
+    #     aware lookalike matching fix, docs/BACKLOG.md). Previously these
+    #     could NOT be added: bidirectional substring matching's reverse arm
+    #     would have matched bare "rice"/"grape"/"corn" ingredient rows
+    #     corpus-wide (e.g. a bare "corn" ingredient reverse-matching "corn
+    #     flakes" and wrongly failing gluten-free for a plain vegetable).
+    #     `_recipe_contains_any_term`/`_any_term_matches` is now one-directional
+    #     (a term may only match as a substring OF a longer ingredient name,
+    #     never the reverse), so these compound terms are safe to add: a bare
+    #     "corn"/"rice"/"grape" ingredient can never reverse-match into them.
+    #     These close the exact gap the "krispies"/"cereal" broader terms
+    #     above could not: a brand-cereal row naming neither "cereal" nor
+    #     "krispies" (e.g. a bare "corn flakes" ingredient with no "cereal"
+    #     suffix, or "Post Toasties" -- Post's own toasted-corn-flakes brand,
+    #     same barley-malt-flavoring hazard class as Rice Krispies). See the
+    #     6-recipe manual-quarantine release this fix enables, this same
+    #     round (docs/BACKLOG.md "Manual quarantine: brand-cereal rows..."
+    #     entry). The existing "krispies"/"cereal" broader terms are KEPT,
+    #     not replaced -- they still catch brand names/phrasings that don't
+    #     literally contain these four compound terms.
+    "gluten": _WHEAT
+    | {
+        "barley",
+        "malt",
+        "rye",
+        "krispies",
+        "cereal",
+        "corn flakes",
+        "post toasties",
+        "rice krispies",
+        "grape-nuts",
+    },
     "soy": _SOY,
     "soya": _SOY,
     "egg": _EGG,
@@ -715,6 +743,30 @@ def derive_allergen_labels(ingredient_names: list[str]) -> list[str]:
     return sorted(labels)
 
 
+def _any_term_matches(candidate_terms: set[str], terms: set[str]) -> bool:
+    """One-directional substring match: True iff some `term` appears WITHIN
+    some `candidate_terms` entry (`term in candidate`), and that match is not
+    fully explained by a known lookalike phrase (see `_is_lookalike_match`).
+
+    Direction is deliberate and safety-load-bearing (docs/BACKLOG.md,
+    "direction-aware lookalike matching mechanism"): a compound allergen/diet
+    term may match as a substring of a longer ingredient name (e.g. "peanut
+    butter" matching within "creamy peanut butter"), but a bare ingredient
+    word must never match merely because it happens to be a substring of a
+    longer, unrelated compound term (e.g. bare "pepper" must never match
+    "pepperoni", and bare "soy" must never match "soy sauce" -- see
+    `_recipe_contains_any_term`'s prior bidirectional implementation, which
+    had exactly that reverse-direction hazard). `term in candidate` alone
+    already subsumes the exact-equality case (a string is always `in`
+    itself), so there is no separate `==` check.
+    """
+    for term in terms:
+        for candidate in candidate_terms:
+            if term in candidate and not _is_lookalike_match(term, candidate):
+                return True
+    return False
+
+
 def _recipe_contains_any_term(recipe: Recipe, terms: set[str]) -> bool:
     # Deliberately NOT ingredient_matches(term, recipe_term) here: that function
     # re-runs normalize_ingredient on `term` internally, which re-applies
@@ -728,17 +780,70 @@ def _recipe_contains_any_term(recipe: Recipe, terms: set[str]) -> bool:
     # both the raw and normalized form of each value), so a direct substring
     # test is sufficient and doesn't re-trigger that collision.
     recipe_terms = _recipe_safety_terms(recipe)
-    for term in terms:
-        for recipe_term in recipe_terms:
-            if term == recipe_term or term in recipe_term or recipe_term in term:
-                if _is_lookalike_match(term, recipe_term):
-                    continue
-                return True
-    return False
+    return _any_term_matches(recipe_terms, terms)
+
+
+# --- Bare "nut"/"nuts" ingredient (direction-aware lookalike matching fix,
+# 2026-07-19, docs/BACKLOG.md) -----------------------------------------------
+#
+# A bare, unqualified "nuts" ingredient row is a real, measured shape in this
+# corpus (16 active-corpus recipes, e.g. imp_2cb3642cd927507e "Applesauce
+# Cake", imp_38d021312e6751c9 "Deep Dark Secret", imp_6ab74a6c238451a3
+# "Banana-Nut Muffins" -- verified 2026-07-19). Before this fix,
+# `_recipe_contains_any_term`'s bidirectional substring matching's REVERSE
+# arm accidentally caught these rows (bare "nut" is a substring of every
+# compound tree-nut term: "walnut", "hazelnut", "brazil nut", "pine nut",
+# ...). Removing the reverse arm would silently lose that detection unless
+# compensated for.
+#
+# The obvious fix -- adding bare "nut"/"nuts" as ordinary ALLERGEN_ALIASES
+# substring terms -- was tried and is UNSAFE: forward substring matching
+# would then match "nut"/"nuts" against every OTHER word that merely
+# *contains* those letters, which is a large, real false-positive surface
+# with zero nut content: "butternut squash" (a vegetable), "water chestnut"
+# (the EXISTING, explicitly-tested lookalike carve-out --
+# test_water_chestnut_not_over_blocked_by_tree_nut_additions caught this
+# regression directly), "chestnut" (unrelated to the bare-noun question --
+# already its own explicit term), "nutmeg" (a spice, unrelated botanically),
+# and "coconut" (disputed/labeling-nuanced, not something this addition
+# should silently decide). This is the same "durum"/"rum" false-positive
+# class this project explicitly avoids elsewhere (see
+# GROUND_TRUTH_GLUTEN's docstring in scripts/audit_diet_leaks.py) -- not
+# ambiguity that should resolve toward blocking, but a plain, objectively
+# wrong match with no real nut-vocabulary payoff.
+#
+# Instead, "nut"/"nuts" is matched only as a whole, standalone WORD (regex
+# word boundaries), never as a substring of a longer word. This still
+# catches every real corpus shape ("nuts", "nuts, Chopped", "chopped nuts",
+# "-1 cup nuts, chopped", "nuts (walnuts or pecans are good)") while never
+# matching "butternut squash"/"water chestnut"/"chestnut"/"nutmeg"/
+# "coconut". Net safety effect measured as zero over-block delta versus the
+# pre-fix baseline: every one of the 16 corpus rows this catches was ALREADY
+# being blocked before this fix, via the reverse-arm bug this fix removes --
+# so this is a same-behavior-preserving migration onto a precise, direction-
+# safe mechanism, not a new block, and it does not reintroduce the
+# over-broad match a plain substring term would have.
+#
+# An ambiguous "nuts" row could equally be peanuts (not just tree nuts), so
+# this check applies to BOTH the tree-nut and peanut allergy keys (and the
+# "nuts" key, their union) -- mirroring how the pre-existing bare
+# "shellfish" term is a member of both _MOLLUSK and, via composition, the
+# "crustacean" key.
+_BARE_NUT_WORD = re.compile(r"\bnuts?\b", re.IGNORECASE)
+_BARE_NUT_ALLERGY_KEYS = frozenset({"tree nut", "nuts", "peanut", "peanuts"})
+
+
+def _recipe_has_bare_nut_word(recipe: Recipe) -> bool:
+    return any(_BARE_NUT_WORD.search(item.name) for item in recipe.ingredients)
 
 
 def contains_allergen(recipe: Recipe, allergies: list[str]) -> bool:
-    return _recipe_contains_any_term(recipe, _expand_allergen_terms(allergies))
+    if _recipe_contains_any_term(recipe, _expand_allergen_terms(allergies)):
+        return True
+    requested = {allergy.lower().strip() for allergy in allergies}
+    if requested & _BARE_NUT_ALLERGY_KEYS and _recipe_has_bare_nut_word(recipe):
+        return True
+    return False
 
 
 def contains_disliked_ingredient(recipe: Recipe, disliked_ingredients: list[str]) -> bool:

@@ -164,6 +164,55 @@ _ADVISOR_APPROVED_MANUAL_RELEASES: dict[str, str] = {
         "instructions 'Cut the fish into small pieces' with no fish ingredient row. Cured: "
         "archive ingredients now include 'fish fillets'."
     ),
+    # --- 2026-07-19, direction-aware lookalike matching fix (docs/BACKLOG.md) --
+    # 6 ids below: NOT a scraped-archive-reimport release (their ingredient
+    # rows were never wrong or incomplete -- see the note before each entry).
+    # The prior blocker was that `_recipe_contains_any_term`'s bidirectional
+    # substring matching could not safely add "corn flakes"/"Post Toasties"
+    # as their own compound gluten terms (the reverse arm would have matched
+    # bare "rice"/"corn" ingredient rows corpus-wide). That reverse arm is
+    # now removed (`_any_term_matches` is one-directional) and the four
+    # precise compound terms are now in `ALLERGEN_ALIASES["gluten"]` --
+    # each id below was individually re-verified this round
+    # (`contains_allergen(recipe, ["gluten"])` now returns True for its
+    # existing, UNCHANGED ingredient rows) before being added here. Released
+    # via `run_manual_quarantine_release` (JSONL-level move, not a full
+    # scraped-archive reconciliation run), per the same
+    # advisor-approval-required discipline as every other entry in this
+    # dict.
+    "imp_334d0269ca805812": (
+        "Low-Fat Sour Cream Potato Casserole -- original finding (docs/BACKLOG.md "
+        "'Manual quarantine: brand-cereal rows' entry, 2026-07-19 diet_023 cure round): bare "
+        "'corn flakes, crumbled' ingredient row, no 'cereal'/'krispies' word for the "
+        "then-current ALLERGEN_ALIASES[\"gluten\"] vocabulary to catch. Cured: ingredients "
+        "unchanged; 'corn flakes' is now its own direct, forward-catchable gluten term."
+    ),
+    "imp_a4f05171ac765162": (
+        "Mallow Sweet Potato Balls -- original finding (same docs/BACKLOG.md entry): bare "
+        "'to taste corn flakes, crushed' ingredient row. Cured: ingredients unchanged; "
+        "'corn flakes' is now its own direct, forward-catchable gluten term."
+    ),
+    "imp_e572df5dc6c557f3": (
+        "Flake-and-Fruit Squares -- original finding (same docs/BACKLOG.md entry): bare "
+        "'corn flakes' ingredient row. Cured: ingredients unchanged; 'corn flakes' is now "
+        "its own direct, forward-catchable gluten term."
+    ),
+    "imp_ec6ac830c040514a": (
+        "Hash Browns Casserole -- original finding (same docs/BACKLOG.md entry): bare "
+        "'corn flakes, crushed (or potato chips)' ingredient row. Cured: ingredients "
+        "unchanged; 'corn flakes' is now its own direct, forward-catchable gluten term."
+    ),
+    "imp_f5b6e366f427503c": (
+        "Baked Breakfast Potatoes -- original finding (same docs/BACKLOG.md entry): bare "
+        "'corn flakes, crushed, for topping' ingredient row. Cured: ingredients unchanged; "
+        "'corn flakes' is now its own direct, forward-catchable gluten term."
+    ),
+    "imp_f90fc172136c51f8": (
+        "Carrot Casserole -- original finding (same docs/BACKLOG.md entry): bare "
+        "'1/2 cup Post Toasties' ingredient row, no 'cereal'/'krispies' word. Cured: "
+        "ingredients unchanged; 'post toasties' is now its own direct, forward-catchable "
+        "gluten term."
+    ),
 }
 
 
@@ -207,6 +256,127 @@ def _atomic_copy_file(src: Path, dst: Path) -> None:
         with contextlib.suppress(FileNotFoundError):
             os.remove(tmp_name)
         raise
+
+
+def _write_jsonl_records_atomic(path: Path, records: list[dict]) -> None:
+    """Same content as `_write_jsonl_records`, but written atomically (temp
+    file in `path`'s directory, then `os.replace`) -- same pattern as
+    `_atomic_copy_file` above and `scripts/quarantine_flagged_recipes.py`'s
+    `_write_quarantine_atomic`. Used for `imported_recipes.jsonl` and
+    `quarantined_recipes.jsonl` specifically: both are live safety data (the
+    quarantine sidecar is a safety AUDIT TRAIL, never overwritten
+    non-atomically -- see that script's module docstring), so a crash
+    mid-write must never leave either file truncated."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False, default=str))
+                handle.write("\n")
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(tmp_name)
+        raise
+
+
+def run_manual_quarantine_release(recipe_ids: list[str], *, dry_run: bool = False) -> int:
+    """Move specific `manual_adjudication`-quarantined recipe ids back into
+    the active corpus, guarded by `_ADVISOR_APPROVED_MANUAL_RELEASES` exactly
+    like `run_scraped_archive_reimport`'s manual-release handling below: an
+    id absent from that allowlist is refused, never silently released.
+
+    Unlike `run_scraped_archive_reimport`, this is NOT a scraped-archive
+    reconciliation run -- it performs a direct JSONL-level move
+    (`quarantined_recipes.jsonl` -> `imported_recipes.jsonl`) for ids whose
+    underlying ingredient rows were already correct and complete; only the
+    MATCHING MECHANISM changed (see each id's citation in the dict above).
+    Every id is independently RE-VERIFIED here via `contains_allergen`
+    against its own (unchanged) ingredient rows before being released --
+    "is now caught by the fix" is checked live, not assumed from the dict
+    entry's prose (spec requirement: verify each one's flagged ingredient is
+    now caught by the new precise terms before releasing it).
+
+    Only ever checks the "gluten" allergen key: this release path exists
+    specifically for the brand-cereal/gluten manual-quarantine class (see
+    docs/BACKLOG.md's "Manual quarantine: brand-cereal rows" entry). A
+    future id released through this same function for a different allergen
+    reason would need this hardcoded key generalized -- deliberately not
+    done speculatively here.
+
+    Returns a process exit code (0 = released, or --dry-run reported, with
+    no problems; 1 = aborted -- a requested id is missing from the
+    quarantine sidecar, not `manual_adjudication`-quarantined, not on the
+    allowlist, or (a data bug) still fails its own serve-time coverage check
+    after the "cure" -- no files are written in the 1 case, all-or-nothing).
+    """
+    settings = get_settings()
+    corpus_path = Path(settings.recipe_path).parent / "imported_recipes.jsonl"
+    quarantine_path = corpus_path.parent / "quarantined_recipes.jsonl"
+
+    active_records = _read_jsonl(corpus_path)
+    quarantine_records = _read_jsonl(quarantine_path)
+    quarantine_by_id = {record["recipe"]["recipe_id"]: record for record in quarantine_records}
+
+    errors: list[str] = []
+    to_release: list[dict] = []
+    for recipe_id in recipe_ids:
+        record = quarantine_by_id.get(recipe_id)
+        if record is None:
+            errors.append(f"{recipe_id}: not found in {quarantine_path}")
+            continue
+        check = record.get("quarantine_reason", {}).get("check")
+        if check != "manual_adjudication":
+            errors.append(
+                f"{recipe_id}: quarantine_reason.check is {check!r}, not 'manual_adjudication' "
+                "-- this release path is for manual-adjudication quarantines only."
+            )
+            continue
+        if recipe_id not in _ADVISOR_APPROVED_MANUAL_RELEASES:
+            errors.append(
+                f"{recipe_id}: not present in _ADVISOR_APPROVED_MANUAL_RELEASES -- manual "
+                "quarantine decisions may never be silently overturned. Add a cited entry first."
+            )
+            continue
+        recipe = Recipe.model_validate(record["recipe"])
+        if not contains_allergen(recipe, ["gluten"]):
+            errors.append(
+                f"{recipe_id}: serve-time coverage check FAILED -- "
+                "contains_allergen(recipe, ['gluten']) is False on this recipe's own "
+                "(unchanged) ingredient rows even after the fix. Refusing to release a "
+                "recipe the live safety gate still cannot actually catch."
+            )
+            continue
+        to_release.append(record)
+
+    if errors:
+        print("ERROR: refusing to release -- no files written:")
+        for error in errors:
+            print(f"  - {error}")
+        return 1
+
+    print(f"Verified {len(to_release)} id(s) are advisor-approved AND serve-time-covered for release:")
+    for record in to_release:
+        print(f"  - {record['recipe']['recipe_id']} {record['recipe']['title']!r}")
+
+    if dry_run:
+        print("\n--dry-run: no files written.")
+        return 0
+
+    released_ids = {record["recipe"]["recipe_id"] for record in to_release}
+    new_active_records = active_records + [record["recipe"] for record in to_release]
+    new_active_records.sort(key=lambda record: record["recipe_id"])
+    new_quarantine_records = [
+        record for record in quarantine_records if record["recipe"]["recipe_id"] not in released_ids
+    ]
+
+    _write_jsonl_records_atomic(corpus_path, new_active_records)
+    _write_jsonl_records_atomic(quarantine_path, new_quarantine_records)
+
+    print(f"\nWrote {len(new_active_records)} active recipes -> {corpus_path}")
+    print(f"Wrote {len(new_quarantine_records)} remaining quarantined recipes -> {quarantine_path}")
+    return 0
 
 
 def _unit_coverage(recipes: list[Recipe]) -> tuple[int, int]:
@@ -819,9 +989,9 @@ def _run_generic_import(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", choices=sorted(_ADAPTERS), required=True)
+    parser.add_argument("--dataset", choices=sorted(_ADAPTERS))
     parser.add_argument(
-        "--source", required=True, help="Path to the downloaded dataset file, or (for "
+        "--source", help="Path to the downloaded dataset file, or (for "
         "foodcom_scraped_archive) the archive directory (data/scraped/foodcom)"
     )
     parser.add_argument("--limit", type=int, default=5000, help="Ignored by foodcom_scraped_archive")
@@ -830,7 +1000,28 @@ def main() -> int:
         action="store_true",
         help="Skip rebuilding the vector store after writing the corpus file",
     )
+    parser.add_argument(
+        "--release-manual-quarantine-ids",
+        nargs="+",
+        metavar="RECIPE_ID",
+        help="Move one or more manual_adjudication-quarantined recipe ids back into the "
+        "active corpus (see run_manual_quarantine_release / _ADVISOR_APPROVED_MANUAL_"
+        "RELEASES above). Mutually exclusive with --dataset. Not a scraped-archive "
+        "reimport -- no --source needed, and --no-reindex has no effect here (this mode "
+        "never touches the vector store).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --release-manual-quarantine-ids: verify and report, but write nothing.",
+    )
     args = parser.parse_args()
+
+    if args.release_manual_quarantine_ids:
+        return run_manual_quarantine_release(args.release_manual_quarantine_ids, dry_run=args.dry_run)
+
+    if not args.dataset or not args.source:
+        parser.error("--dataset and --source are required unless --release-manual-quarantine-ids is given")
 
     if args.dataset == "foodcom_scraped_archive":
         return run_scraped_archive_reimport(args.source, no_reindex=args.no_reindex)

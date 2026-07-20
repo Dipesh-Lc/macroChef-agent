@@ -884,3 +884,159 @@ def test_enchilada_sauce_blocks_peanut_allergy() -> None:
     assert contains_allergen(recipe, ["peanut"])
     assert contains_allergen(recipe, ["peanuts"])
     assert contains_allergen(recipe, ["nuts"])
+
+
+# --- Direction-aware lookalike matching fix, 2026-07-19 (docs/BACKLOG.md) ---
+#
+# `_recipe_contains_any_term`'s bidirectional substring matching (`term ==
+# recipe_term or term in recipe_term or recipe_term in term`) had an unsafe
+# REVERSE arm: a bare ingredient word could match merely because it was a
+# substring of a longer, unrelated compound term (bare "pepper" matching
+# "pepperoni"; bare "soy" matching "soy sauce"). This is now one-directional
+# (`_any_term_matches`: `term in candidate`, never the reverse) -- these
+# tests pin the motivating cases from the task spec, plus the four new
+# precise compound gluten terms this fix enables.
+
+
+def test_bare_soy_does_not_trip_gluten_filter_but_still_trips_soy_allergen() -> None:
+    # "soy" reverse-matched _WHEAT's "soy sauce" entry before this fix
+    # ("soy" in "soy sauce" is True), wrongly failing gluten-free/wheat for a
+    # plain soybean ingredient with no wheat content at all. Soy itself must
+    # still trip a soy allergy -- "soy" is a direct _SOY member.
+    recipe = _recipe(ingredients=["rice", "soy"], allergens=[], diet_tags=[])
+
+    assert not contains_allergen(recipe, ["gluten"])
+    assert not contains_allergen(recipe, ["wheat"])
+    assert not violates_diet_type(recipe, "gluten-free")
+    assert contains_allergen(recipe, ["soy"])
+
+
+def test_bare_pepper_still_passes_vegetarian() -> None:
+    # The bug's original motivating case: bare "pepper" (bell pepper/ground
+    # black pepper) is not meat and must never fail vegetarian just because
+    # it is a substring of "pepperoni".
+    recipe = _recipe(ingredients=["rice", "pepper"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert result.is_valid
+
+
+def test_pepperoni_alone_still_fails_vegetarian() -> None:
+    recipe = _recipe(ingredients=["rice", "pepperoni"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_pepperoni_and_bare_pepper_together_still_fails_vegetarian() -> None:
+    # A recipe carrying BOTH the real meat ("pepperoni") and the unrelated
+    # bare word ("pepper") must still fail, on the strength of "pepperoni"'s
+    # own (forward) match -- removing the reverse arm must not weaken this.
+    recipe = _recipe(ingredients=["pepperoni", "pepper", "rice"], allergens=[], diet_tags=[])
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    ["corn flakes, crumbled", "1/2 cup Post Toasties", "Rice Krispies", "Post Grape-Nuts cereal"],
+)
+def test_new_precise_brand_cereal_terms_block_gluten_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["gluten"])
+
+
+@pytest.mark.parametrize("ingredient", ["corn", "rice", "grapes"])
+def test_bare_corn_flakes_lookalike_words_do_not_block_gluten_allergy(ingredient: str) -> None:
+    # The exact hazard the new compound terms ("corn flakes", "rice
+    # krispies", "grape-nuts") would have reintroduced under the OLD
+    # bidirectional matching: bare "corn"/"rice"/"grapes" must never reverse-
+    # match into these longer compound terms.
+    recipe = _recipe(ingredients=["olive oil", ingredient], allergens=[])
+
+    assert not contains_allergen(recipe, ["gluten"])
+
+
+def test_bare_nuts_ingredient_does_not_block_gluten_allergy() -> None:
+    # "nuts" is genuinely, definitionally a tree-nut/peanut ingredient (see
+    # test_bare_nuts_ingredient_blocks_tree_nut_and_peanut_allergy below),
+    # but must never be confused for gluten via "grape-nuts".
+    recipe = _recipe(ingredients=["olive oil", "nuts"], allergens=[])
+
+    assert not contains_allergen(recipe, ["gluten"])
+
+
+def test_bare_nuts_ingredient_blocks_tree_nut_and_peanut_allergy() -> None:
+    # Compensating addition for a real reverse-arm-removal loss: a bare,
+    # unqualified "nuts" ingredient (16 real corpus recipes, e.g. Applesauce
+    # Cake, Deep Dark Secret) was accidentally caught pre-fix via the
+    # reverse arm (bare "nut" is a substring of every compound tree-nut
+    # term). A plain ALLERGEN_ALIASES substring term for "nut"/"nuts" would
+    # be unsafe (it would forward-match "butternut squash", "water
+    # chestnut", "nutmeg", "coconut", ...) -- see contains_allergen's
+    # _BARE_NUT_WORD word-boundary check, which catches this precisely
+    # instead.
+    recipe = _recipe(ingredients=["flour", "nuts"], allergens=[])
+
+    assert contains_allergen(recipe, ["tree nut"])
+    assert contains_allergen(recipe, ["peanut"])
+    assert contains_allergen(recipe, ["nuts"])
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    ["butternut squash", "water chestnut", "chestnut puree", "nutmeg", "coconut, flaked", "walnut", "peanuts"],
+)
+def test_bare_nut_word_check_does_not_over_block_unrelated_or_already_covered_ingredients(ingredient: str) -> None:
+    # The word-boundary check must never match "nut"/"nuts" as a mere
+    # SUBSTRING of a longer, unrelated word -- that would reintroduce the
+    # exact kind of over-broad match this whole fix exists to remove, just
+    # in the forward direction. "walnut"/"peanuts" are included to confirm
+    # this check adds nothing on top of their own pre-existing, correct
+    # explicit-term coverage (both must still be blocked -- via their own
+    # terms, not this check).
+    #
+    # Deliberately checks the "tree nut" and "peanut" allergy keys only, not
+    # "nuts": requesting allergy=["nuts"] independently normalizes the
+    # ALLERGY NAME ITSELF ("nuts" -> "nut", via the same pluralization rule
+    # normalize_ingredient applies to ingredient names) into a bare "nut"
+    # matching term via `_expand_allergen_terms` -- a PRE-EXISTING,
+    # unrelated bug (confirmed present on main before this task's changes)
+    # that already over-blocks "nutmeg"/"butternut squash"/etc. for a
+    # "nuts"-allergy request regardless of this fix. See "Noticed, not
+    # fixed" in this task's report / docs/BACKLOG.md -- out of scope here.
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+    # "chestnut puree" is a REAL tree nut (chestnut is a direct _TREE_NUT
+    # member) and must stay blocked -- only "water chestnut" (the lookalike)
+    # must not be.
+    expected_tree_nut_block = ingredient in {"walnut", "chestnut puree"}
+
+    assert contains_allergen(recipe, ["tree nut"]) is expected_tree_nut_block
+    assert contains_allergen(recipe, ["peanut"]) is (ingredient == "peanuts")
+
+
+def test_bare_butter_does_not_block_peanut_allergy() -> None:
+    # False positive correctly removed: bare "butter" (dairy) is not peanut
+    # butter, and reverse-matched "peanut butter" before this fix.
+    recipe = _recipe(ingredients=["flour", "butter"], allergens=[])
+
+    assert not contains_allergen(recipe, ["peanut"])
+
+
+def test_bare_sage_does_not_block_vegetarian_or_vegan_diet() -> None:
+    # False positive correctly removed: bare "sage" (herb) reverse-matched
+    # "sausage" before this fix.
+    recipe = _recipe(ingredients=["rice", "sage"], allergens=[], diet_tags=[])
+
+    assert not violates_diet_type(recipe, "vegetarian")
+    assert not violates_diet_type(recipe, "vegan")
+
+
+def test_bare_ham_does_not_block_gluten_allergy() -> None:
+    # False positive correctly removed: bare "ham" (a substring of "graham"
+    # cracker) reverse-matched "graham cracker" before this fix.
+    recipe = _recipe(ingredients=["rice", "ham"], allergens=[])
+
+    assert not contains_allergen(recipe, ["gluten"])
