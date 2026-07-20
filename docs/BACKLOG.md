@@ -667,6 +667,10 @@ were pre-registered before anyone saw a result.
   let "rice krispies"/"grape-nuts"/"corn flakes"/"pepperoni" all be added
   precisely, closing this entire recurring class in one FULL TREATMENT
   pass instead of one narrowly-scoped workaround per incident.
+  **DONE 2026-07-20** (commits `4a97b80` + `59a9157`; direction-aware
+  implementation removes unsafe reverse-arm bidirectional substring matching,
+  unblocks precise compound-term additions, releases 6 manual-quarantine
+  recipes via the existing `_ADVISOR_APPROVED_MANUAL_RELEASES` allowlist).
   **Advisor label-amplification note (2026-07-19):** separately,
   `derive_allergen_labels`'s composed `"nuts"` key (`_TREE_NUT | _PEANUT`
   union) means a re-derived `"nuts"` label additionally blocks peanut
@@ -697,10 +701,11 @@ were pre-registered before anyone saw a result.
   Balls", `imp_e572df5dc6c557f3` "Flake-and-Fruit Squares",
   `imp_ec6ac830c040514a` "Hash Browns Casserole", `imp_f5b6e366f427503c`
   "Baked Breakfast Potatoes", `imp_f90fc172136c51f8` "Carrot Casserole".
-  Superseded once the direction-aware lookalike mechanism above lands
-  (would let "corn flakes"/"post toasties" be added as precise compound
-  terms and these could be released on the same cure basis as the
-  Kellogg's Rice Krispies rows already fixed automatically).
+  Superseded by the direction-aware lookalike mechanism (commits `4a97b80` +
+  `59a9157`, 2026-07-20): the 6 recipes were auto-released via the
+  `_ADVISOR_APPROVED_MANUAL_RELEASES` allowlist mechanism, "corn flakes" and
+  "post toasties" added as precise compound terms alongside existing
+  "krispies"/"cereal" equivalents.
 - **FULL TREATMENT: systematic ground-truth-vs-production vocabulary
   diff — CLOSED 2026-07-20, commit `d200acb`** ("A1 backlog / vocabulary gap
   closure: close the systematic ground-truth-vs-production vocabulary
