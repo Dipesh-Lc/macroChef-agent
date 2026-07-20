@@ -1,186 +1,184 @@
 # Grounding report
 
 ## Corpus-wide summary
-- total recipes processed: 3878
+- total recipes processed: 4263
 - grounded: 15 (0.4%)
-- partial: 3329 (85.8%)
-- ungrounded: 534 (13.8%)
-
-**Comparability note (A3 prep):** the pre-A3 baseline (`data/processed/grounding_report_pre_A3_baseline.md`, grounded 0.4% / partial 59.2%) was computed against the OLD, pre-A1 corpus of 4,263 recipes (near-zero unit coverage, 0.35%). The A1 corpus rebuild replaced that corpus with 3,853 active imported recipes + 25 hand-authored seeds and raised unit coverage to 76.14% -- the `total recipes processed` count above states THIS run's corpus size so the before/after grounded/partial/ungrounded percentages are read against the right denominator, not silently compared across two different corpora of different sizes. `data/processed/grounding_report_baseline.md` is a separate, even older snapshot (also pre-A1, from an earlier point in phase 1.5) -- do not confuse the two baseline files.
+- partial: 2522 (59.2%)
+- ungrounded: 1726 (40.5%)
 
 ## Top ungrounded ingredients, corpus-wide (top 50 of up to 50)
 
 | ingredient (normalized) | recipes affected |
 |---|---|
-| salt | 1548 |
-| baking powder | 398 |
-| lemon juice | 373 |
-| vanilla | 346 |
-| pepper | 326 |
-| baking soda | 299 |
-| all purpose flour | 292 |
-| onion, chopped | 281 |
-| cinnamon | 252 |
-| garlic, minced | 207 |
-| oil | 170 |
-| butter or margarine | 165 |
-| vanilla extract | 164 |
-| butter, melted | 156 |
-| parsley, chopped | 148 |
-| worcestershire sauce | 129 |
-| granulated sugar | 126 |
-| paprika | 119 |
-| cinnamon, ground | 116 |
-| orange juice | 115 |
-| egg white | 113 |
-| mayonnaise | 113 |
-| vinegar | 112 |
-| nutmeg | 109 |
-| black pepper | 105 |
-| salt and pepper | 102 |
-| cream cheese, softened | 102 |
-| garlic powder | 99 |
-| raisin | 97 |
-| egg yolk | 97 |
-| salt & pepper | 92 |
-| margarine | 90 |
-| unbleached flour | 88 |
-| butter, softened | 87 |
-| brown sugar, packed | 84 |
-| dry mustard | 84 |
-| shortening | 82 |
-| pinch salt | 81 |
-| buttermilk | 77 |
-| onions, chopped | 77 |
-| eggs, beaten | 76 |
-| bay leaf | 75 |
-| oregano | 73 |
-| parmesan cheese, grated | 73 |
-| chili powder | 72 |
-| nuts, chopped | 72 |
-| egg, beaten | 72 |
-| walnuts, chopped | 72 |
-| pecans, chopped | 70 |
-| boiling water | 69 |
+| salt | 1895 |
+| butter | 1252 |
+| sugar | 1247 |
+| water | 869 |
+| flour | 721 |
+| milk | 664 |
+| pepper | 535 |
+| margarine | 457 |
+| lemon juice | 439 |
+| baking powder | 420 |
+| brown sugar | 407 |
+| cinnamon | 407 |
+| parsley | 393 |
+| vanilla | 370 |
+| all purpose flour | 337 |
+| olive oil | 326 |
+| baking soda | 317 |
+| green onion | 279 |
+| celery | 273 |
+| garlic clove | 264 |
+| nutmeg | 256 |
+| sour cream | 250 |
+| black pepper | 236 |
+| chicken breast | 223 |
+| cream cheese | 204 |
+| cornstarch | 202 |
+| mushroom | 199 |
+| ginger | 187 |
+| parmesan | 182 |
+| vanilla extract | 180 |
+| green pepper | 173 |
+| soy sauce | 168 |
+| mayonnaise | 161 |
+| pecan | 161 |
+| honey | 157 |
+| worcestershire sauce | 156 |
+| raisin | 155 |
+| walnut | 155 |
+| cheddar cheese | 155 |
+| paprika | 153 |
+| apple | 148 |
+| potatoe | 145 |
+| garlic powder | 141 |
+| granulated sugar | 141 |
+| vinegar | 124 |
+| unsalted butter | 121 |
+| oregano | 120 |
+| bacon | 117 |
+| basil | 115 |
+| shortening | 114 |
 
 ## Tag-vs-computed ratio distribution, corpus-wide (GROUNDED/PARTIAL recipes with a self-reported tag calorie value)
 
-- n: 3344
-- mean: 0.63x
-- median: 0.37x
-- stdev: 4.23
+- n: 2537
+- mean: 0.21x
+- median: 0.03x
+- stdev: 1.48
 - min: 0.00x
-- max: 238.53x
+- max: 61.09x
 
 ### Ratio outliers (outside [0.4x, 2.5x]) -- report-only, no demotion
-- count: 1860
+- count: 2345
 
 | recipe_id | title | tag kcal | computed kcal | ratio |
 |---|---|---|---|---|
-| imp_0035657e83a75216 | Amaretto Peach Cheesecake | 441 | 94 | 0.21x |
-| imp_003ab1b0f9d054ca | Sugar Free Brownies | 68 | 23 | 0.34x |
-| imp_004e107d27b75fc2 | White Bean Soup | 93 | 0 | 0.00x |
-| imp_00d7e68543255f34 | Dill Buttermilk Bread | 1677 | 143 | 0.09x |
-| imp_011194df31185a29 | Liqueur Cakes | 412 | 1734 | 4.21x |
-| imp_0134a2a00a95591a | Braised Beef Liver With Vegetables | 1004 | 197 | 0.20x |
-| imp_0141e4e6f885578b | Rumaki | 170 | 48 | 0.28x |
-| imp_019d2c379b625f78 | King Arthur's Apple Cinnamon Breakfast Bread | 2632 | 152 | 0.06x |
-| imp_01ade4e559db5978 | Oatmeal Breakfast Cookies | 68 | 20 | 0.30x |
-| imp_02406425ae5c50f1 | Mississippi Mud Pie With Ice Cream | 258 | 99 | 0.39x |
-| imp_0244d835f7a65c79 | No-bake Honey Snacks | 162 | 7 | 0.04x |
-| imp_0245f163d50057e4 | Crock Pot Rathskeller Pork | 470 | 30 | 0.06x |
-| imp_02466cb5e6655705 | Zinfandeli's Chicken Tortilla Soup - S.a. Express - Arlene Light | 206 | 15 | 0.07x |
-| imp_0281b314009e5470 | Orange and Lemon Schnitzel Rolls | 577 | 5 | 0.01x |
-| imp_0297a5b9b8da515b | Mushroom Red Pepper Phyllo Puffs | 196 | 23 | 0.12x |
-| imp_02a5b6ed7968549e | Strawberry Marbled Cheesecake | 434 | 24 | 0.06x |
-| imp_02e8b9e122635553 | Creamy Turkey Pie | 350 | 9 | 0.03x |
-| imp_0326b00eade05b1a | Pecan Filling | 2764 | 186 | 0.07x |
-| imp_035b1fa3663a5033 | Oatcakes | 495 | 76 | 0.15x |
-| imp_036a4f35023f513f | Oatmeal Muffins | 188 | 73 | 0.39x |
-| imp_03a56ee8c5775340 | Pork in Cider Sauce | 498 | 23 | 0.05x |
-| imp_03aaea4eaafb5601 | Dutch Oven Pot Roast | 413 | 12 | 0.03x |
-| imp_03d00dccc2095e6f | Sun of a Gun Beef Stew | 3295 | 0 | 0.00x |
-| imp_03d34d5d7adf5719 | Enchiladas Pollo With Green Chilies Cream Sauce | 808 | 140 | 0.17x |
-| imp_04076747e2645787 | Chanfana Ou Lampantana | 1266 | 171 | 0.14x |
-| imp_040ea38571635a32 | Game Salmi | 1281 | 156 | 0.12x |
+| imp_0035657e83a75216 | Amaretto Peach Cheesecake | 441 | 11 | 0.02x |
+| imp_003ab1b0f9d054ca | Sugar Free Brownies | 68 | 0 | 0.00x |
+| imp_004e107d27b75fc2 | White Bean Soup | 93 | 6 | 0.07x |
+| imp_005e6018423e5f71 | Gazpacho 1 (adopted) | 179 | 18 | 0.10x |
+| imp_006b3d01133f555e | Baked Red Onions | 160 | 1 | 0.01x |
+| imp_007080a9b0485889 | Egg Drop Soup | 88 | 18 | 0.21x |
+| imp_007bd1fec5fd5e08 | Hung Shao Pork | 2530 | 7 | 0.00x |
+| imp_00a34af8ec095c83 | Soft Potato Bread Stuffing | 93 | 13 | 0.14x |
+| imp_00efafa3c86e5b9e | Beef Stroganoff with Dill | 1098 | 6 | 0.01x |
+| imp_011194df31185a29 | Liqueur Cakes | 412 | 9 | 0.02x |
+| imp_0134a2a00a95591a | Braised Beef Liver With Vegetables | 1004 | 172 | 0.17x |
+| imp_01581d6dce025b73 | East Indian Chicken | 558 | 6 | 0.01x |
+| imp_01f7efb72e7b5af9 | Slow-Cooker Grape Jelly Meatballs | 22 | 72 | 3.22x |
+| imp_01f8776d18bc54b5 | Scrambled Eggs and Ham | 313 | 3 | 0.01x |
+| imp_02344598c0a758e5 | Crawfish Pie | 370 | 14 | 0.04x |
+| imp_02466cb5e6655705 | Zinfandeli's Chicken Tortilla Soup - S.a. Express - Arlene Light | 206 | 32 | 0.16x |
+| imp_025c90934851588b | Pumpkin Spice Cake in Jars | 378 | 7 | 0.02x |
+| imp_026073a067615a51 | Carla's Turkey Loaf | 213 | 6 | 0.03x |
+| imp_02a164f4a2b65adc | Easy Peasey Bread Pudding | 614 | 34 | 0.06x |
+| imp_02a5b6ed7968549e | Strawberry Marbled Cheesecake | 434 | 7 | 0.02x |
+| imp_02e8b9e122635553 | Creamy Turkey Pie | 350 | 10 | 0.03x |
+| imp_02f9c5861cd05c8e | Layered Mexican Dip | 252 | 35 | 0.14x |
+| imp_02ff2336265c57c6 | Mixed Onion Soup in Sourdough Bread Bowls | 809 | 4 | 0.00x |
+| imp_030591e83db85591 | Hungarian Goulash Soup | 190 | 24 | 0.13x |
+| imp_0326b00eade05b1a | Pecan Filling | 2764 | 82 | 0.03x |
+| imp_03311d2fa6d755f7 | Pizza Pockets | 421 | 19 | 0.05x |
+| imp_033dd5cc647753b2 | Ice-Water Pickles | 292 | 44 | 0.15x |
+| imp_034cf87edb9f5e9b | Fried Chicken Livers II | 1215 | 28 | 0.02x |
+| imp_036a4f35023f513f | Oatmeal Muffins | 188 | 28 | 0.15x |
+| imp_03872087026150bb | Ground Beef Stuffed Red Bell Peppers | 1754 | 22000 | 12.54x |
+| imp_03a56ee8c5775340 | Pork in Cider Sauce | 498 | 6 | 0.01x |
+| imp_03aaea4eaafb5601 | Dutch Oven Pot Roast | 413 | 46 | 0.11x |
+| imp_03d00dccc2095e6f | Sun of a Gun Beef Stew | 3295 | 101 | 0.03x |
+| imp_03d34d5d7adf5719 | Enchiladas Pollo With Green Chilies Cream Sauce | 808 | 26 | 0.03x |
+| imp_03dcbe6587375d85 | Grilled Salmon | 666 | 5 | 0.01x |
+| imp_04076747e2645787 | Chanfana Ou Lampantana | 1266 | 5507 | 4.35x |
+| imp_040ea38571635a32 | Game Salmi | 1281 | 47 | 0.04x |
 | imp_041c6eb156dd5999 | Easy Asian Chicken Soup | 267 | 5 | 0.02x |
-| imp_04594870ff31545b | Snickerdoodles II | 93 | 1 | 0.01x |
-| imp_045f83b795df50a8 | California Rarebit | 392 | 96 | 0.24x |
-| imp_04622e49335754c2 | Kentucky Kernels - S.a. Express News - Karen Haram | 284 | 51 | 0.18x |
-| imp_047c9248e21a51a0 | Chiffon Pumpkin Pie | 368 | 19 | 0.05x |
-| imp_04875ecba30a5e37 | Soft Corn Muffins | 183 | 33 | 0.18x |
-| imp_04a3ba13b7cc5e17 | Cornbread With Corn Casserole | 272 | 36 | 0.13x |
-| imp_04ac0d2f8a645070 | Onion Soup | 162 | 11 | 0.07x |
-| imp_04b608a36f075cd0 | Chocolate Cherry Cordial Muffins | 329 | 56 | 0.17x |
-| imp_04dcee8c7db35373 | Citrus Chicken | 168 | 4 | 0.02x |
-| imp_051aa81563645939 | Crafty Crescent Lasagna | 772 | 212 | 0.27x |
-| imp_051c7061b89e5faa | Creamy Vegetable Curry with Rice | 1763 | 192 | 0.11x |
-| imp_05433c91cc3b5666 | French Roasted Vegetable Sandwiches | 222 | 30 | 0.13x |
-| imp_0563fa52cc03502f | Cherry Bars | 122 | 7 | 0.06x |
-| imp_059e4d6450c650ec | Snails Sommeroise / Escargots a la Sommeroise | 425 | 132 | 0.31x |
-| imp_05bc0340cffb5a85 | Grilled Thai Sirloin with Tangy Lime Sauce | 237 | 28 | 0.12x |
-| imp_05c09b087dcf52bf | Streusel-Topped Pumpkin Pie | 504 | 21 | 0.04x |
-| imp_05c4ce5de6a25c5d | Pumpkin Swirl Pie | 337 | 31 | 0.09x |
-| imp_05d9eb8ccbfa5ebd | Cranberry Sauce With Port, Rosemary and Dried Figs | 219 | 72 | 0.33x |
-| imp_05f8b2ebb84756d0 | Half-Time Beef Sandwiches | 403 | 51 | 0.13x |
-| imp_06111ce3958251cd | Roasted Garlic Puree Dip | 395 | 19 | 0.05x |
-| imp_06119595d11d52f0 | A-To-Z Bread | 367 | 2928 | 7.98x |
-| imp_061a2bb7f4e45904 | Morning Maple Muffins | 212 | 51 | 0.24x |
+| imp_045f83b795df50a8 | California Rarebit | 392 | 7 | 0.02x |
+| imp_047c9248e21a51a0 | Chiffon Pumpkin Pie | 368 | 14 | 0.04x |
+| imp_048143cd0c5d5a4d | White Sauce Seafood Lasagna | 472 | 2 | 0.00x |
+| imp_0489e1831ad55000 | Libby's Jeweled Relish | 571 | 25 | 0.04x |
+| imp_04a3ba13b7cc5e17 | Cornbread With Corn Casserole | 272 | 55 | 0.20x |
+| imp_04abc2d9c3bc5600 | Sunday Black-Bean Soup | 384 | 49 | 0.13x |
+| imp_04ac0d2f8a645070 | Onion Soup | 162 | 53 | 0.33x |
+| imp_04b608a36f075cd0 | Chocolate Cherry Cordial Muffins | 329 | 2 | 0.01x |
+| imp_05002beb175a5aac | Potato Spinach Soup | 1180 | 44 | 0.04x |
+| imp_051aa81563645939 | Crafty Crescent Lasagna | 772 | 64 | 0.08x |
+| imp_05433c91cc3b5666 | French Roasted Vegetable Sandwiches | 222 | 11 | 0.05x |
+| imp_0563fa52cc03502f | Cherry Bars | 122 | 2 | 0.02x |
+| imp_0569647ef2c2583b | Grandma's Apple Muffins | 160 | 55 | 0.34x |
+| imp_059e4d6450c650ec | Snails Sommeroise / Escargots a la Sommeroise | 425 | 5 | 0.01x |
+| imp_05bc0340cffb5a85 | Grilled Thai Sirloin with Tangy Lime Sauce | 237 | 4 | 0.02x |
+| imp_05c09b087dcf52bf | Streusel-Topped Pumpkin Pie | 504 | 28 | 0.05x |
+| imp_05c4ce5de6a25c5d | Pumpkin Swirl Pie | 337 | 3 | 0.01x |
+| imp_06119595d11d52f0 | A-To-Z Bread | 367 | 23 | 0.06x |
+| imp_0613d1f5a68955f5 | Quick Barbecue Sauce | 348 | 6 | 0.02x |
+| imp_061a2bb7f4e45904 | Morning Maple Muffins | 212 | 14 | 0.06x |
 | imp_061a6bf4b72a51b4 | Clam - Lobster Bake | 990 | 44 | 0.04x |
-| imp_065cb86552265bf3 | Amish Cornbread | 1792 | 537 | 0.30x |
-| imp_066554e9bc51597c | Wild Goose | 5460 | 409 | 0.07x |
-| imp_06b3ec9513ff5005 | Green Chicken Enchiladas | 222 | 24 | 0.11x |
-| imp_06f98881ebf05a75 | Roasted Pork Loin with Bacon and Onion Spaetzle | 1186 | 470 | 0.40x |
-| imp_070317197449598d | Beef in Red Wine | 156 | 33 | 0.21x |
-| imp_075d0e93d33955bc | Ginger Apple Salad | 257 | 32 | 0.12x |
-| imp_079476fa25a35a43 | True Texas Chili Con Carne | 1732 | 312 | 0.18x |
-| imp_079c4aaf57965ff5 | Salad-in-a-Boat | 331 | 120 | 0.36x |
-| imp_07dfa5757af1554f | Vfw Ladies Auxiliary Ceviche | 186 | 44 | 0.24x |
-| imp_07e9764049835042 | Fruited Spinach Salad With Honey Mustard Dressing | 107 | 13 | 0.12x |
-| imp_083928a8d2f958d6 | Cracker Barrel Old Country Store Fried Apples | 185 | 34 | 0.18x |
-| imp_086356531a07531f | Smoothy Chocolate Cookies | 133 | 22 | 0.17x |
-| imp_0886d7d81ae75829 | Orange Muffins | 160 | 20 | 0.12x |
-| imp_089c6045d3535615 | Spicy Apple-Stuffed Squash | 93 | 8 | 0.09x |
-| imp_08a8f9de773d57eb | Pumpkin Pie Squares | 340 | 135 | 0.40x |
-| imp_08f2b06332435f6d | Baklava | 363 | 103 | 0.28x |
-| imp_0941779dcb115194 | Baked Butternut Squash With Orange | 192 | 30 | 0.16x |
-| imp_096cd44eb6b95090 | Apple Cranberry Pie | 389 | 83 | 0.21x |
-| imp_0982148f97be5fce | Low-Fat Thai Steak Salad | 2630 | 1 | 0.00x |
-| imp_09c40c8e41f753e5 | Jack Daniel's Marinade | 320 | 34 | 0.11x |
-| imp_09d47ae36f695520 | Chocolatey Raisin Chip Cookies | 84 | 32 | 0.38x |
-| imp_09deb8dad38b5a76 | Enchiladas Verdes Suizas | 756 | 143 | 0.19x |
-| imp_0a0d1babded653b7 | Carrot Ginger Biscuits | 127 | 4 | 0.03x |
-| imp_0a25559792285e8c | Herbed Pizza Crust | 268 | 16 | 0.06x |
-| imp_0aa2803cf1405629 | Low-Fat Pumpkin Pie | 248 | 64 | 0.26x |
-| imp_0ab6d18389435ade | Chocolate Amaretto Cheesecake | 668 | 197 | 0.29x |
-| imp_0b214e230cfa5409 | Marinated Flank Steak with Citrus Salsa | 687 | 0 | 0.00x |
-| imp_0b287cdee3655a9b | Butter Bean Dip with Basil | 83 | 13 | 0.16x |
-| imp_0b3f793c87425ce3 | Blueberry Dessert | 381 | 96 | 0.25x |
-| imp_0b5f7d74c5815980 | Skillet Beef and Shells | 1022 | 242 | 0.24x |
-| imp_0b69887731e15b7e | Crusty Garlic Bread | 72 | 8 | 0.11x |
-| imp_0b921f9f9d195623 | Pasta Al Pesto | 310 | 90 | 0.29x |
-| imp_0b935770b8b85854 | Old-Fashioned Sage Loaf | 851 | 248 | 0.29x |
-| imp_0b9824dd0d8e5f62 | Harvest Cornish Hens | 1112 | 21 | 0.02x |
-| imp_0bb2ab7a5f2155cf | "21" Apple Pie | 694 | 6 | 0.01x |
-| imp_0bd46b4c3d1b5c3e | Squash & Golden Onion Risotto | 337 | 85 | 0.25x |
-| imp_0be2ee7c3d60574f | Blueberry Buttertarts | 338 | 22 | 0.07x |
-| imp_0c0b6207064c5d15 | Flowerpots (Baked Alaska) | 116 | 36 | 0.31x |
-| imp_0c3b66dc78035b4a | A New Spaghetti with Clams | 1537 | 21 | 0.01x |
-| imp_0c6a0b69d7c35da7 | Muesli Cookies | 4435 | 967 | 0.22x |
-| imp_0c8a0544d85358f4 | Philly Cheesesteak Sandwich | 309 | 111 | 0.36x |
-| imp_0ca6447a3ebe505f | Sweet and Sour Edamame Soybeans | 300 | 71 | 0.24x |
-| imp_0cdb5fbc60dc5bb2 | Green Olives | 19658 | 6500 | 0.33x |
-| imp_0d09c95974a15287 | Cheesy Ham Au Gratin | 426 | 89 | 0.21x |
-| imp_0d13cca8fdcd599d | Swiss Chard and Cheese Strata | 314 | 18 | 0.06x |
-| imp_0d20dbf56b3b55fa | Cantaloupe Melba | 175 | 32 | 0.18x |
-| imp_0d423c1a38025015 | Root Beer Cake | 274 | 9 | 0.03x |
-| imp_0d4e3c3e19cc50d2 | Cream of Chicken Soup With Wild Rice | 610 | 203 | 0.33x |
-| imp_0d5e43e1232d59db | Easy Cream Cheese Fruit Squares | 187 | 55 | 0.30x |
-| imp_0d867e1807a95d3b | Swiss-Sauced Broccoli | 138 | 52 | 0.37x |
-| ... | (1760 more, see full count above) | | | |
+| imp_06417c1d6fd0509f | Black Coffee Barbecue Sauce | 772 | 44 | 0.06x |
+| imp_065cb86552265bf3 | Amish Cornbread | 1792 | 55 | 0.03x |
+| imp_066554e9bc51597c | Wild Goose | 5460 | 157 | 0.03x |
+| imp_066bbc90afa15f57 | Low-Fat Chicken With Caramelized Onions | 169 | 11 | 0.07x |
+| imp_067b4604c9aa5f72 | Green Mango Salad With Cilantro Vinaigrette | 92 | 6 | 0.07x |
+| imp_069a3957e9845585 | Mango Salsa | 100 | 7 | 0.07x |
+| imp_06b3ec9513ff5005 | Green Chicken Enchiladas | 222 | 88 | 0.40x |
+| imp_06bc46d645225dc0 | Pacific Blue Marlin (Kajiki) | 111 | 11 | 0.10x |
+| imp_06f98881ebf05a75 | Roasted Pork Loin with Bacon and Onion Spaetzle | 1186 | 1 | 0.00x |
+| imp_070317197449598d | Beef in Red Wine | 156 | 15 | 0.10x |
+| imp_070d4579ad1256b3 | Biscotti Di Anise | 962 | 21 | 0.02x |
+| imp_071082b7aec05d7e | Extra-Rich Chocolate Pecan Pie | 649 | 9 | 0.01x |
+| imp_072a543988f85a97 | Raisin-Almond Bread | 230 | 3 | 0.01x |
+| imp_079476fa25a35a43 | True Texas Chili Con Carne | 1732 | 36 | 0.02x |
+| imp_0798a2a391015c23 | Buttertart Squares | 294 | 5 | 0.02x |
+| imp_079c4aaf57965ff5 | Salad-in-a-Boat | 331 | 18 | 0.06x |
+| imp_07d4900d6d2055ef | Asparagus Strata | 495 | 55 | 0.11x |
+| imp_07dc18bc6e545e6f | Blueberry Cookies | 58 | 1 | 0.01x |
+| imp_07fb931d1d415cd5 | Penne Piperade | 467 | 23 | 0.05x |
+| imp_086356531a07531f | Smoothy Chocolate Cookies | 133 | 1 | 0.01x |
+| imp_087266c2e7c550a1 | Corn Casserole II | 202 | 9 | 0.05x |
+| imp_08a8f9de773d57eb | Pumpkin Pie Squares | 340 | 41 | 0.12x |
+| imp_08f2b06332435f6d | Baklava | 363 | 1 | 0.00x |
+| imp_092d4aea4df65760 | Lemony Herbed Drumsticks | 2445 | 44 | 0.02x |
+| imp_0930e089069e5d96 | Caesar for Two | 276 | 20 | 0.07x |
+| imp_096552b6325d5645 | Sopa Leao Velloso | 251 | 4 | 0.02x |
+| imp_097c3c0c319e5b52 | Chicken Breasts Florentine | 490 | 10 | 0.02x |
+| imp_0982148f97be5fce | Low-Fat Thai Steak Salad | 2630 | 2 | 0.00x |
+| imp_0995a404a5135c69 | 7-Up Cake | 550 | 5 | 0.01x |
+| imp_09c0cbf187d850eb | Seafood Pasta Saute | 845 | 2 | 0.00x |
+| imp_09c936ec1c8754a1 | Crabby Quiche Pie | 362 | 14 | 0.04x |
+| imp_09ca8915c85450ca | Chicken-Fried Steak With Cracked Pepper Gravy | 1636 | 14 | 0.01x |
+| imp_09da1a4f1201506e | Chicken Curry | 360 | 26 | 0.07x |
+| imp_09deb8dad38b5a76 | Enchiladas Verdes Suizas | 756 | 33 | 0.04x |
+| imp_09f840f9b831568f | Orange Cupcakes | 1804 | 55 | 0.03x |
+| imp_0a0d1babded653b7 | Carrot Ginger Biscuits | 127 | 1 | 0.01x |
+| imp_0a3f277639cc56f6 | Cheese and Meatball Soup | 458 | 10 | 0.02x |
+| imp_0a5ee9a653145c20 | Key Lime Bars | 132 | 3 | 0.02x |
+| imp_0a98dc6855795a71 | Greek Salad | 1043 | 144 | 0.14x |
+| imp_0aa9ea1739cc54ca | Carina's Garden Ratatouille | 823 | 167 | 0.20x |
+| imp_0ab6d18389435ade | Chocolate Amaretto Cheesecake | 668 | 5 | 0.01x |
+| ... | (2245 more, see full count above) | | | |
 
 ## Corpus-wide implausible kcal/serving band (<20 or >2000), GROUNDED/PARTIAL only
-- count: 651
+- count: 1439
 
 ## Corpus-wide ingredient-occurrence terminal outcomes (what actually happens to every ingredient row)
 
@@ -188,11 +186,11 @@ Every ingredient occurrence in the corpus lands in EXACTLY ONE of the buckets be
 
 | outcome | count | % of occurrences |
 |---|---|---|
-| grounded | 8125 | 21.9% |
-| no_unit | 7669 | 20.7% |
-| unit_unconvertible | 19351 | 52.3% |
-| no_relevant_candidate | 1715 | 4.6% |
-| all_candidates_rejected | 161 | 0.4% |
+| grounded | 3749 | 10.6% |
+| no_unit | 31495 | 89.0% |
+| unit_unconvertible | 124 | 0.4% |
+| no_relevant_candidate | 9 | 0.0% |
+| all_candidates_rejected | 1 | 0.0% |
 
 ## Individual-candidate rejection counts by reason, corpus-wide (NOT a table of ungroundedness causes)
 
@@ -200,168 +198,16 @@ Every ingredient occurrence in the corpus lands in EXACTLY ONE of the buckets be
 
 | reason | candidates skipped |
 |---|---|
-| processed_state_modifier:creamed | 750 |
-| processed_state_modifier:sweetened | 296 |
-| kcal_too_low_branded | 192 |
-| branded_high_dispersion | 122 |
-| processed_state_modifier:powdered | 83 |
-| atwater_mismatch | 51 |
-| processed_state_modifier:dehydrated | 49 |
-| processed_state_modifier:smoked | 41 |
-| processed_state_modifier:juice | 32 |
-| processed_state_modifier:cured | 24 |
-| processed_state_modifier:pickled | 23 |
-| processed_state_modifier:sauce | 20 |
-| processed_state_modifier:candied | 19 |
-| processed_state_modifier:fried | 18 |
-| mass_over_105g | 15 |
-| processed_state_modifier:marinated | 8 |
-| processed_state_modifier:syrup | 6 |
-| kcal_too_high | 1 |
-| processed_state_modifier:breaded | 1 |
-| processed_state_modifier:soup | 1 |
+| processed_state_modifier:creamed | 1203 |
+| processed_state_modifier:dehydrated | 338 |
+| kcal_too_low_branded | 22 |
+| atwater_mismatch | 3 |
+| processed_state_modifier:pickled | 2 |
+| mass_over_105g | 1 |
 
 ## Branded-tier high-dispersion queries, corpus-wide (3+ candidates, >3.0x calorie spread -- left ungrounded)
 
-- count: 122
-
-| query | min kcal | max kcal | candidates |
-|---|---|---|---|
-| mushroom, sliced | 7 | 33 | 24 |
-| unsweetened coconut milk | 38 | 200 | 24 |
-| pork rind | 107 | 571 | 10 |
-| pumpkin | 29 | 400 | 25 |
-| cranberry | 50 | 375 | 3 |
-| apple cider vinegar | 13 | 222 | 3 |
-| pumpkin | 29 | 400 | 25 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| spaghetti | 104 | 375 | 25 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| spaghetti | 104 | 375 | 25 |
-| spaghetti, | 104 | 375 | 15 |
-| orange juice | 45 | 183 | 25 |
-| artichoke hearts, marinated | 36 | 117 | 10 |
-| tuna steak | 53 | 181 | 6 |
-| mushroom, , sliced | 7 | 33 | 24 |
-| country ham | 170 | 698 | 7 |
-| mixed fruit | 32 | 429 | 20 |
-| button mushrooms, sliced | 13 | 123 | 9 |
-| pumpkin | 29 | 400 | 25 |
-| mushroom, sliced | 7 | 33 | 24 |
-| spaghetti | 104 | 375 | 25 |
-| pineapple chunk | 36 | 375 | 23 |
-| cranberry | 50 | 375 | 3 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| philadelphia cream cheese | 91 | 375 | 8 |
-| pumpkin | 29 | 400 | 25 |
-| pumpkin | 29 | 400 | 25 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| broad bean | 104 | 467 | 5 |
-| pumpkin | 29 | 400 | 25 |
-| spaghetti, | 104 | 375 | 15 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| spaghetti | 104 | 375 | 25 |
-| pumpkin | 29 | 400 | 25 |
-| philadelphia cream cheese | 91 | 375 | 8 |
-| cherry tomatoe | 21 | 346 | 5 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| strawberry | 85 | 350 | 7 |
-| artichoke heart | 19 | 89 | 24 |
-| lemon gelatin | 25 | 389 | 5 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| spaghetti | 104 | 375 | 25 |
-| cranberry | 50 | 375 | 3 |
-| pineapple chunk | 36 | 375 | 23 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| strawberry gelatin | 67 | 400 | 6 |
-| angel hair pasta | 5 | 375 | 16 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| salmon fillet | 71 | 283 | 12 |
-| unsweetened coconut milk | 38 | 200 | 24 |
-| philadelphia cream cheese | 91 | 375 | 8 |
-| chunk pineapple | 36 | 375 | 23 |
-| mushroom, sliced | 7 | 33 | 24 |
-| pumpkin | 29 | 400 | 25 |
-| spaghetti | 104 | 375 | 25 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| pumpkin | 29 | 400 | 25 |
-| spaghetti | 104 | 375 | 25 |
-| philadelphia cream cheese | 91 | 375 | 8 |
-| hash brown | 82 | 368 | 4 |
-| spaghetti | 104 | 375 | 25 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| pineapple chunk | 36 | 375 | 23 |
-| orange juice | 45 | 183 | 25 |
-| crawfish | 14 | 82 | 3 |
-| unsweetened coconut milk | 38 | 200 | 24 |
-| carrots, diced | 9 | 49 | 8 |
-| beets, sliced | 17 | 67 | 25 |
-| salmon fillet | 71 | 283 | 12 |
-| self rising flour | 110 | 367 | 14 |
-| button mushrooms, sliced | 13 | 123 | 9 |
-| french style green bean | 11 | 41 | 25 |
-| pumpkin | 29 | 400 | 25 |
-| catfish fillet | 71 | 268 | 15 |
-| angel hair pasta, | 5 | 375 | 16 |
-| cranberry | 50 | 375 | 3 |
-| cranberry | 50 | 375 | 3 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| catfish fillet | 71 | 268 | 15 |
-| beef broth | 6 | 167 | 10 |
-| fruit punch | 12 | 375 | 24 |
-| salmon fillet | 71 | 283 | 12 |
-| pineapple tidbit | 50 | 389 | 14 |
-| strawberry | 85 | 350 | 7 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| strawberry gelatin | 67 | 400 | 6 |
-| pumpkin | 29 | 400 | 25 |
-| lemon gelatin | 25 | 389 | 5 |
-| mushroom, sliced | 7 | 33 | 24 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| mushroom, sliced | 7 | 33 | 24 |
-| mushrooms, , sliced | 7 | 33 | 24 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| angel hair pasta | 5 | 375 | 16 |
-| self rising flour | 110 | 367 | 14 |
-| mixed fruit | 32 | 429 | 20 |
-| pumpkin | 29 | 400 | 25 |
-| orange juice | 45 | 183 | 25 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| mushroom, sliced | 7 | 33 | 24 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| button mushrooms, sliced | 13 | 123 | 9 |
-| pumpkin | 29 | 400 | 25 |
-| pineapple chunk | 36 | 375 | 23 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| mushrooms, sliced | 7 | 33 | 24 |
-| salmon fillet | 71 | 283 | 12 |
-| pumpkin | 29 | 400 | 25 |
-| mushroom, sliced | 7 | 33 | 24 |
-| mushroom, sliced | 7 | 33 | 24 |
-| pineapple chunk | 36 | 375 | 23 |
-| spaghetti | 104 | 375 | 25 |
-| pumpkin | 29 | 400 | 25 |
-| pineapple tidbit | 50 | 389 | 14 |
-| mushroom, sliced | 7 | 33 | 24 |
-| self rising flour | 110 | 367 | 14 |
-| mushroom, sliced | 7 | 33 | 24 |
-| garlic, chopped | 67 | 500 | 15 |
-| crawfish | 14 | 82 | 3 |
-
-## Seed macro-computation accuracy (pre-registered A3 eval)
-
-Pre-registered gate (docs/ROADMAP.md item A3): "macro-computation accuracy measured against the 25 hand-authored seed recipes as ground truth." These metric definitions (see `SeedMacroAccuracy`/`compute_seed_macro_accuracy` in `app/services/grounding_job.py`) were fixed BEFORE the corpus-wide A3 grounding run and are not adjusted after seeing results. A seed contributes to a macro's error only when its status is GROUNDED or PARTIAL (an UNGROUNDED seed has no real computed value) AND it has a non-null, non-zero self-reported tag value for that macro -- every seed excluded either way is counted as "missing" below, never silently dropped. **kcal is the PRIMARY metric.**
-
-- seeds: 25 total -- 14 grounded, 11 partial, 0 ungrounded
-
-| macro | n compared | median abs relative error | mean abs relative error | missing (excluded) |
-|---|---|---|---|---|
-| **kcal (PRIMARY)** | 25 | 16.1% | 25.3% | 0 |
-| protein_g | 25 | 21.4% | 35.0% | 0 |
-| carbs_g | 25 | 34.8% | 34.4% | 0 |
-| fat_g | 25 | 31.7% | 39.4% | 0 |
+- count: 0
 
 ## Seed tag-vs-computed comparison (25 recipes)
 
@@ -370,13 +216,13 @@ Pre-registered gate (docs/ROADMAP.md item A3): "macro-computation accuracy measu
 | r_001 | Mediterranean Chicken Rice Bowl | grounded | 100% | 610 | 590 | 0.97x |
 | r_002 | Thai Peanut Tofu Stir Fry | grounded | 100% | 540 | 605 | 1.12x |
 | r_003 | Mexican Turkey Black Bean Skillet | grounded | 100% | 520 | 638 | 1.23x |
-| r_004 | Italian Lentil Tomato Pasta | partial | 88% | 590 | 923 | 1.56x |
+| r_004 | Italian Lentil Tomato Pasta | grounded | 100% | 590 | 1007 | 1.71x **[RAW/COOKED BLOWUP]** |
 | r_005 | Japanese Salmon Sushi Bowl | partial | 88% | 650 | 835 | 1.28x |
 | r_006 | American Egg White Veggie Omelet | partial | 86% | 330 | 727 | 2.20x |
 | r_007 | Indian Chickpea Spinach Curry | partial | 75% | 560 | 392 | 0.70x |
 | r_008 | Mediterranean Quinoa Chickpea Salad | grounded | 100% | 480 | 835 | 1.74x **[RAW/COOKED BLOWUP]** |
 | r_009 | Dairy-Free Chicken Fajita Plate | grounded | 100% | 620 | 684 | 1.10x |
-| r_010 | Gluten-Free Turkey Meatballs | partial | 62% | 500 | 415 | 0.83x |
+| r_010 | Gluten-Free Turkey Meatballs | partial | 75% | 500 | 602 | 1.20x |
 | r_011 | Thai Basil Shrimp Rice | partial | 88% | 470 | 417 | 0.89x |
 | r_012 | American Turkey Sweet Potato Chili | grounded | 100% | 570 | 632 | 1.11x |
 | r_013 | Japanese Miso Tofu Soup Bowl | grounded | 100% | 410 | 426 | 1.04x |
@@ -394,6 +240,7 @@ Pre-registered gate (docs/ROADMAP.md item A3): "macro-computation accuracy measu
 | r_025 | Italian White Bean Zucchini Stew | grounded | 100% | 420 | 440 | 1.05x |
 
 ## Flags: raw/cooked-scale blowup (>1.6x)
+- **r_004** (Italian Lentil Tomato Pasta): ratio 1.71x
 - **r_008** (Mediterranean Quinoa Chickpea Salad): ratio 1.74x
 
 ## Flags: implausible kcal/serving band (<20 or >2000)
@@ -448,14 +295,14 @@ None.
 | lime | True | 15.0 | matched: Limes, raw (SR Legacy) |
 | coriander | True | 5.0 | matched: Spices, coriander seed (SR Legacy) |
 
-### r_004 -- Italian Lentil Tomato Pasta (partial, coverage 88%)
+### r_004 -- Italian Lentil Tomato Pasta (grounded, coverage 100%)
 | ingredient | grounded | grams | detail |
 |---|---|---|---|
 | whole wheat pasta | True | 100.0 | matched: Pasta, whole grain, 51% whole wheat, remaining unenriched semolina, dry (SR Legacy) |
 | lentils | True | 100.0 | matched: Lentils, dry (Foundation) |
 | tomato | True | 246.0 | matched: Tomato, roma (Foundation) |
 | spinach | True | 40.0 | matched: Spinach, baby (Foundation) |
-| vegetarian hard cheese | False | 20.0 | ungrounded: no USDA match |
+| parmesan | True | 20.0 | matched: Cheese, parmesan, grated (Foundation) |
 | garlic | True | 10.0 | matched: Garlic, raw (Foundation) |
 | basil | True | 5.0 | matched: Basil, fresh (SR Legacy) |
 | olive oil | True | 13.7 | matched: Oil, corn, peanut, and olive (SR Legacy) |
@@ -519,12 +366,12 @@ None.
 | avocado | True | 75.0 | matched: Avocados, raw, California (SR Legacy) |
 | coriander | True | 5.0 | matched: Spices, coriander seed (SR Legacy) |
 
-### r_010 -- Gluten-Free Turkey Meatballs (partial, coverage 62%)
+### r_010 -- Gluten-Free Turkey Meatballs (partial, coverage 75%)
 | ingredient | grounded | grams | detail |
 |---|---|---|---|
 | ground turkey | True | 200.0 | matched: Turkey, Ground, raw (SR Legacy) |
 | whole egg | False | n/a | ungrounded: amount/unit not convertible to grams |
-| almond meal | False | 30.0 | ungrounded: no USDA match |
+| almond flour | True | 30.0 | matched: Flour, almond (Foundation) |
 | tomato sauce | False | 100.0 | ungrounded: no USDA match |
 | zucchini noodles | True | 150.0 | matched: ZUCCHINI NOODLES (Branded) |
 | parmesan | True | 20.0 | matched: Cheese, parmesan, grated (Foundation) |
