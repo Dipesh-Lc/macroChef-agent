@@ -3,10 +3,12 @@ import uuid
 
 import requests
 import streamlit as st
+from components.day_plan_view import render_day_plan
 from components.debug_panel import render_debug_panel
 from components.inventory_input import render_inventory_input
 from components.profile_form import render_profile_sidebar
 from components.recommendation_cards import render_recommendations
+from components.safety_banner import render_safety_banner
 from components.shopping_list import render_shopping_list
 from components.taste_profile import render_taste_profile
 from session_client import request_with_session
@@ -267,6 +269,25 @@ st.markdown(
       padding: .18rem .62rem;
       font-size: .78rem;
     }
+    .safety-banner {
+      display: block;
+      color: #bff4de;
+      border: 1px solid #2f725b;
+      background: var(--macro-green-soft);
+      border-radius: 12px;
+      padding: .6rem .9rem;
+      margin: .2rem 0 1rem;
+      font-size: .92rem;
+      font-weight: 600;
+    }
+    .plan-canvas-empty {
+      color: var(--macro-muted);
+      border: 1px dashed var(--macro-border);
+      border-radius: 12px;
+      padding: 1.4rem;
+      text-align: center;
+      margin-top: .6rem;
+    }
     .score-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -365,55 +386,111 @@ st.info(
 planner_tab, trace_tab = st.tabs(["Meal planner", "System trace"])
 
 with planner_tab:
-    (
-        input_type,
-        typed_ingredients,
-        confirmed_inventory,
-        cuisine_preference,
-        meal_type,
-    ) = render_inventory_input(API_URL)
+    # C1: two-pane layout -- left pane is the conversational/inventory input
+    # flow (functionally unchanged from the single-pane version, just
+    # relocated), right pane is the live "plan canvas" showing whatever the
+    # left pane's actions have produced so far (recommendation results
+    # and/or an assembled day plan). Both panes read/write the same
+    # `st.session_state` keys as before, so a rerun from either pane's
+    # widgets keeps the other pane's content exactly as it was.
+    left_pane, right_pane = st.columns([2, 3], gap="large")
 
-    if st.button("Find matching recipes", type="primary", width="stretch"):
-        profile = profile_bundle["profile"]
-        profile["preferred_cuisines"] = [] if cuisine_preference is None else [cuisine_preference]
-        payload = {
-            # No user_id here, deliberately -- /recipes/recommend derives
-            # identity from the verified session token sent by
-            # request_with_session below, never from the request body (see
-            # app.schemas.recommendation.RecommendationRequest).
-            "input_type": input_type,
-            "typed_ingredients": typed_ingredients,
-            "confirmed_inventory": confirmed_inventory or None,
-            "user_profile": profile,
-            "cuisine_preference": cuisine_preference,
-            "meal_type": meal_type,
-        }
-        try:
-            # /recipes/recommend now requires a verified session (it drives
-            # LLM calls and is rate-limited per session) -- see
-            # app.dependencies.require_recommend_rate_limit.
-            response = request_with_session(
-                "POST", f"{API_URL}/recipes/recommend", json=payload, timeout=90
+    with left_pane:
+        st.markdown('<div class="results-title">Plan your meal</div>', unsafe_allow_html=True)
+        (
+            input_type,
+            typed_ingredients,
+            confirmed_inventory,
+            cuisine_preference,
+            meal_type,
+        ) = render_inventory_input(API_URL)
+
+        if st.button("Find matching recipes", type="primary", width="stretch"):
+            profile = profile_bundle["profile"]
+            profile["preferred_cuisines"] = [] if cuisine_preference is None else [cuisine_preference]
+            payload = {
+                # No user_id here, deliberately -- /recipes/recommend derives
+                # identity from the verified session token sent by
+                # request_with_session below, never from the request body (see
+                # app.schemas.recommendation.RecommendationRequest).
+                "input_type": input_type,
+                "typed_ingredients": typed_ingredients,
+                "confirmed_inventory": confirmed_inventory or None,
+                "user_profile": profile,
+                "cuisine_preference": cuisine_preference,
+                "meal_type": meal_type,
+            }
+            try:
+                # /recipes/recommend now requires a verified session (it drives
+                # LLM calls and is rate-limited per session) -- see
+                # app.dependencies.require_recommend_rate_limit.
+                response = request_with_session(
+                    "POST", f"{API_URL}/recipes/recommend", json=payload, timeout=90
+                )
+                if response.status_code == 429:
+                    st.warning("You're sending requests too quickly. Please wait a bit and try again.")
+                else:
+                    response.raise_for_status()
+                    st.session_state["recommendation_response"] = response.json()
+            except requests.RequestException as exc:
+                st.error(f"Could not reach MacroChef API at {API_URL}: {exc}")
+
+        st.markdown('<div class="section-label spaced">Day plan (beta)</div>', unsafe_allow_html=True)
+        st.caption(
+            "Assemble a full day's meals against your macro targets (POST "
+            "/plan/day) -- same deterministic safety filter as above, run "
+            "across the whole recipe corpus."
+        )
+        if st.button("Build a day plan", width="stretch"):
+            day_plan_payload = {"user_profile": profile_bundle["profile"]}
+            try:
+                # /plan/day takes no identity/session data of its own (see
+                # app.schemas.day_plan.DayPlanRequest) -- it always filters
+                # the full corpus through constraint_engine.validate_recipe
+                # itself, so a plain request (no session header) is correct
+                # here, unlike /recipes/recommend above.
+                day_response = requests.post(
+                    f"{API_URL}/plan/day", json=day_plan_payload, timeout=60
+                )
+                day_response.raise_for_status()
+                st.session_state["day_plan_response"] = day_response.json()
+            except requests.RequestException as exc:
+                st.error(f"Could not reach MacroChef API at {API_URL}: {exc}")
+
+    with right_pane:
+        st.markdown('<div class="results-title">Plan canvas</div>', unsafe_allow_html=True)
+        response_json = st.session_state.get("recommendation_response")
+        day_plan_json = st.session_state.get("day_plan_response")
+
+        if not response_json and not day_plan_json:
+            st.markdown(
+                '<div class="plan-canvas-empty">Your recipe matches and day plan will '
+                "appear here once you search on the left.</div>",
+                unsafe_allow_html=True,
             )
-            if response.status_code == 429:
-                st.warning("You're sending requests too quickly. Please wait a bit and try again.")
-            else:
-                response.raise_for_status()
-                st.session_state["recommendation_response"] = response.json()
-        except requests.RequestException as exc:
-            st.error(f"Could not reach MacroChef API at {API_URL}: {exc}")
 
-    response_json = st.session_state.get("recommendation_response")
-    if response_json:
-        errors = response_json.get("errors", [])
-        if errors:
-            st.warning(" ".join(errors))
+        if response_json:
+            errors = response_json.get("errors", [])
+            if errors:
+                st.warning(" ".join(errors))
 
-        shopping = response_json.get("shopping_list", [])
-        render_shopping_list(shopping)
-        render_taste_profile(response_json.get("taste_profile"))
+            # C2: the safety filter's actual, deterministic output for this
+            # request -- always visible, not buried in an expander. See
+            # components/safety_banner.py for the zero-LLM templating.
+            render_safety_banner(response_json.get("rejected_recipes", []))
 
-        render_recommendations(API_URL, response_json.get("recommendations", []))
+            shopping = response_json.get("shopping_list", [])
+            render_shopping_list(shopping)
+            render_taste_profile(response_json.get("taste_profile"))
+
+            render_recommendations(API_URL, response_json.get("recommendations", []))
+
+        if day_plan_json:
+            # Same safety-visibility treatment for the day-plan's own
+            # rejected_recipes (app.schemas.day_plan.DayPlanResponse) --
+            # reuses the exact same deterministic templating function.
+            render_safety_banner(day_plan_json.get("rejected_recipes", []))
+            render_day_plan(day_plan_json)
 
 with trace_tab:
     render_debug_panel(st.session_state.get("recommendation_response"))
