@@ -4,6 +4,10 @@ import { ProfileForm } from "../components/ProfileForm";
 import { PantryInput, type PantryState } from "../components/PantryInput";
 import { SafetyAuditPanel } from "../components/SafetyAuditPanel";
 import { RecipeCard } from "../components/RecipeCard";
+import { ShoppingList } from "../components/ShoppingList";
+import { TasteProfilePanel } from "../components/TasteProfilePanel";
+import { WasteNudges } from "../components/WasteNudges";
+import { DebugDrawer } from "../components/DebugDrawer";
 import { ApiError, RateLimitError } from "../api/client";
 import { recommendRecipes } from "../api/endpoints";
 import type { RecommendationRequest, UserProfile } from "../api/types";
@@ -156,21 +160,9 @@ export default function HomePage() {
               </div>
             )}
 
-            {(result.shopping_list ?? []).length > 0 && (
-              <section className="rounded-lg border border-sage-line bg-white p-4">
-                <h2 className="font-display text-base font-semibold text-cast-iron">Shopping list</h2>
-                <ul className="mt-2 flex flex-col gap-1 text-sm">
-                  {(result.shopping_list ?? []).map((item, index) => (
-                    <li key={index} className="flex justify-between gap-4">
-                      <span>{item.name}</span>
-                      <span className="font-mono text-cast-iron/70">
-                        {item.quantity ?? (item.amount != null ? `${item.amount} ${item.unit ?? ""}` : "")}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
+            <ShoppingList items={result.shopping_list ?? []} />
+            <TasteProfilePanel tasteProfile={result.taste_profile} />
+            <WasteNudges nudges={result.waste_nudges} />
           </>
         )}
 
@@ -179,6 +171,8 @@ export default function HomePage() {
             Add what's in your kitchen and set your profile, then find recipes.
           </p>
         )}
+
+        <DebugDrawer response={result ?? null} />
       </div>
     </div>
   );

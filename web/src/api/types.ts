@@ -30,6 +30,10 @@ export type RecommendationResponse = components["schemas"]["RecommendationRespon
 
 export type FeedbackRequest = components["schemas"]["FeedbackRequest"];
 
+export type TasteProfile = components["schemas"]["TasteProfile"];
+export type WasteNudge = components["schemas"]["WasteNudge"];
+export type SuggestedRecipe = components["schemas"]["SuggestedRecipe"];
+
 export type ShareCreateRequest = components["schemas"]["ShareCreateRequest"];
 export type ShareCreateResponse = components["schemas"]["ShareCreateResponse"];
 export type SharedPlanView = components["schemas"]["SharedPlanView"];

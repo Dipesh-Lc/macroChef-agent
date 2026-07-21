@@ -1456,3 +1456,18 @@ to act on:
   around line 218/233-234, keyed on `CSRF_HEADER_NAME`) — confirm each of
   the five routes actually routes through `get_session_user` (not a
   lighter-weight dependency) rather than adding a new check.
+
+## SPA rebuild W2 (nutrition transparency + full recipe cards)
+
+- **`npm audit`: 2 high-severity transitive advisories in `web/`.** Flagged
+  in the W1b report (2026-07-21), not re-triaged in W2. Reproduce with
+  `cd web && npm audit`. Triage (upgrade or accept-with-justification)
+  before public deploy.
+- **Taste-profile / waste-nudge UI is intentionally trivial.** `web/src/
+  components/TasteProfilePanel.tsx` and `web/src/components/WasteNudges.tsx`
+  are plain list renders (tag pills / simple `<ul>`s), matching the W2 task
+  spec's "trivial list renders ... small, quiet panels" instruction. A
+  richer treatment (e.g. trend sparkline for taste drift, inline "add to
+  plan" action on a waste-nudge suggested recipe) was deferred by that plan,
+  not by a discovered constraint — pick this up only if a future roadmap
+  item asks for it explicitly.
