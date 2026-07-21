@@ -62,4 +62,12 @@ export type PublicWeeklyPlan = components["schemas"]["PublicWeeklyPlan"];
 
 export type UserRecipeLibraryResponse = components["schemas"]["UserRecipeLibraryResponse"];
 
+export type RecipeCandidate = components["schemas"]["RecipeCandidate"];
+export type RecipeDiscoveryRequest = components["schemas"]["RecipeDiscoveryRequest"];
+export type RecipeDiscoveryResponse = components["schemas"]["RecipeDiscoveryResponse"];
+export type SaveRecipeCandidatesRequest = components["schemas"]["SaveRecipeCandidatesRequest"];
+export type SaveRecipeCandidatesResponse = components["schemas"]["SaveRecipeCandidatesResponse"];
+export type ReindexLibraryResponse = components["schemas"]["ReindexLibraryResponse"];
+export type DeleteRecipeResponse = components["schemas"]["DeleteRecipeResponse"];
+
 export type HTTPValidationError = components["schemas"]["HTTPValidationError"];

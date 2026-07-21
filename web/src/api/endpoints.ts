@@ -9,15 +9,22 @@ import type {
   BatchPlanResponse,
   DayPlanRequest,
   DayPlanResponse,
+  DeleteRecipeResponse,
   FeedbackRequest,
   InventoryObservation,
+  RecipeDiscoveryRequest,
+  RecipeDiscoveryResponse,
   RecommendationRequest,
   RecommendationResponse,
+  ReindexLibraryResponse,
+  SaveRecipeCandidatesRequest,
+  SaveRecipeCandidatesResponse,
   ShareCreateRequest,
   ShareCreateResponse,
   SharedPlanView,
   ShoppingListRequest,
   ShoppingListResponse,
+  UserRecipeLibraryResponse,
   WeeklyPlanRequest,
   WeeklyPlanResponse,
 } from "./types";
@@ -43,6 +50,30 @@ const BATCH_PLAN_TIMEOUT_MS = 60_000;
 // one consolidated shopping-list reconciliation -- a multi-day solve is
 // slower than a single day, so this gets a longer budget.
 const WEEK_PLAN_TIMEOUT_MS = 90_000;
+
+// POST /library/discover's `discovery_node` can call an LLM (source_mode
+// "llm"/"hybrid") or hit an external recipe source ("external"/"hybrid") --
+// same generous budget as RECOMMEND_TIMEOUT_MS, and what
+// `frontend/pages/1_Recipe_Library_Builder.py` already used (timeout=90).
+const DISCOVER_TIMEOUT_MS = 90_000;
+
+// POST /library/save runs `selected_candidate_validation_node` +
+// `save_recipe_node` + `index_recipe_node` (an embedding upsert per saved
+// candidate) -- not LLM-backed, but still I/O over however many candidates
+// were selected, so it gets a bounded (if shorter) timeout rather than none.
+const SAVE_LIBRARY_TIMEOUT_MS = 60_000;
+
+// POST /library/reindex is a synchronous full-corpus re-embed (see
+// `app.api.routes_library.reindex_recipe_library`'s docstring) -- the
+// single most expensive request path in the app, and rate-limited to 2/hour
+// (RATE_LIMIT_REINDEX_MAX in app/config.py) specifically because of that
+// cost. Manually verified against the running app (W5 executor report):
+// reindexing the ~3,884-document demo corpus took ~5 minutes end-to-end
+// locally, so a RECOMMEND_TIMEOUT_MS-sized budget would abort a real,
+// still-succeeding request. 10 minutes leaves headroom above that observed
+// figure; the tight 2/hour rate limit is what actually bounds abuse here,
+// not this client-side timeout.
+const REINDEX_TIMEOUT_MS = 600_000;
 
 /** Public call: no session bootstrap, no CSRF header. */
 export async function extractInventory(typedIngredients: string): Promise<InventoryObservation[]> {
@@ -150,5 +181,63 @@ export async function createShare(request: ShareCreateRequest): Promise<ShareCre
 export async function getSharedPlan(shareId: string): Promise<SharedPlanView> {
   return apiRequest<SharedPlanView>(`/share/${encodeURIComponent(shareId)}`, {
     method: "GET",
+  });
+}
+
+/** Session-required: bootstraps a session and sends the CSRF header. Also
+ * rate-limited server-side (`RATE_LIMIT_DISCOVER_MAX` per
+ * `RATE_LIMIT_DISCOVER_WINDOW_SECONDS` -- see `app/dependencies.py`'s
+ * `require_discover_rate_limit`), so callers should handle `RateLimitError`
+ * the same way `recommendRecipes` callers do. */
+export async function discoverRecipes(
+  request: RecipeDiscoveryRequest,
+): Promise<RecipeDiscoveryResponse> {
+  return apiRequest<RecipeDiscoveryResponse>("/library/discover", {
+    method: "POST",
+    json: request,
+    sessionRequired: true,
+    timeoutMs: DISCOVER_TIMEOUT_MS,
+  });
+}
+
+/** Session-required: bootstraps a session and sends the CSRF header. */
+export async function saveRecipeCandidates(
+  request: SaveRecipeCandidatesRequest,
+): Promise<SaveRecipeCandidatesResponse> {
+  return apiRequest<SaveRecipeCandidatesResponse>("/library/save", {
+    method: "POST",
+    json: request,
+    sessionRequired: true,
+    timeoutMs: SAVE_LIBRARY_TIMEOUT_MS,
+  });
+}
+
+/** Session-required: bootstraps a session and sends the CSRF header. Also
+ * rate-limited server-side to `RATE_LIMIT_REINDEX_MAX` (2) per
+ * `RATE_LIMIT_REINDEX_WINDOW_SECONDS` (1 hour) -- the tightest limit of any
+ * endpoint in this app (see `app/dependencies.py`'s
+ * `require_reindex_rate_limit`), so callers must handle `RateLimitError`
+ * with copy that makes the hourly cap explicit, not a generic retry hint. */
+export async function reindexLibrary(): Promise<ReindexLibraryResponse> {
+  return apiRequest<ReindexLibraryResponse>("/library/reindex", {
+    method: "POST",
+    sessionRequired: true,
+    timeoutMs: REINDEX_TIMEOUT_MS,
+  });
+}
+
+/** Session-required: bootstraps a session and sends the CSRF header. */
+export async function getLibrary(): Promise<UserRecipeLibraryResponse> {
+  return apiRequest<UserRecipeLibraryResponse>("/library", {
+    method: "GET",
+    sessionRequired: true,
+  });
+}
+
+/** Session-required: bootstraps a session and sends the CSRF header. */
+export async function deleteLibraryRecipe(recipeId: string): Promise<DeleteRecipeResponse> {
+  return apiRequest<DeleteRecipeResponse>(`/library/${encodeURIComponent(recipeId)}`, {
+    method: "DELETE",
+    sessionRequired: true,
   });
 }
