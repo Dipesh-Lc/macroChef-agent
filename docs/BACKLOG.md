@@ -1409,3 +1409,50 @@ to act on:
   read-path logic, only a new authenticated write endpoint + a repository
   method). Not built now because the task spec was create + anonymous view
   only.
+
+## SPA rebuild W0 (advisor review) / W1a
+
+- **`tests/test_session_endpoint.py::test_valid_header_and_different_valid_cookie_header_identity_wins`
+  is weaker than it looks.** Flagged in the W0 advisor review. It currently
+  asserts on an empty library both ways (header identity and cookie
+  identity), which would pass even if the cookie's identity silently won
+  instead of the header's — an empty list looks the same regardless of
+  which identity actually served the request. Fix: before the assertion,
+  save a real recipe under the header identity (e.g. via `POST /library/save`
+  or directly through the repository, matching the pattern already used
+  elsewhere in that file), then `GET /library` under the *cookie* identity
+  and assert the saved recipe is ABSENT (proving the cookie identity, not
+  the header's, was used for that second call) — and/or assert it IS
+  present when queried under the header identity again. Not fixed in W1a
+  because W1a's scope was FastAPI static serving, not session-test hardening.
+- **Missing standalone "no header + no cookie -> 401" test.** Also flagged
+  in the W0 advisor review. `tests/test_session_endpoint.py` covers this
+  combination only transitively, inside the full recovery-loop test (item
+  14 in that file's module docstring: "dead cookie -> 401 ... -> retried
+  request succeeds"). Add an explicit, standalone test in that file that
+  sends a request to a session-authenticated endpoint (e.g. `GET /library`)
+  with neither `X-Session-Token` nor the `mc_session` cookie set, and
+  asserts a bare 401 — completing the four-combination matrix (header only,
+  cookie only, both, neither) as its own named test rather than relying on
+  it being incidentally exercised elsewhere. Not fixed in W1a for the same
+  reason as above.
+- **Blanket CSRF / `X-Requested-With` gap on anonymous state-changing
+  endpoints.** Deferred by advisor consult on 2026-07-21 (W0 review).
+  `POST /plan/day`, `/plan/batch`, `/plan/week`, `/plan/shopping-list`, and
+  `POST /inventory/extract` accept the `mc_session` cookie (via
+  `app.dependencies.get_session_user`) but do not require the
+  `X-Requested-With` CSRF header the way the cookie-path in
+  `get_session_user` already enforces for other session-authenticated
+  routes (see `app/dependencies.py`, `CSRF_HEADER_NAME`). In the current
+  same-origin deployment topology this is benign (a cross-site request
+  would ride the cookie but the response never reaches the attacker's
+  origin, and none of these endpoints currently expose read access to
+  another user's data through their response body) — but it's inconsistent
+  with the CSRF model applied elsewhere, and worth closing for
+  defense-in-depth / consistency once someone is touching
+  `app/dependencies.py` or these routers again. Fix shape: these routes
+  already depend on `app.dependencies.get_session_user`, which performs the
+  `X-Requested-With` check for the cookie path inline (`app/dependencies.py`,
+  around line 218/233-234, keyed on `CSRF_HEADER_NAME`) — confirm each of
+  the five routes actually routes through `get_session_user` (not a
+  lighter-weight dependency) rather than adding a new check.

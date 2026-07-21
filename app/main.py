@@ -14,6 +14,7 @@ from app.api.routes_session import router as session_router
 from app.api.routes_share import router as share_router
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
+from app.spa import mount_spa
 
 
 def create_app() -> FastAPI:
@@ -73,6 +74,11 @@ def create_app() -> FastAPI:
         # used to detect local dev and why raising here (not warning) matters.
         validate_session_secret_at_startup()
         init_db()
+
+    # LAST: mounts the built SPA (if present) + its catch-all client-routing
+    # fallback. Must stay after every app.include_router(...) call above --
+    # see app/spa.py's module docstring for why ordering matters here.
+    mount_spa(app)
 
     return app
 

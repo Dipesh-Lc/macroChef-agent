@@ -186,6 +186,15 @@ class Settings(BaseSettings):
         default=3600.0, alias="RATE_LIMIT_SESSION_WINDOW_SECONDS"
     )
 
+    # SPA rebuild W1a (app/spa.py): directory containing the built React SPA
+    # (Vite's `index.html` + `assets/`). Defaults to `<repo>/web/dist`,
+    # relative to the process's working directory like the other path
+    # settings above (chroma_path, recipe_data_path). If `index.html` isn't
+    # found there at app-startup mount time, the SPA/static routes are
+    # skipped entirely (a warning is logged) -- the API stays fully usable
+    # without a Node build, which is the normal case for pytest/CI today.
+    web_dist: str = Field(default="./web/dist", alias="MACROCHEF_WEB_DIST")
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)
@@ -193,6 +202,10 @@ class Settings(BaseSettings):
     @property
     def recipe_path(self) -> Path:
         return Path(self.recipe_data_path)
+
+    @property
+    def web_dist_path(self) -> Path:
+        return Path(self.web_dist)
 
 
 @lru_cache
