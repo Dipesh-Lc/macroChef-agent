@@ -1191,6 +1191,92 @@ to act on:
   operates over the ~15-recipe trusted subset only, same as the day
   planner.
 
+## Weekly meal-plan solver (Phase 4 item 2, app.services.weekly_planner)
+
+- **"All days come out identical" — a known, honest, human-visible product
+  truth, stated loudly, not a bug.** `app.services.weekly_planner.
+  assemble_week` is a THIN COMPOSITION of B3
+  (`app.services.day_planner.assemble_day_plan`, called `days` times, same
+  candidates/target every time) — recipe selection is macro-only and
+  pantry-independent (macros don't depend on pantry state, so there is no
+  day-to-day pantry-depletion state to carry between calls), and the
+  trusted pool is tiny (~15 recipes as of the A3 corpus, 2026-07-20 — see
+  `app.services.day_planner`'s "CRUX FINDING"). Given that, EVERY call to
+  `assemble_day_plan` inside a single `assemble_week` run is fully
+  deterministic and receives identical inputs, so **every day in a
+  `WeeklyPlan.days` typically comes back structurally identical** (the same
+  day-plan repeated `days` times) — confirmed by
+  `scripts/evaluate_weekly_planner.py`'s `all_days_identical` reporting
+  column on every bucket-2 target it ran (2026-07-20/21: `True` for all 3
+  realistic-round targets at the then-15-recipe pool). This is documented
+  on `app.schemas.weekly_plan.WeeklyPlan`'s own docstring and
+  `app.services.weekly_planner`'s module docstring, both loudly, per this
+  task's own instruction not to bury it. It stops being true once
+  day-to-day variety (below) or the trusted pool grows enough that
+  different days could legitimately draw different combos for the same
+  target — neither is built yet.
+- **Day-to-day variety — deliberately dropped from v1 (thin-composition
+  design, decided).** No mechanism exists to make different days of a week
+  select different recipe combos for the same target (e.g. round-robin
+  across near-tied combos, or a diversity-aware secondary sort key) — every
+  day independently calls `assemble_day_plan` with the SAME inputs and gets
+  the SAME (correctly) globally-best answer. **Revisit trigger
+  (pre-registered, same numeric criterion `docs/BACKLOG.md`'s day-planner
+  "Enumeration-scaling trigger" and the batch solver's "Ingredient-sharing
+  scoring" entry both use):** once the trusted pool
+  (`app.services.nutrition_view.trusted_per_serving` count) reaches roughly
+  the ~200-recipe mark, there will typically be multiple combos within
+  tolerance for a given target, at which point picking a DIFFERENT
+  near-optimal combo per day becomes a real, meaningful choice rather than
+  a moot one at today's ~15-recipe pool (where there is often exactly one
+  best combo, or none). Design not started — would need its own FULL
+  TREATMENT consult (this module's own tier), since it changes
+  `assemble_week`'s per-day selection logic, not just a reporting field.
+- **Pantry-utilization as a scored objective — deliberately dropped from
+  v1 (thin-composition design, decided), same shape as the batch solver's
+  "Ingredient-sharing scoring" entry above.**
+  `app.services.weekly_planner.compute_pantry_utilization` is REPORTED
+  ONLY (`WeeklyPlan.pantry_utilization` /
+  `WeeklyPlan.uncompared_ingredient_count`) — it never influences which
+  recipes `assemble_day_plan` selects, and recipe selection stays
+  macro-only. Do not describe pantry utilization as "maximized" or
+  "optimized" anywhere (code comments, docstrings, API docs, UI copy).
+  **Revisit trigger (pre-registered, same numeric criterion as the two
+  entries directly above):** once the trusted pool
+  (`app.services.nutrition_view.trusted_per_serving` count) reaches roughly
+  the ~200-recipe mark AND there are routinely multiple within-tolerance
+  combos to choose between for a given target (the same precondition
+  "Day-to-day variety" above needs), pantry coverage becomes a real
+  tiebreak/objective choice among otherwise-comparable candidates rather
+  than a moot one at today's tiny, mostly-single-best-combo pool. Design
+  not started — would need its own FULL TREATMENT consult (this module's
+  own tier), since it changes the selection algorithm, not just a scoring
+  weight; this is also a hard PREREQUISITE for perishable sequencing below
+  (sequencing which ingredient to use first only matters once utilization
+  is actually being optimized for, not just reported).
+- **Perishable sequencing — deferred entirely, not built at all (not even
+  a partial version).** The roadmap line ("users log rough purchase dates
+  for perishables; system nudges 'use your spinach today'") implies a real
+  "use the ingredient that expires soonest, first" ordering across the
+  week's shopping/prep sequence — this module does not attempt that.
+  Blocked on TWO things, in order: **(a)** a real purchase-date/expiry-date
+  model with actual ORDERING information. As of this task
+  (2026-07-20/21), a concurrent Phase 4 item ("expiry/waste tracking",
+  touching `app/schemas/inventory.py` and the new
+  `app/services/waste_tracking.py` — uncommitted/in-progress in the shared
+  tree at the time this was written, not relied on here since it was
+  off-limits to read-and-depend-on mid-flight) is adding
+  `ConfirmedIngredient.purchase_date` / `.days_until_expiry()` on top of
+  the pre-existing bare `expires_soon: bool` — check its landed state
+  before starting; even once landed, per-ingredient purchase dates alone
+  give a per-item countdown, not yet a week-level SEQUENCING plan (which
+  ingredient across which day's recipes to prioritize first). **(b)**
+  pantry-utilization becoming a real SCORED objective first (the entry
+  directly above) — sequencing which ingredient to use first is only a
+  meaningful question once the solver is actually choosing recipes partly
+  to consume pantry stock, not just reporting coverage after the fact.
+  Design not started for either half.
+
 ## Safety-tools API / MCP (Phase 5, "expose the constraint engine as an
 ## API/MCP server" — 2026-07-20)
 
