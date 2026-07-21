@@ -111,6 +111,16 @@ class Settings(BaseSettings):
         default=False, alias="ALLOW_INSECURE_SESSION_SECRET"
     )
 
+    # Tri-state Secure attribute for the `mc_session` cookie minted by
+    # POST /session (app/api/routes_session.py) -- see
+    # app.dependencies.resolve_cookie_secure for the resolution logic.
+    # "auto" (default): Secure when the request itself is https, or a
+    # reverse proxy says the original request was
+    # (X-Forwarded-Proto: https). "always": Secure regardless (what
+    # production sets -- a spoofed X-Forwarded-Proto: http must never be
+    # able to drop Secure). "never": never Secure (plain http local dev).
+    session_cookie_secure: str = Field(default="auto", alias="SESSION_COOKIE_SECURE")
+
     # PostHog analytics. Absent key => silent no-op (see app/services/analytics.py).
     posthog_api_key: str | None = Field(default=None, alias="POSTHOG_API_KEY")
     posthog_host: str = Field(default="https://us.i.posthog.com", alias="POSTHOG_HOST")
@@ -163,6 +173,17 @@ class Settings(BaseSettings):
     rate_limit_share_view_max: int = Field(default=120, alias="RATE_LIMIT_SHARE_VIEW_MAX")
     rate_limit_share_view_window_seconds: float = Field(
         default=3600.0, alias="RATE_LIMIT_SHARE_VIEW_WINDOW_SECONDS"
+    )
+
+    # POST /session (app/api/routes_session.py, SPA rebuild W0) -- the
+    # anonymous session-mint/validate endpoint. Keyed by caller IP, not a
+    # verified session (this endpoint is pre-identity by definition -- see
+    # app.api.routes_session.require_session_mint_rate_limit). Every call
+    # counts against this bucket uniformly, including the 204-no-mint
+    # ("caller already has a valid session") branch.
+    rate_limit_session_max: int = Field(default=60, alias="RATE_LIMIT_SESSION_MAX")
+    rate_limit_session_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_SESSION_WINDOW_SECONDS"
     )
 
     @property

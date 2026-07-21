@@ -10,6 +10,7 @@ from app.api.routes_inventory import router as inventory_router
 from app.api.routes_library import router as library_router
 from app.api.routes_recommendations import router as recommendations_router
 from app.api.routes_safety_tools import router as safety_tools_router
+from app.api.routes_session import router as session_router
 from app.api.routes_share import router as share_router
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
@@ -36,6 +37,21 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[_frontend_origin, "http://localhost:8000"],
+        # `allow_credentials=False` is LOAD-BEARING for the cookie-CSRF model
+        # introduced by POST /session (app/api/routes_session.py) and the
+        # `mc_session` cookie dual-read in
+        # app.dependencies.get_session_user: a cross-origin browser request
+        # cannot attach a custom header (X-Session-Token, or
+        # X-Requested-With alongside the cookie) to a *credentialed*
+        # (cookie-carrying) cross-site request unless this server's CORS
+        # policy opts that origin into `allow_credentials=True` -- and even
+        # then, browsers refuse to send cookies cross-site at all unless
+        # this middleware echoes the specific requesting origin (never `*`)
+        # AND sets allow_credentials=True. Flipping this to True without
+        # redesigning the CSRF story first would let any allowed origin's
+        # page issue cookie-authenticated requests cross-site. See
+        # tests/test_session_endpoint.py for the regression test asserting
+        # this stays False.
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -48,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(day_planner_router)
     app.include_router(safety_tools_router)
     app.include_router(share_router)
+    app.include_router(session_router)
 
     @app.on_event("startup")
     def _startup() -> None:
