@@ -15,11 +15,14 @@ Uses an isolated in-memory SQLite database (never the developer's real
 macrochef.db) for every test in this module.
 """
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from starlette.routing import Route
 
 import app.data.recipe_library_repository as repo_module
 from app.config import get_settings
@@ -29,6 +32,31 @@ from app.data.recipe_library_repository import RecipeLibraryRepository
 from app.dependencies import SESSION_TOKEN_HEADER, mint_session_token
 from app.main import create_app
 from app.schemas.recipe import Recipe
+from app.spa import _SPA_ASSETS_MOUNT_NAME, _SPA_FALLBACK_ROUTE_NAME
+
+
+@pytest.fixture(autouse=True)
+def _no_spa_mount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Force `create_app()` in this module to never mount the SPA catch-all
+    (see app/spa.py), regardless of whether a developer's working tree
+    happens to have `web/dist` built.
+
+    This module tests pure API-isolation behavior (a client-supplied user id
+    must never resolve to someone's library data), including an assertion
+    that an unmatched GET path 404s/405s. That assertion is about the API
+    surface, not about whether the SPA shell happens to be mounted -- so it
+    must not become flaky/wrong depending on local build state. Pointing
+    `MACROCHEF_WEB_DIST` at a directory that is guaranteed to never exist
+    (a `tmp_path` subdirectory that is never created) makes `mount_spa`
+    (app/spa.py) skip the mount entirely, matching this suite's pre-SPA
+    assumptions exactly. `app/spa.py` itself is untouched -- this only
+    changes what this test module points the setting at.
+    """
+    never_built = tmp_path / "web-dist-never-built"
+    monkeypatch.setenv("MACROCHEF_WEB_DIST", str(never_built))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -221,6 +249,58 @@ def test_user_a_can_delete_their_own_recipe_via_the_api(isolated_session_factory
     assert RecipeLibraryRepository().list_user_recipes("user_a") == []
 
 
+def _flatten_routes(routes) -> list:
+    """Recursively expand router-wrapper objects into the underlying `Route`/
+    `Mount` instances. Adapted from the identical helper in
+    tests/test_spa_serving.py (see that module's docstring for why the naive
+    `isinstance` scan over `app.routes` is insufficient with this repo's
+    pinned FastAPI version)."""
+    flattened: list = []
+    for route in routes:
+        original_router = getattr(route, "original_router", None)
+        if original_router is not None:
+            flattened.extend(_flatten_routes(original_router.routes))
+        else:
+            flattened.append(route)
+    return flattened
+
+
+def _segments(path: str) -> list[str]:
+    return [segment for segment in path.strip("/").split("/") if segment != ""]
+
+
+def _is_wildcard(segment: str) -> bool:
+    return segment.startswith("{") and segment.endswith("}")
+
+
+def test_get_library_with_path_param_is_not_a_registered_api_route() -> None:
+    """Regression guard, at the route-table level rather than the HTTP-status
+    level: no `APIRouter`-registered route (i.e. excluding the SPA catch-all
+    itself, see app/spa.py) may match `GET /library/<anything>`. Only
+    `GET /library` (no param) and `DELETE /library/{recipe_id}` are meant to
+    exist under `/library/` -- this is the precise way to assert "isn't even
+    a registered route" that stays true regardless of whether the SPA shell
+    happens to be mounted (mirrors the collision-guard pattern in
+    tests/test_spa_serving.py::test_no_api_route_collides_with_spa_client_routes).
+    """
+    app = create_app()
+
+    for route in _flatten_routes(app.routes):
+        if getattr(route, "name", None) in (_SPA_FALLBACK_ROUTE_NAME, _SPA_ASSETS_MOUNT_NAME):
+            continue  # the SPA's own catch-all/asset mount, not an API route
+        if not isinstance(route, Route):
+            continue
+        if "GET" not in (route.methods or set()):
+            continue
+        segments = _segments(route.path)
+        if len(segments) == 2 and segments[0] == "library" and _is_wildcard(segments[1]):
+            pytest.fail(
+                f"Found a registered GET route {route.path!r} under /library/ "
+                "that would resolve a client-supplied id to someone's library "
+                "contents -- this must never exist."
+            )
+
+
 def test_the_old_path_param_route_no_longer_exists(isolated_session_factory) -> None:
     """Regression guard: GET/DELETE must never again accept a user id as a
     path parameter -- that was the original vulnerability (anyone could read
@@ -230,10 +310,27 @@ def test_the_old_path_param_route_no_longer_exists(isolated_session_factory) -> 
     response = client.get("/library/user_a", headers=_auth_headers("user_a"))
     # No longer a valid list-library route; recipe_id "user_a" belongs to
     # nobody's deleted-lookup either, so both should never leak library
-    # contents. GET /library/{recipe_id} isn't even a registered route
-    # (only GET /library and DELETE /library/{recipe_id} are), so this is a
-    # 404 or 405, never a 200 with someone's library contents.
-    assert response.status_code in (404, 405)
+    # contents. GET /library/{recipe_id} isn't even a registered route (only
+    # GET /library and DELETE /library/{recipe_id} are -- see
+    # test_get_library_with_path_param_is_not_a_registered_api_route above
+    # for the route-table-level proof of that).
+    #
+    # This module's `_no_spa_mount` fixture points MACROCHEF_WEB_DIST at a
+    # directory that never exists, so in practice this always 404s here (the
+    # SPA catch-all is never mounted in this suite). The branch below is
+    # extra defense-in-depth so this assertion stays correct even if that
+    # weren't true: if some future change to app.main ever made the SPA
+    # catch-all reachable in this module anyway, a 200 would only be
+    # acceptable if it's the static SPA shell (text/html, not JSON) -- proof
+    # that no library data leaked at this path even though it "resolved" to
+    # something.
+    if response.status_code == 200:
+        content_type = response.headers.get("content-type", "")
+        assert not content_type.startswith("application/json")
+        with pytest.raises(ValueError):
+            response.json()
+    else:
+        assert response.status_code in (404, 405)
 
 
 # ---------------------------------------------------------------------------
