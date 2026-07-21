@@ -6,6 +6,7 @@ from app.schemas.inventory import ConfirmedIngredient, InventoryObservation
 from app.schemas.recipe import Recipe
 from app.schemas.shopping import ShoppingItem
 from app.schemas.user import UserProfile
+from app.schemas.waste_tracking import WasteNudge
 
 
 class RecipeScore(BaseModel):
@@ -88,6 +89,14 @@ class RecommendationResponse(BaseModel):
     # ran (e.g. the request errored before scoring) -- distinct from "ran but
     # found no signal yet", which is an empty-but-present TasteProfile.
     taste_profile: TasteProfile | None = None
+    # Phase 4 (expiry/waste tracking): deterministic "use your X today"
+    # nudges for the request's expiring-soon confirmed_inventory items --
+    # see app.services.waste_tracking.build_waste_nudges. Never a safety
+    # signal, never LLM-authored; always [] rather than None (unlike
+    # taste_profile above) since it is populated by the same node
+    # unconditionally whenever nutrition_scoring_node runs, with no
+    # minimum-sample-size gate to distinguish "not enough data" from "ran".
+    waste_nudges: list[WasteNudge] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):

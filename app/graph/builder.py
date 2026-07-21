@@ -149,6 +149,7 @@ def run_recommendation_graph(request: RecommendationRequest, user_id: str) -> Re
         debug_trace=final_state.debug_trace,
         errors=final_state.errors,
         taste_profile=final_state.taste_profile,
+        waste_nudges=final_state.waste_nudges,
     )
 
     analytics = get_analytics()

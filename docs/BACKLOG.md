@@ -1330,3 +1330,57 @@ to act on:
   IP), the next step is a per-API-key identity for external tool callers,
   not tightening this back to session-token auth (which would defeat the
   endpoint's purpose).
+
+## Phase 4: expiry / waste tracking (this task)
+
+- **No dollar-cost/money-saved estimation anywhere in this feature —
+  deliberate, not an oversight.** `app.services.waste_tracking.
+  count_ingredients_used_before_expiring` reports a plain COUNT ("N
+  ingredients used before expiring"), never a dollar figure, per the task
+  spec's hard constraint. Monetary estimation is the separately paused
+  "cost estimation v1" roadmap item, which is itself blocked on a
+  unit-bearing corpus decision — see the "Units decision — 2026-07-17,
+  decided by the human (option 2A...)" entry above in this file: "Phases 3
+  (cost estimation) and 4 (planner...) remain blocked for the imported
+  corpus" until a unit-bearing corpus source is decided (human license
+  gate). Do not add a dollar amount to this feature without first
+  revisiting that entry.
+- **"Recurring-use hook" scoped down to a single cheap cross-reference,
+  not a waste-savings dashboard.** The task spec allowed a modest version
+  ("cheap to compute from data you already have") and explicitly said to
+  defer anything requiring new tracking infrastructure. What shipped:
+  `app.services.waste_tracking.count_ingredients_used_before_expiring(user_id,
+  inventory, corpus=None)` — a same-request count of how many of the
+  CURRENT inventory's expiring-soon ingredients also appear in a recipe the
+  user has already cooked/liked (`app.services.memory_service.
+  get_user_memory`, read-only, not modified). This is NOT wired into any
+  API response or the frontend yet (no caller invokes it outside its own
+  tests, `tests/test_waste_tracking.py`) — it exists as a tested, ready-to-call
+  primitive. **Deliberately NOT built:** any persistent, cross-session
+  record of "ingredients that actually expired unused" vs. "ingredients
+  used in time" (a true waste-savings dashboard) — that needs new
+  tracking infrastructure (e.g. a table recording each expiring item's
+  eventual fate) that does not exist today and was out of scope per the
+  task spec ("if this starts requiring new tracking infrastructure beyond
+  what's cheap and immediate, DEFER it"). Design not started; would need
+  its own spec (what table, when a "used"/"wasted" verdict is recorded,
+  whether it's inferred or user-confirmed) before implementation.
+- **No purchase-date entry UI in `frontend/components/inventory_input.py`
+  yet.** `app.schemas.inventory.ConfirmedIngredient` gained an optional
+  `purchase_date: date | None` field (this task), and
+  `frontend/components/waste_nudge.py` + the `/recipes/recommend` response's
+  new `waste_nudges` field (`app.schemas.recommendation.
+  RecommendationResponse.waste_nudges`) are fully wired end-to-end — but
+  `inventory_input.py`'s `confirmed` list-comprehension
+  (`render_inventory_input`, near the bottom of the function) still
+  hardcodes `"expires_soon": False` for every row and has no date-picker
+  or "days old" input control. Until that UI is added, the nudge feature
+  is only reachable by a caller that sets `purchase_date` or `expires_soon`
+  directly on the API payload (e.g. a test, or a future non-Streamlit
+  client) — the live Streamlit app cannot yet trigger it from a real user
+  session. Fix shape (not designed in detail): add an optional
+  `st.date_input`/"days old" column to the `st.data_editor` table in
+  `render_inventory_input`, feed it into each `confirmed` dict's
+  `purchase_date` (ISO string) instead of the hardcoded `False`. Not done
+  in this task because the task's 4 numbered deliverables did not include
+  it and the spec said to keep the frontend piece "minimal."

@@ -12,6 +12,7 @@ from app.schemas.recommendation import (
 )
 from app.schemas.shopping import ShoppingItem
 from app.schemas.user import UserProfile
+from app.schemas.waste_tracking import WasteNudge
 
 
 class MacroChefState(BaseModel):
@@ -42,6 +43,10 @@ class MacroChefState(BaseModel):
     # Set by nutrition_scoring_node (app.services.memory_service.
     # derive_taste_profile) -- ranking/UX only, see TasteProfile's docstring.
     taste_profile: TasteProfile | None = None
+    # Set by nutrition_scoring_node (app.services.waste_tracking.
+    # build_waste_nudges) -- Phase 4 expiry/waste tracking, display/UX only,
+    # see WasteNudge's docstring.
+    waste_nudges: list[WasteNudge] = Field(default_factory=list)
     final_recommendations: list[MealRecommendation] = Field(default_factory=list)
     shopping_list: list[ShoppingItem] = Field(default_factory=list)
     memory_update: str | None = None

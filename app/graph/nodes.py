@@ -14,6 +14,7 @@ from app.services.recipe_retriever import RecipeRetriever
 from app.services.substitution_service import generate_safe_variants
 from app.services.text_inventory_parser import merge_inventory_observations, parse_typed_inventory
 from app.services.vision_service import extract_inventory_from_image
+from app.services.waste_tracking import build_waste_nudges
 
 
 def _trace(state: MacroChefState, message: str) -> list[str]:
@@ -348,10 +349,17 @@ def nutrition_scoring_node(state: MacroChefState | dict):
         )
         for recipe in current.candidate_recipes
     ]
+    # Phase 4 (expiry/waste tracking): deterministic, display-only "use your
+    # X today" nudges for whatever in confirmed_inventory is expiring soon --
+    # see app.services.waste_tracking.build_waste_nudges. Placed here (not a
+    # dedicated node) because it needs nothing this node doesn't already
+    # have (confirmed_inventory) and produces no safety-relevant output.
+    waste_nudges = build_waste_nudges(current.confirmed_inventory)
     return state_update(
         current,
         scored_recipes=scores,
         taste_profile=taste_profile,
+        waste_nudges=waste_nudges,
         debug_trace=_trace(current, f"nutrition_scoring_node: scored {len(scores)} recipes."),
     )
 

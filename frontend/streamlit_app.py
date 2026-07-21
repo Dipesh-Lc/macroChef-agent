@@ -11,6 +11,7 @@ from components.recommendation_cards import render_recommendations
 from components.safety_banner import render_safety_banner
 from components.shopping_list import render_shopping_list
 from components.taste_profile import render_taste_profile
+from components.waste_nudge import render_waste_nudges
 from session_client import request_with_session
 
 from app.services.analytics import get_analytics
@@ -482,6 +483,11 @@ with planner_tab:
             shopping = response_json.get("shopping_list", [])
             render_shopping_list(shopping)
             render_taste_profile(response_json.get("taste_profile"))
+            # Phase 4: expiry/waste tracking -- deterministic "use your X
+            # today" nudges for whatever confirmed_inventory item is
+            # expiring soon this request. See components/waste_nudge.py for
+            # the zero-LLM templating.
+            render_waste_nudges(response_json.get("waste_nudges", []))
 
             render_recommendations(API_URL, response_json.get("recommendations", []))
 
