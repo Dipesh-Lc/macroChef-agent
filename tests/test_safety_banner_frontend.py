@@ -55,6 +55,17 @@ def test_groups_and_counts_multiple_reason_types() -> None:
     assert markup.count(" recipes excluded for") == 1
 
 
+def test_singular_recipe_uses_singular_noun_in_first_clause() -> None:
+    # Single recipe excluded should render "1 recipe excluded..." not "1 recipes excluded..."
+    rejected = [_rejected("r1", "Peanut Noodles", "Contains a user allergen")]
+
+    markup = safety_banner_markup(rejected)
+
+    assert "1 recipe excluded for an allergy" in markup
+    # Ensure plural form is NOT used for count of 1
+    assert "1 recipes excluded" not in markup
+
+
 def test_all_four_known_reason_categories_are_labeled_distinctly() -> None:
     rejected = [
         _rejected("r1", "A", "Contains a user allergen"),

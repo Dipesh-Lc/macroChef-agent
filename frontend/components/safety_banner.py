@@ -102,7 +102,8 @@ def safety_banner_markup(rejected_recipes: list[dict]) -> str:
     for index, (label, count) in enumerate(counts.items()):
         escaped_label = escape_value(label)
         if index == 0:
-            clauses.append(f"{count} recipes excluded for {escaped_label}")
+            noun = "recipe" if count == 1 else "recipes"
+            clauses.append(f"{count} {noun} excluded for {escaped_label}")
         else:
             clauses.append(f"{count} excluded for {escaped_label}")
     return f"Filtered deterministically: {', '.join(clauses)}."
