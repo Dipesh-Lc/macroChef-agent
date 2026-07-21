@@ -135,6 +135,16 @@ class Settings(BaseSettings):
         default=3600.0, alias="RATE_LIMIT_REINDEX_WINDOW_SECONDS"
     )
 
+    # /tools/* safety-tools endpoints (app/api/routes_safety_tools.py,
+    # Phase 5) -- keyed by caller IP, not a verified session (see
+    # app/dependencies.py require_safety_tools_rate_limit for why). Each
+    # call is a single deterministic function call (no LLM, no corpus scan),
+    # so the default budget is generous relative to the other three buckets.
+    rate_limit_safety_tools_max: int = Field(default=60, alias="RATE_LIMIT_SAFETY_TOOLS_MAX")
+    rate_limit_safety_tools_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_SAFETY_TOOLS_WINDOW_SECONDS"
+    )
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)

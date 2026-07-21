@@ -271,6 +271,43 @@ Recipe Library API endpoints:
 
 ---
 
+## Safety Tools API
+
+A small, standalone HTTP surface (`app/api/routes_safety_tools.py`) that
+exposes the deterministic constraint engine directly — for an external AI
+agent or developer who wants allergy/diet-type filtering without going
+through MacroChef's full recommend/day-plan pipeline. Every endpoint below
+is a thin, unmodified pass-through to the same
+`app/services/constraint_engine.py` functions the rest of the app uses —
+this surface adds no new safety logic of its own, only new access to logic
+that was already there. Rate-limited by caller IP (not a session token —
+see `docs/BACKLOG.md`'s "Safety-tools API / MCP" entry for why this differs
+from `/library`'s session-keyed limits), default 60 requests/hour/caller
+(`RATE_LIMIT_SAFETY_TOOLS_MAX`).
+
+- `POST /tools/validate-recipe` — `{recipe, user_profile}` → the same
+  `ValidationResult` (`is_valid`, `rejection_reason`) `validate_recipe`
+  returns (allergens, disliked ingredients, diet type, cook time, in that
+  order)
+- `POST /tools/check-allergen` — `{recipe, allergies}` →
+  `{contains_allergen: bool}`
+- `POST /tools/check-diet-violation` — `{recipe, diet_type}` →
+  `{violates_diet_type: bool}` (422 for a `diet_type` outside
+  `vegetarian`/`vegan`/`gluten-free`/`dairy-free` — this project doesn't
+  enforce, and won't silently pass, an unsupported diet type)
+- `POST /tools/derive-allergen-labels` — `{ingredient_names: [str, ...]}` →
+  `{allergens: [str, ...]}`
+
+Same disclaimer as the rest of this project: hobby project, not medical
+advice — see the adversarial-benchmark numbers at the top of this README
+(judge-flagged / adjudicated-true, published together, always). MCP-server
+access was evaluated for this pass and deliberately skipped (no MCP
+dependency exists in this repo; adding one just to wrap 4 REST endpoints
+was judged scope creep for a ship-first item) — see `docs/BACKLOG.md` if
+picking that up later.
+
+---
+
 ## Optional model providers
 
 Mock mode is the default and needs no keys. If you provide API keys or run Ollama

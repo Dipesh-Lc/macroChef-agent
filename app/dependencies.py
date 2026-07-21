@@ -1,6 +1,6 @@
 from collections.abc import Callable, Generator
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.config import Settings, get_settings
@@ -216,3 +216,70 @@ require_reindex_rate_limit = _rate_limit_dependency(
     lambda settings: settings.rate_limit_reindex_max,
     lambda settings: settings.rate_limit_reindex_window_seconds,
 )
+
+
+# ---------------------------------------------------------------------------
+# Safety-tools rate limit (app/api/routes_safety_tools.py, Phase 5) -- keyed
+# by caller IP, NOT the verified session user id above.
+#
+# DEVIATION FROM THE PATTERN ABOVE, FLAGGED DELIBERATELY: every dependency
+# above first resolves get_session_user, i.e. it requires a signed
+# X-Session-Token that only the trusted Streamlit frontend process can mint
+# (mint_session_token is called directly by that process, never exposed
+# through any HTTP endpoint a caller could hit to obtain one). The whole
+# point of routes_safety_tools.py is that an EXTERNAL AI agent/developer --
+# with no MacroChef session at all -- can call it directly; gating it behind
+# get_session_user would make it uncallable by exactly the audience it's
+# built for, and those endpoints hold no per-user data to isolate (each one
+# is a pure function of its request body, never a DB read/write keyed by
+# user id) -- so there is no data-isolation reason to require a session
+# here, unlike /library or /recipes/recommend.
+#
+# What IS reused, unchanged, from the pattern above: the same process-wide
+# RateLimiter singleton (get_rate_limiter()), the same sliding-window
+# algorithm, and the same Settings-driven limit/window configurability --
+# only the identity source changes (caller IP instead of verified session
+# user id). This is the most conservative option available given "reuse
+# existing rate-limiting infra, do not build new infra from scratch, and
+# don't force these external-facing tools behind an auth mechanism only the
+# app's own frontend can satisfy" -- see this task's executor report for the
+# full reasoning; flagged here for an explicit human/orchestrator review
+# rather than assumed silently.
+#
+# Caller-IP keying is a known-weaker identity than a verified session (it's
+# spoofable behind a shared NAT/proxy, and Starlette's request.client.host
+# reflects whatever the ASGI server reports, which can be a reverse proxy's
+# address unless that proxy is configured to forward the real client IP) --
+# an accepted, documented limitation for a ship-first hobby-scope abuse
+# guard, not a security boundary. These endpoints hold no secrets and make
+# no safety decision of their own (they only expose one that
+# constraint_engine already makes), so the consequence of the limiter being
+# imprecise here is "an abuser can send more requests than intended," never
+# an allergy/diet safety miss.
+# ---------------------------------------------------------------------------
+
+
+def _safety_tools_caller_id(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def require_safety_tools_rate_limit(
+    request: Request,
+    settings: Settings = Depends(get_app_settings),
+) -> str:
+    """FastAPI dependency gating app/api/routes_safety_tools.py by caller IP
+    (see the module-level note above for why this does not reuse
+    _rate_limit_dependency/get_session_user)."""
+    caller_id = _safety_tools_caller_id(request)
+    limit = settings.rate_limit_safety_tools_max
+    window_seconds = settings.rate_limit_safety_tools_window_seconds
+    key = f"safety_tools:{caller_id}"
+    if not get_rate_limiter().allow(key, limit, window_seconds):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Rate limit exceeded: max {limit} requests per "
+                f"{int(window_seconds)}s per caller. Try again later."
+            ),
+        )
+    return caller_id

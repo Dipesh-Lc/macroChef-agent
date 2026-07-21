@@ -1148,3 +1148,99 @@ to act on:
   `app/services/day_planner.py`. No marketing claim about this feature
   should describe it as covering "the corpus" (3,878 recipes) — it
   currently operates over the ~15-recipe trusted subset only.
+
+## Meal-prep batch solver (Phase 4 item 1, app.services.batch_planner)
+
+- **Ingredient-sharing scoring — deliberately dropped from v1 (design
+  consult, decided).** `app.services.batch_planner.assemble_batch_plan`
+  selects the 2-3 batch recipes by per-container macro fit alone
+  (`(kcal_relative_error, protein_relative_error)`); it never scores,
+  ranks, or optimizes for ingredient overlap among the selected recipes.
+  Whatever overlap exists shows up naturally in the consolidated shopping
+  list (`app.services.procurement_service.build_shopping_list_for_items`)
+  but is incidental, not a designed objective — do not describe
+  ingredient-sharing as "optimized" anywhere (code comments, docstrings,
+  API docs, UI copy). **Revisit trigger (pre-registered):** once the
+  trusted pool (`app.services.nutrition_view.trusted_per_serving` count,
+  same metric `docs/BACKLOG.md`'s day-planner "Enumeration-scaling
+  trigger" entry uses) reaches roughly the same ~200-recipe mark AND
+  eligible sets (recipes passing `_container_eligible` for a given target)
+  routinely exceed `max_recipes` (today, at a ~15-recipe pool, the
+  eligible set rarely exceeds 3 — see `scripts/evaluate_batch_planner.py`'s
+  bucket 2 `eligible_recipe_count` column), making ingredient overlap a
+  REAL tiebreak choice among otherwise-comparable candidates rather than a
+  moot one. Design not started; would need its own FULL TREATMENT consult
+  (this module's own tier) since it changes the selection algorithm, not
+  just a scoring weight.
+- **Honest technical note for the orchestrator/human (not a code change),
+  mirrors the day-planner's own entry above:** the batch solver's
+  real-world usefulness is capped by the same ~15-recipe trusted pool the
+  day planner shares (`app.services.nutrition_view.trusted_per_serving`,
+  A3 corpus, 2026-07-20) — this solver's PER-CONTAINER band (every
+  selected recipe's own per-serving macros must individually fit the
+  target, not just their sum) is additionally a HARDER constraint than the
+  day planner's summed +/-10%/+/-15% band, so the realistic-round bucket's
+  feasibility number is expected to be lower/more volatile than
+  `scripts/evaluate_day_planner.py`'s own — see
+  `scripts/evaluate_batch_planner.py`'s own module docstring and its
+  pre-registered target list (500/40, 600/45, 450/35, 700/50) for the
+  measured numbers on any given run. That number moves only if/when
+  overall grounding coverage improves the trusted-pool size, not by
+  touching `app/services/batch_planner.py`. No marketing claim about this
+  feature should describe it as covering "the corpus" — it currently
+  operates over the ~15-recipe trusted subset only, same as the day
+  planner.
+
+## Safety-tools API / MCP (Phase 5, "expose the constraint engine as an
+## API/MCP server" — 2026-07-20)
+
+- **MCP server: deliberately skipped this pass, REST-only shipped.** No
+  MCP-related dependency or scaffolding exists anywhere in this repo today
+  (`requirements.txt`/`pyproject.toml` grepped, `python -c "import mcp"`
+  fails — package not installed). Adding an MCP SDK dependency purely to
+  wrap 4 already-existing REST endpoints is exactly the "forced,
+  unjustified dependency" CLAUDE.md warns against for a ship-first item
+  with no design ambiguity otherwise. `app/api/routes_safety_tools.py`
+  ships the REST surface only (`POST /tools/validate-recipe`,
+  `/tools/check-allergen`, `/tools/check-diet-violation`,
+  `/tools/derive-allergen-labels`). If MCP access is picked up later: build
+  it as a thin wrapper that calls these same 4 REST endpoints (not
+  `constraint_engine` directly a second time), so there is exactly one
+  implementation of "what does this endpoint do" — this was pre-decided in
+  the task spec for this item and should still hold when MCP is added.
+- **Rate limiting for `/tools/*`: IP-keyed, not session-keyed — a
+  deliberate, flagged deviation from the existing pattern.** Every other
+  rate-limited endpoint (`/library/discover`, `/recipes/recommend`,
+  `/library/reindex`) requires a signed `X-Session-Token`
+  (`app.dependencies.get_session_user`) that only the trusted Streamlit
+  frontend process can mint (`mint_session_token` is never exposed via any
+  HTTP endpoint an external caller could hit). Requiring that same token on
+  `/tools/*` would make the surface unreachable by exactly the audience
+  this roadmap item exists to serve ("an external AI agent/developer could
+  call to get deterministic allergy/diet safety filtering without needing
+  MacroChef's full recommend pipeline"). Implemented instead:
+  `app.dependencies.require_safety_tools_rate_limit`, which reuses the same
+  `RateLimiter` singleton/sliding-window algorithm (`get_rate_limiter()`,
+  `app/services/rate_limiter.py` — unchanged) and the same
+  `Settings`-driven limit/window config pattern
+  (`RATE_LIMIT_SAFETY_TOOLS_MAX` / `RATE_LIMIT_SAFETY_TOOLS_WINDOW_SECONDS`,
+  default 60/hour), but keys on caller IP
+  (`request.client.host`) instead of a verified session user id. This is a
+  weaker identity (spoofable behind a shared NAT/proxy, and reflects
+  whatever the ASGI server reports unless a reverse proxy is configured to
+  forward the real client IP) — an accepted, documented limitation for a
+  ship-first abuse guard, not a security boundary; these endpoints hold no
+  secrets, no per-user data, and make no safety decision of their own (see
+  `app/dependencies.py`'s inline comment at
+  `require_safety_tools_rate_limit` for the full reasoning). **Flagged for
+  explicit orchestrator/human review**, not silently assumed — CLAUDE.md
+  lists "rate limiting" among the FULL TREATMENT categories generally, and
+  this task's own spec pre-classified the whole item as not needing
+  advisor consult on the premise that it adds "no new safety DECISION, only
+  new ACCESS" to already-approved logic; the auth-mechanism choice here is
+  an access/abuse-control decision, not an allergy/diet safety decision,
+  but it's still worth a second look given CLAUDE.md's general framing. If
+  IP-keying proves too weak in practice (e.g. real abuse from a shared
+  IP), the next step is a per-API-key identity for external tool callers,
+  not tightening this back to session-token auth (which would defeat the
+  endpoint's purpose).
