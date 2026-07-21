@@ -15,8 +15,8 @@ import "./index.css";
 import App from "./App";
 import HomePage from "./pages/HomePage";
 import DayPlanPage from "./pages/DayPlanPage";
-import WeekPage from "./pages/WeekPage";
-import BatchPage from "./pages/BatchPage";
+import WeekPlanPage from "./pages/WeekPlanPage";
+import BatchPlanPage from "./pages/BatchPlanPage";
 import MyRecipesPage from "./pages/MyRecipesPage";
 import SharedPlanPage from "./pages/SharedPlanPage";
 
@@ -35,8 +35,8 @@ createRoot(rootElement).render(
           <Route element={<App />}>
             <Route index element={<HomePage />} />
             <Route path="day" element={<DayPlanPage />} />
-            <Route path="week" element={<WeekPage />} />
-            <Route path="batch" element={<BatchPage />} />
+            <Route path="week" element={<WeekPlanPage />} />
+            <Route path="batch" element={<BatchPlanPage />} />
             <Route path="my-recipes" element={<MyRecipesPage />} />
             <Route path="shared/:shareId" element={<SharedPlanPage />} />
           </Route>

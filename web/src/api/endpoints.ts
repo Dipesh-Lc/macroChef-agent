@@ -5,6 +5,8 @@
  */
 import { apiRequest } from "./client";
 import type {
+  BatchPlanRequest,
+  BatchPlanResponse,
   DayPlanRequest,
   DayPlanResponse,
   FeedbackRequest,
@@ -16,6 +18,8 @@ import type {
   SharedPlanView,
   ShoppingListRequest,
   ShoppingListResponse,
+  WeeklyPlanRequest,
+  WeeklyPlanResponse,
 } from "./types";
 
 // POST /recipes/recommend can take 30-90s (LLM parsing + corpus scoring +
@@ -26,6 +30,19 @@ const RECOMMEND_TIMEOUT_MS = 90_000;
 // corpus plus exhaustive combination enumeration -- generous but bounded,
 // same idea as RECOMMEND_TIMEOUT_MS.
 const DAY_PLAN_TIMEOUT_MS = 60_000;
+
+// POST /plan/batch is a single filter-then-sort-then-take-top pass (see
+// `app.services.batch_planner`'s module docstring -- NOT combinatorial
+// enumeration like `assemble_day_plan`), but still runs
+// constraint_engine.validate_recipe over the full corpus first, so it gets
+// the same generous-but-bounded timeout as DAY_PLAN_TIMEOUT_MS.
+const BATCH_PLAN_TIMEOUT_MS = 60_000;
+
+// POST /plan/week calls assemble_day_plan (the same enumeration
+// DAY_PLAN_TIMEOUT_MS budgets for) once per requested day (up to 14) plus
+// one consolidated shopping-list reconciliation -- a multi-day solve is
+// slower than a single day, so this gets a longer budget.
+const WEEK_PLAN_TIMEOUT_MS = 90_000;
 
 /** Public call: no session bootstrap, no CSRF header. */
 export async function extractInventory(typedIngredients: string): Promise<InventoryObservation[]> {
@@ -69,6 +86,36 @@ export async function planDay(request: DayPlanRequest): Promise<DayPlanResponse>
     method: "POST",
     json: request,
     timeoutMs: DAY_PLAN_TIMEOUT_MS,
+  });
+}
+
+/**
+ * Public call: no session bootstrap, no CSRF header. Every candidate recipe
+ * is safety-cleared server-side by `app.services.constraint_engine.
+ * validate_recipe` before `app.services.batch_planner` ever sees it (see
+ * `app.api.routes_day_planner.plan_batch`'s docstring) -- this wrapper makes
+ * no safety decision of its own, it only calls the endpoint.
+ */
+export async function planBatch(request: BatchPlanRequest): Promise<BatchPlanResponse> {
+  return apiRequest<BatchPlanResponse>("/plan/batch", {
+    method: "POST",
+    json: request,
+    timeoutMs: BATCH_PLAN_TIMEOUT_MS,
+  });
+}
+
+/**
+ * Public call: no session bootstrap, no CSRF header. Every candidate recipe
+ * is safety-cleared server-side by `app.services.constraint_engine.
+ * validate_recipe` before `app.services.weekly_planner` ever sees it (see
+ * `app.api.routes_day_planner.plan_week`'s docstring) -- this wrapper makes
+ * no safety decision of its own, it only calls the endpoint.
+ */
+export async function planWeek(request: WeeklyPlanRequest): Promise<WeeklyPlanResponse> {
+  return apiRequest<WeeklyPlanResponse>("/plan/week", {
+    method: "POST",
+    json: request,
+    timeoutMs: WEEK_PLAN_TIMEOUT_MS,
   });
 }
 

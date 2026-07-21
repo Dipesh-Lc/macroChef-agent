@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ApiError, NotFoundError } from "../api/client";
 import { getSharedPlan } from "../api/endpoints";
-import type { PublicDayPlan, PublicRecipe, SharedPlanView } from "../api/types";
+import type { PublicBatchPlan, PublicDayPlan, PublicRecipe, PublicWeeklyPlan, SharedPlanView } from "../api/types";
+import { BatchContainerGrid } from "../components/BatchContainerGrid";
 import { ComingSoonPage } from "../components/ComingSoonPage";
 import { PlanMacroSummary } from "../components/PlanMacroSummary";
+import { RecipeFitTable } from "../components/RecipeFitTable";
 import { SubstitutionNoteCard } from "../components/SubstitutionNoteCard";
 import { TrustBadge } from "../components/TrustBadge";
+import { WeekCalendarGrid } from "../components/WeekCalendarGrid";
 import { macroDisplay } from "../lib/macroDisplay";
 import { ingredientDisplay } from "../lib/scaling";
 
@@ -114,6 +117,38 @@ function SharedDayPlanView({ dayPlan }: { dayPlan: PublicDayPlan }) {
   );
 }
 
+// `PublicBatchPlan` (unlike `BatchPlan`) has no `trusted_pool_size` and no
+// `min_recipes` (that was a REQUEST field, never part of the plan itself --
+// see `app.schemas.share.PublicBatchPlan`'s docstring) -- so the
+// "variety target not met" banner (which needs the caller's requested
+// `min_recipes` to compare against `recipes_selected`) is gracefully
+// omitted here rather than guessed, unlike `BatchPlanPage.tsx`'s
+// authenticated view which has that value on hand.
+function SharedBatchPlanView({ batchPlan }: { batchPlan: PublicBatchPlan }) {
+  return (
+    <>
+      {!batchPlan.within_tolerance && (
+        <div className="rounded-md border border-dashed border-honey-dark bg-honey/10 px-3 py-2 text-sm font-medium text-honey-dark">
+          Closest available — no recipe fit the per-container target band
+        </div>
+      )}
+      <BatchContainerGrid items={batchPlan.items ?? []} containers={batchPlan.containers} />
+      <RecipeFitTable recipeFits={batchPlan.recipe_fits ?? []} />
+    </>
+  );
+}
+
+// `PublicWeeklyPlan` (unlike `WeeklyPlan`) has no `trusted_pool_size`,
+// `pantry_utilization`, or `uncompared_ingredient_count` (all excluded --
+// see that schema's docstring: the pantry-derived fields would leak "here's
+// what's in the sharer's kitchen" to an anonymous viewer) -- so this
+// renders the calendar grid only, omitting the pantry gauge entirely and
+// letting `WeekCalendarGrid` omit the trusted-pool detail from the
+// identical-days callout rather than guessing a value.
+function SharedWeeklyPlanView({ weeklyPlan }: { weeklyPlan: PublicWeeklyPlan }) {
+  return <WeekCalendarGrid days={weeklyPlan.days ?? []} />;
+}
+
 export default function SharedPlanPage() {
   const { shareId } = useParams<{ shareId: string }>();
   // Lazy initializer folds the "no :shareId param at all" case into the
@@ -185,11 +220,12 @@ export default function SharedPlanPage() {
         <SharedDayPlanView dayPlan={view.content as PublicDayPlan} />
       )}
 
-      {(view.plan_type === "batch" || view.plan_type === "week") && (
-        <ComingSoonPage
-          title="Not yet supported in this preview"
-          message={`Viewing a shared ${view.plan_type === "batch" ? "batch" : "weekly"} plan is on its way in a future update.`}
-        />
+      {view.plan_type === "batch" && (
+        <SharedBatchPlanView batchPlan={view.content as PublicBatchPlan} />
+      )}
+
+      {view.plan_type === "week" && (
+        <SharedWeeklyPlanView weeklyPlan={view.content as PublicWeeklyPlan} />
       )}
     </div>
   );

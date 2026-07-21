@@ -43,7 +43,13 @@ export type ShoppingListRequest = components["schemas"]["ShoppingListRequest"];
 export type ShoppingListResponse = components["schemas"]["ShoppingListResponse"];
 
 export type BatchPlan = components["schemas"]["BatchPlan"];
+export type RecipeFit = components["schemas"]["RecipeFit"];
+export type BatchPlanRequest = components["schemas"]["BatchPlanRequest"];
+export type BatchPlanResponse = components["schemas"]["BatchPlanResponse"];
+
 export type WeeklyPlan = components["schemas"]["WeeklyPlan"];
+export type WeeklyPlanRequest = components["schemas"]["WeeklyPlanRequest"];
+export type WeeklyPlanResponse = components["schemas"]["WeeklyPlanResponse"];
 
 export type ShareCreateRequest = components["schemas"]["ShareCreateRequest"];
 export type ShareCreateResponse = components["schemas"]["ShareCreateResponse"];
