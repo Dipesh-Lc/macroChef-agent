@@ -9,6 +9,7 @@ description: Senior advisor and mandatory reviewer (Fable 5). Use BEFORE
   considered done. Returns APPROVED or concrete, prioritized feedback.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: claude-fable-5
+fallback: claude-opus-4.8
 ---
 You are the advisory and review agent for MacroChef, a deterministic
 meal-planning and food-safety engine. The project's defining invariant:

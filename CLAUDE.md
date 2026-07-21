@@ -211,4 +211,4 @@ claim states both numbers. Under-claim until the number is real.
 - `executor` runs Sonnet 5 (`claude-sonnet-5`); `mechanic` runs Haiku 4.5.
 - `advisor` runs Fable 5 — reserved for design consults, mandatory reviews,
   benchmark methodology, solver optimization design, and pre-launch safety
-  review. Do not use it for implementation.
+  review. Do not use it for implementation (Fallback - Opus 4.8 if Fable 5 not available).
