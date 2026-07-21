@@ -12,7 +12,7 @@ silent "have enough", so callers can surface that the amount wasn't verified.
 from dataclasses import dataclass
 from typing import Literal
 
-from app.schemas.day_plan import DayPlan
+from app.schemas.day_plan import DayPlan, PlanItem
 from app.schemas.ingredient import Ingredient, scale_ingredients
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recipe import Recipe
@@ -205,13 +205,18 @@ def merge_shopping_lists(items: list[ShoppingItem]) -> list[ShoppingItem]:
     return merged
 
 
-def build_shopping_list_for_plan(
-    plan: DayPlan,
+def build_shopping_list_for_items(
+    items: list[PlanItem],
     recipe_lookup: dict[str, Recipe],
     inventory: list[ConfirmedIngredient],
 ) -> list[ShoppingItem]:
-    """Aggregate a shopping list across every `PlanItem` in a `DayPlan`
-    (roadmap item B4).
+    """Aggregate a shopping list across an arbitrary list of `PlanItem`s
+    (extracted from `build_shopping_list_for_plan`, roadmap item B4, so the
+    meal-prep batch solver -- `app.services.batch_planner` /
+    `app.api.routes_day_planner.plan_batch` -- can reuse the exact same
+    combine-then-reconcile-once logic against `BatchPlan.items` with zero
+    duplication; `build_shopping_list_for_plan` below is now a one-line
+    delegate to this function).
 
     Scale factor (confirmed against app.services.day_planner and
     app.services.grounding_job): `PlanItem.servings` is a COUNT OF SERVINGS
@@ -257,7 +262,7 @@ def build_shopping_list_for_plan(
     fallback_ingredient_by_name: dict[str, Ingredient] = {}
     titles_by_name: dict[str, list[str]] = {}
 
-    for plan_item in plan.items:
+    for plan_item in items:
         recipe = recipe_lookup.get(plan_item.recipe_id)
         if recipe is None:
             continue
@@ -301,11 +306,28 @@ def build_shopping_list_for_plan(
             combined_ingredients.append(Ingredient(name=key, amount=grams, unit="g"))
 
     plan_recipe = Recipe(recipe_id="__plan__", title="Day Plan", ingredients=combined_ingredients)
-    items = build_shopping_list_for_recipe(plan_recipe, inventory)
+    shopping_items = build_shopping_list_for_recipe(plan_recipe, inventory)
 
     attributed: list[ShoppingItem] = []
-    for item in items:
+    for item in shopping_items:
         titles = titles_by_name.get(item.name)
         reason = f"Needed for {', '.join(sorted(titles))}" if titles else item.reason
         attributed.append(item.model_copy(update={"reason": reason}))
     return attributed
+
+
+def build_shopping_list_for_plan(
+    plan: DayPlan,
+    recipe_lookup: dict[str, Recipe],
+    inventory: list[ConfirmedIngredient],
+) -> list[ShoppingItem]:
+    """Aggregate a shopping list across every `PlanItem` in a `DayPlan`
+    (roadmap item B4). Thin delegate onto `build_shopping_list_for_items`
+    (extracted so the meal-prep batch solver can reuse the exact same
+    combine-then-reconcile-once logic against a `BatchPlan`'s items without
+    duplicating it -- see that function's docstring for the full algorithm
+    and the double-counting bug it fixes) -- byte-identical behavior to
+    the pre-extraction implementation, verified by
+    tests/test_procurement_service.py's existing B4 reconciliation tests.
+    """
+    return build_shopping_list_for_items(plan.items, recipe_lookup, inventory)

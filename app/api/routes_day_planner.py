@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.rag.loaders import load_corpus
+from app.schemas.batch_plan import BatchPlanRequest, BatchPlanResponse
 from app.schemas.day_plan import (
     DayPlanRequest,
     DayPlanResponse,
@@ -8,9 +9,10 @@ from app.schemas.day_plan import (
     ShoppingListResponse,
 )
 from app.schemas.recommendation import RejectedRecipe
+from app.services.batch_planner import assemble_batch_plan
 from app.services.constraint_engine import validate_recipe
 from app.services.day_planner import assemble_day_plan, assemble_plan
-from app.services.procurement_service import build_shopping_list_for_plan
+from app.services.procurement_service import build_shopping_list_for_items, build_shopping_list_for_plan
 
 router = APIRouter(prefix="/plan", tags=["day-planner"])
 
@@ -68,6 +70,67 @@ def plan_day(request: DayPlanRequest) -> DayPlanResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return DayPlanResponse(plan=plan, rejected_recipes=rejected)
+
+
+@router.post("/batch", response_model=BatchPlanResponse)
+def plan_batch(request: BatchPlanRequest) -> BatchPlanResponse:
+    """Phase 4 item 1: meal-prep batch solver -- pick 2-3 recipes, scale to
+    N whole containers, each container individually hitting a per-container
+    kcal/protein target, with one consolidated shopping list.
+
+    SAFETY (mandatory, verifiable, identical pattern to `plan_day` above):
+    every recipe in the corpus is run through
+    `app.services.constraint_engine.validate_recipe` BEFORE
+    `app.services.batch_planner` ever sees it. Only the survivors
+    (`safe_candidates`) are passed into `assemble_batch_plan`; rejected
+    recipes are reported back in `rejected_recipes` but never reach the
+    planner. This is the sole point in this file where safety is decided
+    for this endpoint, and it happens purely in deterministic code -- no
+    LLM call anywhere on this path.
+
+    The consolidated shopping list is built via
+    `app.services.procurement_service.build_shopping_list_for_items`
+    against the assembled `plan.items` and `request.inventory` -- the same
+    combine-then-reconcile-once logic `plan_shopping_list` uses for a
+    `DayPlan`, reused unmodified rather than reimplemented (see that
+    function's docstring for the double-counting bug it avoids).
+    """
+    all_recipes = load_corpus()
+    safe_candidates = []
+    rejected: list[RejectedRecipe] = []
+    for recipe in all_recipes:
+        result = validate_recipe(recipe, request.user_profile)
+        if result.is_valid:
+            safe_candidates.append(recipe)
+        else:
+            rejected.append(
+                RejectedRecipe(
+                    recipe_id=recipe.recipe_id,
+                    title=recipe.title,
+                    reason=result.rejection_reason or "Rejected by hard constraint",
+                )
+            )
+
+    try:
+        plan = assemble_batch_plan(
+            safe_candidates,
+            per_container_target_calories=request.per_container_target_calories,
+            per_container_target_protein_g=request.per_container_target_protein_g,
+            containers=request.containers,
+            min_recipes=request.min_recipes,
+            max_recipes=request.max_recipes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    recipe_lookup = {
+        recipe.recipe_id: recipe
+        for recipe in safe_candidates
+        if recipe.recipe_id in {item.recipe_id for item in plan.items}
+    }
+    shopping_list = build_shopping_list_for_items(plan.items, recipe_lookup, request.inventory)
+
+    return BatchPlanResponse(plan=plan, rejected_recipes=rejected, shopping_list=shopping_list)
 
 
 @router.post("/shopping-list", response_model=ShoppingListResponse)

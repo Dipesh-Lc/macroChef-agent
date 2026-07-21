@@ -7,6 +7,7 @@ from app.schemas.recipe import Recipe
 from app.schemas.shopping import ShoppingItem
 from app.services.procurement_service import (
     _analyze,
+    build_shopping_list_for_items,
     build_shopping_list_for_plan,
     build_shopping_list_for_recipe,
     merge_shopping_lists,
@@ -284,3 +285,104 @@ def test_plan_shopping_list_skips_plan_item_missing_from_recipe_lookup() -> None
 
     assert len(shopping_list) == 1
     assert shopping_list[0].name == "egg"
+
+
+# --- Meal-prep batch solver: build_shopping_list_for_items (extraction) ----
+
+
+def test_build_shopping_list_for_items_matches_build_shopping_list_for_plan_exactly() -> None:
+    """The extraction (roadmap item: meal-prep batch solver) is a pure
+    refactor -- build_shopping_list_for_plan is now a one-line delegate
+    onto build_shopping_list_for_items. Calling the new function directly
+    with the same (items, recipe_lookup, inventory) as an existing DayPlan
+    must produce byte-identical output to calling the old entrypoint."""
+    r1 = Recipe(
+        recipe_id="r1",
+        title="Chicken Rice Bowl",
+        servings=1,
+        ingredients=[
+            Ingredient(name="chicken breast", amount=200, unit="g"),
+            Ingredient(name="rice", amount=100, unit="g"),
+        ],
+    )
+    r2 = Recipe(
+        recipe_id="r2",
+        title="Rice Broccoli Side",
+        servings=1,
+        ingredients=[
+            Ingredient(name="rice", amount=150, unit="g"),
+            Ingredient(name="broccoli", amount=80, unit="g"),
+        ],
+    )
+    items = [
+        PlanItem(recipe_id="r1", title=r1.title, servings=1),
+        PlanItem(recipe_id="r2", title=r2.title, servings=2),
+    ]
+    plan = _day_plan(items)
+    inventory = [
+        ConfirmedIngredient(name="chicken breast", amount=50, unit="g"),
+        ConfirmedIngredient(name="rice", amount=120, unit="g"),
+    ]
+    recipe_lookup = {"r1": r1, "r2": r2}
+
+    via_plan = build_shopping_list_for_plan(plan, recipe_lookup, inventory)
+    via_items = build_shopping_list_for_items(items, recipe_lookup, inventory)
+
+    assert via_plan == via_items
+
+
+def test_batch_plan_shopping_list_avoids_double_counting_shared_ingredient_across_recipes() -> None:
+    """The B4 double-counting bug this task's shopping-list reuse exists to
+    avoid, replayed against a batch-plan-shaped item list: 2 recipes share
+    an ingredient (tofu), one with container_count (PlanItem.servings) > 1.
+    Chosen so EACH recipe's own scaled need (200 g and 200 g) is
+    INDIVIDUALLY satisfied by the pantry's 300 g on hand -- the exact
+    condition that makes the naive "per-recipe shortfall against the full,
+    undepleted pantry, then merge" composition report a WRONG 0 g total
+    shortfall for both, even though the pantry can only actually cover one
+    of them. build_shopping_list_for_items must combine both recipes' needs
+    into ONE consolidated total FIRST, then reconcile against the pantry
+    exactly once, catching the true combined shortfall."""
+    recipe_a = Recipe(
+        recipe_id="a",
+        title="Tofu Stir Fry",
+        servings=1,
+        ingredients=[Ingredient(name="tofu", amount=200, unit="g")],
+    )
+    recipe_b = Recipe(
+        recipe_id="b",
+        title="Tofu Soup",
+        servings=1,
+        ingredients=[Ingredient(name="tofu", amount=100, unit="g")],
+    )
+    # Batch-plan shape: container counts (PlanItem.servings), one recipe
+    # with container_count > 1 (mirrors RecipeFit.container_count / a
+    # BatchPlan.items entry from app.services.batch_planner). recipe_b's
+    # scaled need is 100 g * (2 containers / 1 recipe.servings) = 200 g --
+    # individually <= the 300 g pantry, same as recipe_a's flat 200 g.
+    batch_items = [
+        PlanItem(recipe_id="a", title=recipe_a.title, servings=1),
+        PlanItem(recipe_id="b", title=recipe_b.title, servings=2),  # container_count = 2
+    ]
+    inventory = [ConfirmedIngredient(name="tofu", amount=300, unit="g")]
+    recipe_lookup = {"a": recipe_a, "b": recipe_b}
+
+    # Hand-verified: combined need = 200 (a) + 100*2 (b) = 400 g; pantry has
+    # 300 g -> true combined shortfall = 100 g, in ONE merged line. A naive
+    # per-recipe-then-merge composition would instead see recipe_a's 200 g
+    # need and recipe_b's 200 g (scaled) need EACH independently satisfied
+    # by the same undepleted 300 g pantry (300 >= 200 for both, checked
+    # separately) and wrongly report 0 g shortfall for both -- exactly the
+    # bug this refactor's reuse avoids.
+    need_tofu = 200 * 1 + 100 * 2
+    expected_shortfall = need_tofu - 300
+    assert expected_shortfall == pytest.approx(100.0)
+
+    shopping_list = build_shopping_list_for_items(batch_items, recipe_lookup, inventory)
+
+    assert len(shopping_list) == 1
+    (item,) = shopping_list
+    assert item.name == "tofu"
+    assert item.amount == pytest.approx(expected_shortfall)
+    assert item.unit == "g"
+    assert item.reason is not None and "Tofu Stir Fry" in item.reason and "Tofu Soup" in item.reason
