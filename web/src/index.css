@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/* "The honest kitchen ledger" design system -- see DESIGN BRIEF in the W1b
+   task spec. Verified (USDA-grounded) vs unverified data get distinct
+   visual grammar everywhere; this file is the single source of truth for
+   the palette/type tokens every component reads from. */
+@theme {
+  --color-porcelain: #f5f6f2;
+  --color-cast-iron: #232821;
+  --color-basil: #3f6c42;
+  --color-basil-dark: #2f5231;
+  --color-chili: #b23a2e;
+  --color-chili-dark: #8c2d23;
+  --color-honey: #d9a441;
+  --color-honey-dark: #a97b2c;
+  --color-sage-line: #d8ded2;
+
+  --font-display: "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif;
+  --font-body: "Instrument Sans Variable", "Instrument Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-porcelain);
+  color: var(--color-cast-iron);
+  font-family: var(--font-body);
+}
+
+/* Visible keyboard focus states everywhere, per the design brief -- never
+   suppressed with outline: none without an equivalent replacement. */
+:focus-visible {
+  outline: 2px solid var(--color-basil);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

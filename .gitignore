@@ -45,3 +45,10 @@ build/
 .DS_Store
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# React SPA (SPA rebuild, roadmap item W1b) -- web/openapi.json and
+# web/src/api/types.gen.ts ARE committed (generated API contract, checked
+# in deliberately -- see scripts/export_openapi.py); only the npm install
+# output and the Vite build output are ignored.
+web/node_modules/
+web/dist/
