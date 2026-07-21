@@ -14,7 +14,7 @@ import "./index.css";
 
 import App from "./App";
 import HomePage from "./pages/HomePage";
-import DayPage from "./pages/DayPage";
+import DayPlanPage from "./pages/DayPlanPage";
 import WeekPage from "./pages/WeekPage";
 import BatchPage from "./pages/BatchPage";
 import MyRecipesPage from "./pages/MyRecipesPage";
@@ -34,7 +34,7 @@ createRoot(rootElement).render(
         <Routes>
           <Route element={<App />}>
             <Route index element={<HomePage />} />
-            <Route path="day" element={<DayPage />} />
+            <Route path="day" element={<DayPlanPage />} />
             <Route path="week" element={<WeekPage />} />
             <Route path="batch" element={<BatchPage />} />
             <Route path="my-recipes" element={<MyRecipesPage />} />

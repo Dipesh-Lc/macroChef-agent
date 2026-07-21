@@ -34,9 +34,25 @@ export type TasteProfile = components["schemas"]["TasteProfile"];
 export type WasteNudge = components["schemas"]["WasteNudge"];
 export type SuggestedRecipe = components["schemas"]["SuggestedRecipe"];
 
+export type DayPlan = components["schemas"]["DayPlan"];
+export type PlanItem = components["schemas"]["PlanItem"];
+export type DayPlanRequest = components["schemas"]["DayPlanRequest"];
+export type DayPlanResponse = components["schemas"]["DayPlanResponse"];
+
+export type ShoppingListRequest = components["schemas"]["ShoppingListRequest"];
+export type ShoppingListResponse = components["schemas"]["ShoppingListResponse"];
+
+export type BatchPlan = components["schemas"]["BatchPlan"];
+export type WeeklyPlan = components["schemas"]["WeeklyPlan"];
+
 export type ShareCreateRequest = components["schemas"]["ShareCreateRequest"];
 export type ShareCreateResponse = components["schemas"]["ShareCreateResponse"];
 export type SharedPlanView = components["schemas"]["SharedPlanView"];
+
+export type PublicRecipe = components["schemas"]["PublicRecipe"];
+export type PublicDayPlan = components["schemas"]["PublicDayPlan"];
+export type PublicBatchPlan = components["schemas"]["PublicBatchPlan"];
+export type PublicWeeklyPlan = components["schemas"]["PublicWeeklyPlan"];
 
 export type UserRecipeLibraryResponse = components["schemas"]["UserRecipeLibraryResponse"];
 

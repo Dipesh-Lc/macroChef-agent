@@ -46,6 +46,20 @@ export class RateLimitError extends ApiError {
   }
 }
 
+/**
+ * A 404 the caller should treat as "doesn't exist" rather than a generic
+ * failure -- e.g. `GET /share/{id}` collapses a missing and a revoked share
+ * into a single 404 (see `app.api.routes_share.get_share_view`'s
+ * docstring), so callers only need to distinguish "not found" from "some
+ * other error", never a finer-grained reason.
+ */
+export class NotFoundError extends ApiError {
+  constructor(message: string, detail?: unknown) {
+    super(404, message, detail);
+    this.name = "NotFoundError";
+  }
+}
+
 // Single-flight, memoized session-bootstrap promise. Reset to `null` only
 // when a 401 forces a re-mint (see requestJson below) or when the mint
 // itself fails, so a transient failure doesn't wedge every future call.
@@ -93,6 +107,11 @@ async function toApiError(response: Response): Promise<ApiError> {
   const detail = await extractDetail(response);
   if (response.status === 429) {
     return new RateLimitError(detail);
+  }
+  if (response.status === 404) {
+    const message =
+      typeof detail === "string" && detail.length > 0 ? detail : "Not found";
+    return new NotFoundError(message, detail);
   }
   const message =
     typeof detail === "string" && detail.length > 0

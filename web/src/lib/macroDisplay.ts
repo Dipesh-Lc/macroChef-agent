@@ -16,11 +16,24 @@
  *   systematic undercount: always rendered with an approx ("~") prefix,
  *   the grounding coverage %, and "likely undercounts" wording.
  */
-import type { FoodMacros, Recipe } from "../api/types";
+import type { FoodMacros, RecipeNutrition } from "../api/types";
 
 export type MacroDisplayState = "grounded" | "partial" | "unknown";
 
-export function macroDisplayState(recipe: Recipe): MacroDisplayState {
+/**
+ * Structural subset of `Recipe` (and its share-safe projection
+ * `PublicRecipe`, which carries the identical `nutrition` field -- see
+ * `app/schemas/share.py`'s `PublicRecipe`) that every function below
+ * actually needs. Widened from a hard `Recipe` parameter so this module
+ * also works for `PublicRecipe` (rendered on the public, unauthenticated
+ * `SharedPlanPage`) without a type assertion -- neither function reads any
+ * other `Recipe` field.
+ */
+export interface RecipeWithNutrition {
+  nutrition?: RecipeNutrition | null;
+}
+
+export function macroDisplayState(recipe: RecipeWithNutrition): MacroDisplayState {
   if (!recipe.nutrition) {
     return "unknown";
   }
@@ -43,7 +56,7 @@ export function macroDisplayState(recipe: Recipe): MacroDisplayState {
  * return `null` so a caller never mistakes an undercounted or implausible
  * total for an authoritative one.
  */
-export function trustedPerServing(recipe: Recipe): FoodMacros | null {
+export function trustedPerServing(recipe: RecipeWithNutrition): FoodMacros | null {
   if (!recipe.nutrition || recipe.nutrition.status !== "grounded") {
     return null;
   }
@@ -75,7 +88,7 @@ export interface MacroDisplay {
   badgeText: string;
 }
 
-export function macroDisplay(recipe: Recipe): MacroDisplay {
+export function macroDisplay(recipe: RecipeWithNutrition): MacroDisplay {
   const state = macroDisplayState(recipe);
   if (state === "unknown" || !recipe.nutrition) {
     return { state, badgeText: "Macros unknown" };
