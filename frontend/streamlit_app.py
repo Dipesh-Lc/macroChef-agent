@@ -9,6 +9,7 @@ from components.inventory_input import render_inventory_input
 from components.profile_form import render_profile_sidebar
 from components.recommendation_cards import render_recommendations
 from components.safety_banner import render_safety_banner
+from components.share_button import render_share_button
 from components.shopping_list import render_shopping_list
 from components.taste_profile import render_taste_profile
 from components.waste_nudge import render_waste_nudges
@@ -497,6 +498,22 @@ with planner_tab:
             # reuses the exact same deterministic templating function.
             render_safety_banner(day_plan_json.get("rejected_recipes", []))
             render_day_plan(day_plan_json)
+
+            # Roadmap "Shareable plan URLs" (Phase 4 item 4) -- shares the
+            # inner `DayPlan` object only (day_plan_json["plan"]), matching
+            # what app.schemas.share.ShareCreateRequest.day_plan expects;
+            # never the whole DayPlanResponse wrapper (its rejected_recipes
+            # is structurally excluded from the public payload, see
+            # app.services.share_service.day_plan_to_public's docstring).
+            day_plan_payload = day_plan_json.get("plan") or {}
+            if day_plan_payload.get("items"):
+                render_share_button(
+                    API_URL,
+                    "day",
+                    day_plan_payload,
+                    key="share_day_plan",
+                    label="Share this day plan",
+                )
 
 with trace_tab:
     render_debug_panel(st.session_state.get("recommendation_response"))

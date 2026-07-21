@@ -283,3 +283,42 @@ def require_safety_tools_rate_limit(
             ),
         )
     return caller_id
+
+
+# ---------------------------------------------------------------------------
+# Share rate limits (app/api/routes_share.py, roadmap item "Shareable plan
+# URLs", Phase 4 item 4) -- POST /share reuses the session-keyed
+# _rate_limit_dependency pattern from the top of this file (it is an
+# authenticated write, same as /library/discover et al); GET /share/{id} is
+# UNAUTHENTICATED by design (the whole point of a public share link), so it
+# reuses the caller-IP-keyed pattern from require_safety_tools_rate_limit
+# above instead, with the same documented, accepted limitation (spoofable
+# behind a shared NAT/proxy; an abuse guard, not a security boundary).
+# ---------------------------------------------------------------------------
+
+require_share_create_rate_limit = _rate_limit_dependency(
+    "share_create",
+    lambda settings: settings.rate_limit_share_create_max,
+    lambda settings: settings.rate_limit_share_create_window_seconds,
+)
+
+
+def require_share_view_rate_limit(
+    request: Request,
+    settings: Settings = Depends(get_app_settings),
+) -> str:
+    """FastAPI dependency gating GET /share/{id} by caller IP -- no session
+    token is required or possible here (see the module note above)."""
+    caller_id = _safety_tools_caller_id(request)
+    limit = settings.rate_limit_share_view_max
+    window_seconds = settings.rate_limit_share_view_window_seconds
+    key = f"share_view:{caller_id}"
+    if not get_rate_limiter().allow(key, limit, window_seconds):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Rate limit exceeded: max {limit} requests per "
+                f"{int(window_seconds)}s per caller. Try again later."
+            ),
+        )
+    return caller_id

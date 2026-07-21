@@ -2,6 +2,7 @@ from html import escape
 from urllib.parse import quote_plus
 
 import streamlit as st
+from components.share_button import render_share_button
 from html_safe import escape_value
 
 from app.schemas.ingredient import scale_ingredients
@@ -200,10 +201,16 @@ def render_recommendations(api_url: str, recommendations: list[dict]) -> None:
             for step_idx, step in enumerate(recipe["instructions"], start=1):
                 st.write(f"{step_idx}. {step}")
 
-        cols = st.columns(3)
+        cols = st.columns(4)
         if cols[0].button("Like", key=f"like_{recipe['recipe_id']}", width="stretch"):
             _post_feedback(api_url, recipe["recipe_id"], "liked")
         if cols[1].button("Dislike", key=f"dislike_{recipe['recipe_id']}", width="stretch"):
             _post_feedback(api_url, recipe["recipe_id"], "disliked")
         if cols[2].button("Cooked this", key=f"cooked_{recipe['recipe_id']}", width="stretch"):
             _post_feedback(api_url, recipe["recipe_id"], "cooked")
+        with cols[3]:
+            # Roadmap "Shareable plan URLs" (Phase 4 item 4) -- shares this
+            # exact recipe dict through the authenticated POST /share ->
+            # server-side allowlist path (app.services.share_service); see
+            # components/share_button.py for the request/response handling.
+            render_share_button(api_url, "recipe", recipe, key=f"share_{recipe['recipe_id']}")

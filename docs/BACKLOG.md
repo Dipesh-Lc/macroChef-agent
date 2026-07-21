@@ -1384,3 +1384,28 @@ to act on:
   `purchase_date` (ISO string) instead of the hardcoded `False`. Not done
   in this task because the task's 4 numbered deliverables did not include
   it and the spec said to keep the frontend piece "minimal."
+
+## Phase 4: Shareable plan URLs (this task)
+
+- **SHARE_DISCLAIMER dedupe.** `app/services/share_service.py` (~lines 54–72)
+  defines `SHARE_DISCLAIMER`, a hand-copied duplicate of the disclaimer text
+  in `frontend/streamlit_app.py` (~lines 358–366, the `st.warning` block with
+  the judge-flagged 16/259 vs. adjudicated-true 0/259 numbers per CLAUDE.md's
+  "Honest scope" rule). The two copies can silently drift the next time the
+  benchmark numbers are updated (one gets edited, the other doesn't).
+  Follow-up: extract to one shared constant/location that both the share
+  service and the Streamlit app import from, so a benchmark-number update
+  only has one place to touch. Not done in this task because the task's scope
+  was the share feature itself, not a refactor of the existing disclaimer.
+- **Share-link revoke/delete.** v1 of the share feature (`app/api/routes_share.py`,
+  `app/services/share_service.py`, `app/data/share_repository.py`) ships
+  create (POST /share) and anonymous view (GET /share/{id}) only — no way for
+  a user to revoke/delete a share link they created. `app/data/models.SharedPlan.owner_user_id`
+  and `.is_active` already exist on the table specifically to make this a
+  no-migration follow-up: a future `DELETE /share/{id}` (or similar) would
+  need to verify the caller's session `user_id` matches `owner_user_id` before
+  setting `is_active = False` (repository's `get_active()` already treats
+  `is_active=False` identically to "never existed", so this requires no new
+  read-path logic, only a new authenticated write endpoint + a repository
+  method). Not built now because the task spec was create + anonymous view
+  only.

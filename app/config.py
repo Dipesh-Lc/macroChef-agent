@@ -145,6 +145,26 @@ class Settings(BaseSettings):
         default=3600.0, alias="RATE_LIMIT_SAFETY_TOOLS_WINDOW_SECONDS"
     )
 
+    # Roadmap item "Shareable plan URLs" (Phase 4 item 4). POST /share is
+    # keyed by the verified session user id (same _rate_limit_dependency
+    # pattern as rate_limit_discover_max/rate_limit_recommend_max above);
+    # GET /share/{id} is unauthenticated by design, so it is keyed by caller
+    # IP instead (same pattern as rate_limit_safety_tools_max) -- see
+    # app.dependencies.require_share_create_rate_limit /
+    # require_share_view_rate_limit.
+    rate_limit_share_create_max: int = Field(default=20, alias="RATE_LIMIT_SHARE_CREATE_MAX")
+    rate_limit_share_create_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_SHARE_CREATE_WINDOW_SECONDS"
+    )
+    # GET /share/{id} is a cheap read (one indexed DB lookup, no LLM, no
+    # corpus scan) but is the single most exposed endpoint in the app (no
+    # session required at all) -- generous per-IP budget, matching the
+    # safety-tools precedent's reasoning.
+    rate_limit_share_view_max: int = Field(default=120, alias="RATE_LIMIT_SHARE_VIEW_MAX")
+    rate_limit_share_view_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_SHARE_VIEW_WINDOW_SECONDS"
+    )
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)

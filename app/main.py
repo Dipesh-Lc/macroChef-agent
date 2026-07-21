@@ -10,6 +10,7 @@ from app.api.routes_inventory import router as inventory_router
 from app.api.routes_library import router as library_router
 from app.api.routes_recommendations import router as recommendations_router
 from app.api.routes_safety_tools import router as safety_tools_router
+from app.api.routes_share import router as share_router
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
 
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback_router)
     app.include_router(day_planner_router)
     app.include_router(safety_tools_router)
+    app.include_router(share_router)
 
     @app.on_event("startup")
     def _startup() -> None:
