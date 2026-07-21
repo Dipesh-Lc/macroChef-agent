@@ -1471,3 +1471,20 @@ to act on:
   plan" action on a waste-nudge suggested recipe) was deferred by that plan,
   not by a discovered constraint — pick this up only if a future roadmap
   item asks for it explicitly.
+
+## SPA rebuild W5 (recipe library page)
+
+- **`POST /library/reindex` is much slower than it should be (~5 min
+  locally against the 3,884-doc demo corpus, observed 2026-07-21).**
+  Suspected cause: `app/services/recipe_indexing_service.py` (or wherever
+  the embedding provider is instantiated) appears to reload the
+  `sentence-transformers/all-MiniLM-L6-v2` model from scratch --
+  including repeated HTTP HEAD calls to the Hugging Face Hub -- on every
+  call rather than caching one instance across the reindex run. The
+  actual embedding batches only accounted for roughly 63s of the ~5min
+  wall-clock. Action: cache/reuse the embedder instance for the duration
+  of a single reindex job; re-measure. Until fixed, the SPA's client-side
+  `reindexLibrary()` timeout is set generously (10 minutes,
+  `web/src/api/endpoints.ts`) to avoid aborting a request that is still
+  going to succeed -- the 2/hour rate limit is what actually bounds
+  abuse, not this client timeout.
