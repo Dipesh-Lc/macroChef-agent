@@ -4,6 +4,9 @@ import {
   DIET_TYPE_OPTIONS,
   MAX_COOK_TIME_OPTIONS,
   SERVINGS_OPTIONS,
+  applyHighFiberPreset,
+  applyHighProteinAndFiberPreset,
+  applyHighProteinPreset,
   loadProfileFormValue,
   saveProfileFormValue,
   toUserProfile,
@@ -65,6 +68,32 @@ export function ProfileForm({
         <p className="text-xs text-cast-iron/50">
           Off by default -- switch a target on to have it count toward recipe scoring.
         </p>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs text-cast-iron/50">Quick presets:</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setValue((current) => applyHighProteinPreset(current))}
+              className="shrink-0 rounded-md border border-sage-line px-3 py-1.5 text-sm font-medium hover:bg-sage-line/40"
+            >
+              High Protein
+            </button>
+            <button
+              type="button"
+              onClick={() => setValue((current) => applyHighFiberPreset(current))}
+              className="shrink-0 rounded-md border border-sage-line px-3 py-1.5 text-sm font-medium hover:bg-sage-line/40"
+            >
+              High Fibre
+            </button>
+            <button
+              type="button"
+              onClick={() => setValue((current) => applyHighProteinAndFiberPreset(current))}
+              className="shrink-0 rounded-md border border-sage-line px-3 py-1.5 text-sm font-medium hover:bg-sage-line/40"
+            >
+              High Protein and Fibre
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <NumberField
             label="Calories"

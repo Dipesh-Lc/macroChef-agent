@@ -67,6 +67,43 @@ export const DEFAULT_PROFILE_FORM_VALUE: ProfileFormValue = {
   servings: 2,
 };
 
+// Macro-target quick presets. These are nutrition GOALS (numeric macro
+// targets), never a diet-type/allergy vocabulary -- they only ever touch
+// `proteinG`/`fiberG` + their `*Enabled` flags, the same fields the
+// Protein/Fiber `NumberField`s already write to, so they flow through the
+// existing `macro_targets` wire shape with zero backend change and cannot
+// affect `dietType`/`allergies` (the two fields the deterministic
+// constraint engine treats as safety-relevant).
+//
+// "High Protein" target: the app's own default protein target is 150g
+// (`DEFAULT_PROFILE_FORM_VALUE.proteinG`). 190g is chosen to read as
+// unambiguously "high" relative to that default -- roughly the ~1g per
+// pound of bodyweight rule of thumb commonly cited for a ~190lb/86kg
+// strength-training adult -- rather than a marginal bump over it.
+export const HIGH_PROTEIN_TARGET_G = 190;
+
+// "High Fibre" target: the app's own default fiber target is 25g
+// (`DEFAULT_PROFILE_FORM_VALUE.fiberG`), which sits at the low end of the
+// USDA adult daily fiber range (25-38g). 40g is chosen to sit clearly
+// above that entire range so it reads as "high" rather than "typical".
+export const HIGH_FIBER_TARGET_G = 40;
+
+// Each apply* helper only ever spreads over the fields it owns, so any
+// other field on `value` (including an already-enabled, user-customized
+// calorie/carb/fat target) is carried through unchanged -- clicking a
+// preset is additive, never destructive to unrelated macro targets.
+export function applyHighProteinPreset(value: ProfileFormValue): ProfileFormValue {
+  return { ...value, proteinG: HIGH_PROTEIN_TARGET_G, proteinEnabled: true };
+}
+
+export function applyHighFiberPreset(value: ProfileFormValue): ProfileFormValue {
+  return { ...value, fiberG: HIGH_FIBER_TARGET_G, fiberEnabled: true };
+}
+
+export function applyHighProteinAndFiberPreset(value: ProfileFormValue): ProfileFormValue {
+  return applyHighFiberPreset(applyHighProteinPreset(value));
+}
+
 export function toUserProfile(value: ProfileFormValue): UserProfile {
   return {
     user_id: "demo_user",
