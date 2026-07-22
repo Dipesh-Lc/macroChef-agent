@@ -10,6 +10,8 @@ import type {
   DayPlanRequest,
   DayPlanResponse,
   DeleteRecipeResponse,
+  DetailedInstructionsRequest,
+  DetailedInstructionsResponse,
   FeedbackRequest,
   InventoryObservation,
   RecipeDiscoveryRequest,
@@ -93,6 +95,31 @@ export async function recommendRecipes(
     json: request,
     sessionRequired: true,
     timeoutMs: RECOMMEND_TIMEOUT_MS,
+  });
+}
+
+// POST /recipes/instructions calls the same LLM provider chain as
+// /recipes/recommend (see app.services.model_provider.
+// generate_detailed_instructions_with_provider_chain) -- same generous
+// budget as RECOMMEND_TIMEOUT_MS.
+const DETAILED_INSTRUCTIONS_TIMEOUT_MS = 90_000;
+
+/** Session-required: bootstraps a session and sends the CSRF header. Also
+ * rate-limited server-side (shares RATE_LIMIT_RECOMMEND_MAX per
+ * RATE_LIMIT_RECOMMEND_WINDOW_SECONDS with /recipes/recommend -- see
+ * app/dependencies.py's require_recommend_rate_limit), so callers should
+ * handle `RateLimitError` the same way `recommendRecipes` callers do. This
+ * is a phrasing/elaboration call only: it never adds/removes/substitutes an
+ * ingredient and never states a nutrition or allergy/diet safety claim (see
+ * the backend prompt in app.services.model_provider for the guardrails). */
+export async function getDetailedInstructions(
+  request: DetailedInstructionsRequest,
+): Promise<DetailedInstructionsResponse> {
+  return apiRequest<DetailedInstructionsResponse>("/recipes/instructions", {
+    method: "POST",
+    json: request,
+    sessionRequired: true,
+    timeoutMs: DETAILED_INSTRUCTIONS_TIMEOUT_MS,
   });
 }
 

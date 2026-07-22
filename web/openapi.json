@@ -175,6 +175,81 @@
         }
       }
     },
+    "/recipes/instructions": {
+      "post": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Get Detailed Instructions",
+        "operationId": "get_detailed_instructions_recipes_instructions_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetailedInstructionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailedInstructionsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/library/discover": {
       "post": {
         "tags": [
@@ -1589,6 +1664,88 @@
           "allergens"
         ],
         "title": "DeriveAllergenLabelsToolResponse"
+      },
+      "DetailedInstructionsRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "servings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Servings"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "DetailedInstructionsRequest",
+        "description": "Request to rewrite an already-shown recipe's terse instructions as\ndetailed, beginner-friendly steps (phrasing/elaboration only -- see\napp.services.model_provider.generate_detailed_instructions_with_provider_chain).\n\n`ingredients` are already-formatted display strings (e.g.\n\"2 cups flour\", the frontend's `ingredientDisplay(ingredient)` output),\nnot structured `{name, amount, unit}` objects -- this is presentation-\nlayer elaboration of a recipe already validated safe elsewhere, never a\nsafety-relevant computation, so the wire contract doesn't need the\nstructured Ingredient model here."
+      },
+      "DetailedInstructionsResponse": {
+        "properties": {
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "generated": {
+            "type": "boolean",
+            "title": "Generated"
+          },
+          "provider_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated"
+        ],
+        "title": "DetailedInstructionsResponse",
+        "description": "`generated=False` means `steps` is just the original `instructions`\nechoed back unmodified (no provider configured, or every provider\nfailed/returned unparseable output) -- never fabricated detailed\ncontent. `provider_note` is set to a short human-readable explanation\nwhenever `generated=False`, so the frontend can tell the user why the\nsteps look unchanged rather than silently presenting them as if they\nwere freshly elaborated."
       },
       "FeedbackRequest": {
         "properties": {

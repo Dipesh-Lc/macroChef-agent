@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { postFeedback } from "../api/endpoints";
+import { useMutation } from "@tanstack/react-query";
+import { ApiError, RateLimitError } from "../api/client";
+import { getDetailedInstructions, postFeedback } from "../api/endpoints";
 import type { MealRecommendation } from "../api/types";
 import { batchTotalsLine } from "../lib/batchTotals";
 import { macroDisplay } from "../lib/macroDisplay";
@@ -8,6 +10,96 @@ import { ingredientDisplay, scaleIngredients } from "../lib/scaling";
 import { NutritionBreakdown } from "./NutritionBreakdown";
 import { SubstitutionNoteCard } from "./SubstitutionNoteCard";
 import { TrustBadge } from "./TrustBadge";
+
+function friendlyErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof RateLimitError) {
+    return error.message;
+  }
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  return fallback;
+}
+
+/**
+ * "Get detailed instructions" -- a NEW, separate control from the existing
+ * "Show/Hide instructions" raw-list toggle above (left untouched). Fires a
+ * TanStack Query mutation against POST /recipes/instructions (see
+ * app.services.model_provider.generate_detailed_instructions_with_provider_chain),
+ * a phrasing/elaboration-only call: it never adds/removes/substitutes an
+ * ingredient and never states a nutrition or allergy/diet safety claim --
+ * see that function's docstring for the deterministic guardrails baked into
+ * the backend prompt. This component makes no safety decision of its own.
+ */
+function DetailedInstructions({
+  title,
+  ingredients,
+  instructions,
+  servings,
+  cuisine,
+}: {
+  title: string;
+  ingredients: string[];
+  instructions: string[];
+  servings?: number | null;
+  cuisine?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const mutation = useMutation({
+    mutationFn: () =>
+      getDetailedInstructions({
+        title,
+        ingredients,
+        instructions,
+        servings: servings ?? null,
+        cuisine: cuisine ?? null,
+      }),
+  });
+
+  function handleClick() {
+    setOpen(true);
+    if (!mutation.isSuccess) {
+      mutation.mutate();
+    }
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={mutation.isPending}
+        className="text-xs font-medium uppercase tracking-wide text-basil underline underline-offset-2 disabled:opacity-50"
+      >
+        {mutation.isPending ? "Generating…" : "Get detailed instructions"}
+      </button>
+
+      {open && mutation.isPending && (
+        <p className="mt-2 text-sm text-cast-iron/60">Writing detailed, step-by-step instructions…</p>
+      )}
+
+      {open && mutation.isError && (
+        <div className="mt-2 rounded-md border border-chili bg-chili/5 px-3 py-2 text-sm text-chili">
+          {friendlyErrorMessage(mutation.error, "Could not generate detailed instructions. Please try again.")}
+        </div>
+      )}
+
+      {open && mutation.isSuccess && (
+        <div className="mt-2 flex flex-col gap-1 rounded-md border border-basil/30 bg-basil/5 p-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-basil">Detailed steps</span>
+          {!mutation.data.generated && mutation.data.provider_note && (
+            <p className="text-xs italic text-cast-iron/60">{mutation.data.provider_note}</p>
+          )}
+          <ol className="mt-1 flex list-inside list-decimal flex-col gap-1 text-sm text-cast-iron">
+            {(mutation.data.steps ?? []).map((step, index) => (
+              <li key={index}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function IngredientChips({ items, variant }: { items: string[]; variant: "used" | "missing" }) {
   if (items.length === 0) {
@@ -236,6 +328,14 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
               </ol>
             )}
           </div>
+
+          <DetailedInstructions
+            title={recipe.title}
+            ingredients={(recipe.ingredients ?? []).map((ingredient) => ingredientDisplay(ingredient))}
+            instructions={recipe.instructions ?? []}
+            servings={recipe.servings}
+            cuisine={recipe.cuisine}
+          />
 
           <FeedbackButtons recipeId={recipe.recipe_id} />
         </div>

@@ -28,6 +28,9 @@ export type RecipeNutrition = components["schemas"]["RecipeNutrition"];
 export type RecommendationRequest = components["schemas"]["RecommendationRequest"];
 export type RecommendationResponse = components["schemas"]["RecommendationResponse"];
 
+export type DetailedInstructionsRequest = components["schemas"]["DetailedInstructionsRequest"];
+export type DetailedInstructionsResponse = components["schemas"]["DetailedInstructionsResponse"];
+
 export type FeedbackRequest = components["schemas"]["FeedbackRequest"];
 
 export type TasteProfile = components["schemas"]["TasteProfile"];
