@@ -68,7 +68,16 @@ def test_assemble_week_calls_assemble_day_plan_exactly_days_times(monkeypatch: p
 
     call_count = 0
 
-    def _fake_assemble_day_plan(candidates, target, *, meals_range, max_per_recipe, tolerance):
+    def _fake_assemble_day_plan(
+        candidates,
+        target,
+        *,
+        meals_range,
+        max_per_recipe,
+        tolerance,
+        avoid_recipe_ids=frozenset(),
+        inventory=None,
+    ):
         nonlocal call_count
         call_count += 1
         return DayPlan(
@@ -253,3 +262,107 @@ def test_assemble_week_rejects_zero_or_negative_days() -> None:
     target = MacroTargets(calories=300, protein_g=20)
     with pytest.raises(ValueError):
         assemble_week([], target, days=0)
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-22 pantry-coverage + day-to-day variety tiebreak follow-up (see
+# app.services.weekly_planner's and app.services.day_planner's module
+# docstrings for the shipped design).
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_week_varies_day_to_day_when_macro_tied_combos_exist() -> None:
+    """Two recipes with IDENTICAL macros -> every combo at K=2 (AA/AB/BB)
+    ties exactly on the primary tiers. Day 1 has no prior-day reuse to
+    avoid, so it picks the first-enumerated combo (AA); day 2's cumulative
+    avoid_recipe_ids={"a"} makes BB strictly preferred over AA/AB on the
+    variety tiebreak -- day 2 must differ from day 1."""
+    a = _trusted_recipe("a", calories=150, protein_g=10)
+    b = _trusted_recipe("b", calories=150, protein_g=10)
+    target = MacroTargets(calories=300, protein_g=20)
+
+    plan = assemble_week([a, b], target, days=2)
+
+    day1_selection = {item.recipe_id: item.servings for item in plan.days[0].items}
+    day2_selection = {item.recipe_id: item.servings for item in plan.days[1].items}
+
+    assert day1_selection == {"a": 2}
+    assert day2_selection == {"b": 2}
+    assert day1_selection != day2_selection
+
+
+def test_assemble_week_falls_back_to_repeating_when_only_one_combo_fits() -> None:
+    """Only one within-tolerance combo exists across the whole pool (using
+    "b" at all is always a bad fit) -- every day must still gracefully
+    repeat that single feasible combo, no crash, no infeasible/empty day,
+    even once the variety tiebreak starts penalizing the repeat."""
+    a = _trusted_recipe("a", calories=150, protein_g=10)
+    b = _trusted_recipe("b", calories=900, protein_g=5)
+    target = MacroTargets(calories=300, protein_g=20)
+
+    plan = assemble_week([a, b], target, days=3)
+
+    assert len(plan.days) == 3
+    for day in plan.days:
+        assert day.within_tolerance is True
+        assert day.items == [PlanItem(recipe_id="a", title="a", servings=2)]
+
+
+def test_assemble_week_saturation_avoid_recipe_ids_covering_entire_pool_still_valid() -> None:
+    """A tiny 1-recipe pool means every day's avoid_recipe_ids is already
+    saturated with that recipe from day 2 onward -- assemble_week must
+    still return a valid best-macro-fit plan every day (graceful repeat),
+    never an error or empty day."""
+    only = _trusted_recipe("only", calories=150, protein_g=10)
+    target = MacroTargets(calories=300, protein_g=20)
+
+    plan = assemble_week([only], target, days=4)
+
+    assert len(plan.days) == 4
+    for day in plan.days:
+        assert day.within_tolerance is True
+        assert day.items == [PlanItem(recipe_id="only", title="only", servings=2)]
+
+
+def test_assemble_week_determinism_identical_inputs_produce_identical_result() -> None:
+    a = _trusted_recipe(
+        "a", calories=150, protein_g=10, ingredients=[Ingredient(name="oats", amount=50, unit="g")]
+    )
+    b = _trusted_recipe(
+        "b", calories=150, protein_g=10, ingredients=[Ingredient(name="quinoa", amount=50, unit="g")]
+    )
+    target = MacroTargets(calories=300, protein_g=20)
+    inventory = [ConfirmedIngredient(name="quinoa", amount=50, unit="g")]
+
+    plan1 = assemble_week([a, b], target, days=3, inventory=inventory)
+    plan2 = assemble_week([a, b], target, days=3, inventory=inventory)
+
+    assert plan1 == plan2
+
+
+def test_assemble_week_max_days_completes_within_reasonable_time() -> None:
+    """Timing smoke test (2026-07-22 spec, mandatory): pantry-coverage math
+    now runs per-candidate-combo during enumeration, a materially higher
+    call frequency than before assemble_day_plan's pantry tiebreak
+    existed -- this is an explicit pass/fail guard, not silently ignored.
+    `days=14` is WeeklyPlanRequest's own max (app/schemas/weekly_plan.py)."""
+    import time
+
+    recipes = [
+        _trusted_recipe(
+            f"r{i}",
+            calories=200 + i * 10,
+            protein_g=15 + i,
+            ingredients=[Ingredient(name=f"ingredient{i}", amount=100, unit="g")],
+        )
+        for i in range(15)
+    ]
+    inventory = [ConfirmedIngredient(name=f"ingredient{i}", amount=50, unit="g") for i in range(15)]
+    target = MacroTargets(calories=600, protein_g=45)
+
+    start = time.perf_counter()
+    plan = assemble_week(recipes, target, days=14, max_per_recipe=4, inventory=inventory)
+    elapsed = time.perf_counter() - start
+
+    assert len(plan.days) == 14
+    assert elapsed < 10.0, f"assemble_week(days=14) took {elapsed:.2f}s -- investigate perf regression"

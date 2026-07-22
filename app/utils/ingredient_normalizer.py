@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 
 from app.utils.quantity_parser import KNOWN_UNITS
 
@@ -151,8 +152,22 @@ def cleanup_ingredient_name(name: str) -> str:
     return cleaned
 
 
+@lru_cache(maxsize=4096)
 def normalize_ingredient(name: str) -> str:
-    """Normalize free-form ingredient names for matching and scoring."""
+    """Normalize free-form ingredient names for matching and scoring.
+
+    `@lru_cache`d (2026-07-22 pantry-tiebreak follow-up): pure function of
+    `name` alone (`SYNONYMS`/`DESCRIPTORS`/`CANONICAL_INGREDIENTS` are
+    module-level constants, never mutated after import), so memoizing is a
+    pure performance change with zero behavior difference -- added because
+    `app.services.day_planner`'s new pantry-coverage tiebreak calls this
+    (via `ingredient_matches`/`pantry_coverage_fraction`) at a materially
+    higher frequency than before (once per candidate combo during
+    enumeration, not once per request), and the underlying
+    `fuzzy_normalize_ingredient` rapidfuzz lookup is expensive enough that
+    the same small set of ingredient/pantry-item names being re-normalized
+    thousands of times per request was the dominant cost (see
+    `tests/test_weekly_planner.py`'s mandatory timing smoke test)."""
 
     if not name:
         return ""

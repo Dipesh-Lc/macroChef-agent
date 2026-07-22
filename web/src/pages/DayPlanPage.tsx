@@ -124,6 +124,7 @@ export default function DayPlanPage() {
       user_profile: profile,
       meals,
       max_per_recipe: maxPerRecipe,
+      inventory: pantryState.confirmedInventory,
     };
     shoppingListMutation.reset();
     planMutation.mutate(request);

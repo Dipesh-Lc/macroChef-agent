@@ -66,6 +66,19 @@ class DayPlan(BaseModel):
 
     within_tolerance: bool
 
+    # Pantry-coverage tiebreak metric (2026-07-22 follow-up --
+    # app.services.day_planner's module docstring). REPORTED, NEVER
+    # OPTIMIZED OR GATED: it only ever breaks an EXACT tie between two
+    # plans whose macro-fit tiers (within_tolerance, calories_relative_
+    # error, protein_relative_error) already match -- it never influences
+    # which plan wins when those tiers differ, and it never gates
+    # within_tolerance. `None` when no inventory was supplied at all
+    # (nothing to report); a real fraction in [0, 1] once inventory is
+    # supplied, computed by
+    # app.services.procurement_service.pantry_coverage_fraction for this
+    # exact combo of selected recipes.
+    pantry_coverage: float | None = Field(default=None, ge=0, le=1)
+
 
 class DayPlanRequest(BaseModel):
     """Wire contract for POST /plan/day. `user_profile.macro_targets` is
@@ -81,6 +94,14 @@ class DayPlanRequest(BaseModel):
     app.api.routes_day_planner.plan_day) -- letting a client hand in a
     pre-filtered candidate list would open a second, client-controlled path
     around that mandatory safety filter.
+
+    `inventory` (2026-07-22 pantry-tiebreak follow-up) mirrors
+    `WeeklyPlanRequest.inventory` in shape and purpose: it feeds
+    `DayPlan.pantry_coverage`'s STRICT sub-macro tiebreak
+    (`app.services.day_planner`'s module docstring) -- it never influences
+    which recipes are safety-cleared or which macro target is used.
+    Defaults to empty (no pantry reconciliation, pantry_coverage stays
+    `None`) when omitted, a no-op preserving pre-existing behavior.
     """
 
     user_profile: UserProfile
@@ -91,6 +112,7 @@ class DayPlanRequest(BaseModel):
     # value is a fixed-K day plan.
     meals: int | None = Field(default=None, ge=0, le=8)
     max_per_recipe: int = Field(default=2, ge=1, le=4)
+    inventory: list[ConfirmedIngredient] = Field(default_factory=list)
 
 
 class DayPlanResponse(BaseModel):

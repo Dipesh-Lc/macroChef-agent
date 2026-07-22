@@ -689,7 +689,7 @@
           "day-planner"
         ],
         "summary": "Plan Day",
-        "description": "B3: macro-targeted day-plan assembly.\n\nSAFETY (mandatory, verifiable): every recipe in the corpus is run\nthrough `app.services.constraint_engine.validate_recipe` -- the exact\nsame deterministic check `app.graph.nodes.safety_filter_node` uses\n(app/graph/nodes.py:172-200) -- BEFORE `app.services.day_planner` ever\nsees it. Only the survivors (`safe_candidates`) are passed into\n`assemble_plan`/`assemble_day_plan`; rejected recipes are reported back\n(mirroring `safety_filter_node`'s own rejected_recipes bookkeeping) but\nnever reach the planner. This is the sole point in this file where\nsafety is decided, and it happens purely in deterministic code -- no LLM\ncall anywhere on this path.",
+        "description": "B3: macro-targeted day-plan assembly.\n\nSAFETY (mandatory, verifiable): every recipe in the corpus is run\nthrough `app.services.constraint_engine.validate_recipe` -- the exact\nsame deterministic check `app.graph.nodes.safety_filter_node` uses\n(app/graph/nodes.py:172-200) -- BEFORE `app.services.day_planner` ever\nsees it. Only the survivors (`safe_candidates`) are passed into\n`assemble_plan`/`assemble_day_plan`; rejected recipes are reported back\n(mirroring `safety_filter_node`'s own rejected_recipes bookkeeping) but\nnever reach the planner. This is the sole point in this file where\nsafety is decided, and it happens purely in deterministic code -- no LLM\ncall anywhere on this path.\n\n`request.inventory` (2026-07-22 pantry-tiebreak follow-up) is forwarded\nto `assemble_plan`/`assemble_day_plan` as `inventory=` -- this endpoint\nonly ever exercises the pantry-coverage tiebreak (variety is a\nstructural no-op here; there is no \"prior day\" for a single day-plan\nrequest -- see `app.services.day_planner`'s module docstring). It\nnever changes which recipes are safety-cleared above, and never\nweakens the macro-fit primary sort.",
         "operationId": "plan_day_plan_day_post",
         "requestBody": {
           "content": {
@@ -1546,6 +1546,19 @@
           "within_tolerance": {
             "type": "boolean",
             "title": "Within Tolerance"
+          },
+          "pantry_coverage": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pantry Coverage"
           }
         },
         "type": "object",
@@ -1590,6 +1603,13 @@
             "minimum": 1.0,
             "title": "Max Per Recipe",
             "default": 2
+          },
+          "inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "title": "Inventory"
           }
         },
         "type": "object",
@@ -1597,7 +1617,7 @@
           "user_profile"
         ],
         "title": "DayPlanRequest",
-        "description": "Wire contract for POST /plan/day. `user_profile.macro_targets` is\nused directly as the assembly target -- for \"remaining macros\" mode the\ncaller computes the remainder client-side (target minus what's already\nbeen eaten today) and puts it here; this endpoint holds no eaten-today\nstate itself (see app.services.day_planner.assemble_remaining_meal's\ndocstring).\n\nNo `candidate_recipe_ids` field, deliberately: the endpoint always\nstarts from the full corpus and applies\napp.services.constraint_engine.validate_recipe itself (see\napp.api.routes_day_planner.plan_day) -- letting a client hand in a\npre-filtered candidate list would open a second, client-controlled path\naround that mandatory safety filter."
+        "description": "Wire contract for POST /plan/day. `user_profile.macro_targets` is\nused directly as the assembly target -- for \"remaining macros\" mode the\ncaller computes the remainder client-side (target minus what's already\nbeen eaten today) and puts it here; this endpoint holds no eaten-today\nstate itself (see app.services.day_planner.assemble_remaining_meal's\ndocstring).\n\nNo `candidate_recipe_ids` field, deliberately: the endpoint always\nstarts from the full corpus and applies\napp.services.constraint_engine.validate_recipe itself (see\napp.api.routes_day_planner.plan_day) -- letting a client hand in a\npre-filtered candidate list would open a second, client-controlled path\naround that mandatory safety filter.\n\n`inventory` (2026-07-22 pantry-tiebreak follow-up) mirrors\n`WeeklyPlanRequest.inventory` in shape and purpose: it feeds\n`DayPlan.pantry_coverage`'s STRICT sub-macro tiebreak\n(`app.services.day_planner`'s module docstring) -- it never influences\nwhich recipes are safety-cleared or which macro target is used.\nDefaults to empty (no pantry reconciliation, pantry_coverage stays\n`None`) when omitted, a no-op preserving pre-existing behavior."
       },
       "DayPlanResponse": {
         "properties": {
