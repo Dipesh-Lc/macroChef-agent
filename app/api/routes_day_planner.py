@@ -33,6 +33,14 @@ def plan_day(request: DayPlanRequest) -> DayPlanResponse:
     never reach the planner. This is the sole point in this file where
     safety is decided, and it happens purely in deterministic code -- no LLM
     call anywhere on this path.
+
+    `request.inventory` (2026-07-22 pantry-tiebreak follow-up) is forwarded
+    to `assemble_plan`/`assemble_day_plan` as `inventory=` -- this endpoint
+    only ever exercises the pantry-coverage tiebreak (variety is a
+    structural no-op here; there is no "prior day" for a single day-plan
+    request -- see `app.services.day_planner`'s module docstring). It
+    never changes which recipes are safety-cleared above, and never
+    weakens the macro-fit primary sort.
     """
     all_recipes = load_corpus()
     safe_candidates = []
@@ -64,10 +72,19 @@ def plan_day(request: DayPlanRequest) -> DayPlanResponse:
     try:
         if request.meals is not None:
             plan = assemble_plan(
-                safe_candidates, target, request.meals, max_per_recipe=request.max_per_recipe
+                safe_candidates,
+                target,
+                request.meals,
+                max_per_recipe=request.max_per_recipe,
+                inventory=request.inventory,
             )
         else:
-            plan = assemble_day_plan(safe_candidates, target, max_per_recipe=request.max_per_recipe)
+            plan = assemble_day_plan(
+                safe_candidates,
+                target,
+                max_per_recipe=request.max_per_recipe,
+                inventory=request.inventory,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

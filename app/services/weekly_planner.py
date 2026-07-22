@@ -58,12 +58,30 @@ influences which recipes are selected (selection is `assemble_day_plan`'s
 macro-only decision, untouched) and it never gates `within_tolerance` on
 any `DayPlan`. Never describe this metric as "maximized" or "optimized"
 anywhere (code comments, docstrings, API docs, UI copy).
+
+PANTRY-COVERAGE AND DAY-TO-DAY VARIETY AS TIEBREAKS (2026-07-22 follow-up,
+built ahead of the trigger below). `assemble_week` now threads a
+cumulative `avoid_recipe_ids` set (every recipe_id used on any prior day
+this week) and `inventory` into each day's `assemble_day_plan` call, so
+that day's own `_plan_sort_key` (see `app.services.day_planner`'s module
+docstring) can use pantry coverage and repeat-avoidance as STRICT
+sub-macro tiebreakers. These are NEVER objectives -- never described as
+"optimized", "maximized", or "solved" anywhere -- and macro fit
+(`within_tolerance`, then calorie error, then protein error) remains the
+unweakened, unchanged primary sort key: nothing here can let a
+worse-macro-fit day win over a better one. This was originally scoped as
+a ~200-trusted-recipe revisit trigger (below, and in docs/BACKLOG.md) --
+the project human explicitly asked to build it now, ahead of that
+trigger, on 2026-07-22, accepting that at today's ~15-recipe pool an
+exact tie on both macro-error tiers for either tiebreak to fire on is
+rare-to-occasional and will often change nothing observable. The original
+trigger rationale below is left intact; this is a documented override of
+it, not a replacement for it.
 """
 
 from __future__ import annotations
 
 from app.schemas.day_plan import DayPlan, PlanItem
-from app.schemas.ingredient import scale_ingredients
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets
@@ -75,8 +93,7 @@ from app.services.day_planner import (
     assemble_day_plan,
 )
 from app.services.nutrition_view import trusted_per_serving
-from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
-from app.utils.unit_converter import to_grams
+from app.services.procurement_service import pantry_coverage_fraction
 
 
 def _trusted_pool_size(candidates: list[Recipe]) -> int:
@@ -101,66 +118,6 @@ def _trusted_pool_size(candidates: list[Recipe]) -> int:
     return count
 
 
-def _aggregate_grams_needed(
-    plan_items: list[PlanItem], recipe_lookup: dict[str, Recipe]
-) -> dict[str, float | None]:
-    """Combine every `PlanItem`'s scaled ingredient need into ONE grams
-    total per normalized ingredient name across the WHOLE week, using the
-    same `app.utils.unit_converter.to_grams` arithmetic
-    `app.services.procurement_service.build_shopping_list_for_items` uses
-    for its own combine-then-reconcile-once aggregation. Reimplemented here
-    (not imported -- that function's internals are private to
-    `procurement_service`) purely to compute the `pantry_utilization`
-    *metric*, which is display-only and never feeds back into
-    `procurement_service`'s own shopping-list build (that build stays a
-    single separate call at the API layer -- see
-    `app.api.routes_day_planner.plan_week`).
-
-    A `None` value for a key means at least one contributor's need could
-    not be resolved to grams -- the combined total for that ingredient is
-    therefore unknown and must be excluded from the utilization calc
-    (never silently treated as 0)."""
-    grams_by_name: dict[str, float | None] = {}
-    for plan_item in plan_items:
-        recipe = recipe_lookup.get(plan_item.recipe_id)
-        if recipe is None:
-            continue
-        factor = plan_item.servings / (recipe.servings or 1)
-        for ingredient in scale_ingredients(recipe.ingredients, factor):
-            key = normalize_ingredient(ingredient.name)
-            if not key:
-                continue
-            grams = to_grams(ingredient.amount, ingredient.unit, name=ingredient.name)
-            if key not in grams_by_name:
-                grams_by_name[key] = 0.0
-            if grams is None or grams_by_name[key] is None:
-                grams_by_name[key] = None
-            else:
-                grams_by_name[key] += grams
-    return grams_by_name
-
-
-def _pantry_have_grams(name: str, inventory: list[ConfirmedIngredient]) -> float | None:
-    """Total grams on hand across pantry items matching `name` (already a
-    normalized ingredient key), or `None` if any matched item's quantity
-    can't be resolved to grams (unknown unit/density -- an incomparable
-    contribution poisons the whole total, mirroring
-    `procurement_service._available_grams`'s own all-or-nothing rule for
-    the same reason: a partially-unknown total is not a trustworthy
-    number). No matching pantry item at all is NOT the same as
-    incomparable -- it is a comparable "0 g on hand"."""
-    matches = [item for item in inventory if ingredient_matches(name, item.name)]
-    if not matches:
-        return 0.0
-    total = 0.0
-    for item in matches:
-        grams = to_grams(item.amount, item.unit, name=item.name or name)
-        if grams is None:
-            return None
-        total += grams
-    return total
-
-
 def compute_pantry_utilization(
     plan_items: list[PlanItem],
     recipe_lookup: dict[str, Recipe],
@@ -182,24 +139,25 @@ def compute_pantry_utilization(
     comparable need at all (e.g. an empty plan, or every ingredient
     incomparable) -- never a fabricated "fully covered" claim on nothing.
 
-    REPORTED FOR VISIBILITY ONLY -- see this module's docstring: never used
-    to select, gate, or rank recipes."""
-    grams_needed = _aggregate_grams_needed(plan_items, recipe_lookup)
-    total_needed = 0.0
-    total_covered = 0.0
-    uncompared = 0
-    for name, need in grams_needed.items():
-        if need is None:
-            uncompared += 1
-            continue
-        have = _pantry_have_grams(name, inventory)
-        if have is None:
-            uncompared += 1
-            continue
-        total_needed += need
-        total_covered += min(need, have)
-    utilization = total_covered / total_needed if total_needed > 0 else 0.0
-    return utilization, uncompared
+    REPORTED, NEVER OPTIMIZED OR GATED -- see this module's docstring:
+    never used to select, gate, or rank recipes.
+
+    THIN DELEGATE (pantry-tiebreak follow-up, 2026-07-22): the actual
+    grams-aggregation and coverage math now lives in
+    `app.services.procurement_service.pantry_coverage_fraction`, extracted
+    so `app.services.day_planner`'s pantry tiebreak and this reported-only
+    metric share exactly one implementation. This function just adapts
+    `plan_items`/`recipe_lookup` into the `(Recipe, serving_count)` pairs
+    that function expects and forwards the call -- a byte-identical-output
+    regression test against the pre-extraction implementation lives in
+    tests/test_procurement_service.py.
+    """
+    recipe_counts = [
+        (recipe_lookup[plan_item.recipe_id], plan_item.servings)
+        for plan_item in plan_items
+        if plan_item.recipe_id in recipe_lookup
+    ]
+    return pantry_coverage_fraction(recipe_counts, inventory)
 
 
 def assemble_week(
@@ -218,6 +176,23 @@ def assemble_week(
     `candidates`/`target`/`meals_range`/`max_per_recipe`/`tolerance` every
     time (day_planner.py is never modified or reimplemented), and collects
     the results into `WeeklyPlan.days`.
+
+    PANTRY + VARIETY TIEBREAKS (built ahead of the pre-registered
+    ~200-trusted-recipe revisit trigger below, per the project human's
+    explicit request on 2026-07-22 -- see this module's docstring for the
+    full framing): each day's `assemble_day_plan` call is passed
+    `avoid_recipe_ids=frozenset(used)`, where `used` accumulates every
+    recipe_id selected on every PRIOR day (cumulative across the whole
+    week, not a rolling window) -- so day 2 onward can prefer a
+    different, equally-macro-fit combo over one it already used, and
+    `inventory` (unchanged from before), so each day's `assemble_day_plan`
+    call can also use pantry coverage as a tiebreak. Both are STRICT
+    sub-macro tiebreakers inside `assemble_day_plan`/`assemble_plan`'s own
+    `_plan_sort_key` -- macro fit remains the unweakened primary sort key;
+    see `app.services.day_planner`'s module docstring for the exact tier
+    ordering. At today's ~15-recipe trusted pool, an exact tie on both
+    macro-error tiers for either tiebreak to ever fire on is
+    rare-to-occasional -- in practice they will often change nothing.
 
     Also computes the reported-only `pantry_utilization` /
     `uncompared_ingredient_count` metric (`compute_pantry_utilization`)
@@ -241,16 +216,20 @@ def assemble_week(
     if days < 1:
         raise ValueError("days must be >= 1")
 
-    day_plans: list[DayPlan] = [
-        assemble_day_plan(
+    used: set[str] = set()
+    day_plans: list[DayPlan] = []
+    for _ in range(days):
+        day_plan = assemble_day_plan(
             candidates,
             target,
             meals_range=meals_range,
             max_per_recipe=max_per_recipe,
             tolerance=tolerance,
+            avoid_recipe_ids=frozenset(used),
+            inventory=inventory,
         )
-        for _ in range(days)
-    ]
+        day_plans.append(day_plan)
+        used.update(item.recipe_id for item in day_plan.items)
 
     recipe_lookup = {recipe.recipe_id: recipe for recipe in candidates}
     pooled_items: list[PlanItem] = [item for day_plan in day_plans for item in day_plan.items]

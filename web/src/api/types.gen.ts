@@ -214,6 +214,14 @@ export interface paths {
          *     never reach the planner. This is the sole point in this file where
          *     safety is decided, and it happens purely in deterministic code -- no LLM
          *     call anywhere on this path.
+         *
+         *     `request.inventory` (2026-07-22 pantry-tiebreak follow-up) is forwarded
+         *     to `assemble_plan`/`assemble_day_plan` as `inventory=` -- this endpoint
+         *     only ever exercises the pantry-coverage tiebreak (variety is a
+         *     structural no-op here; there is no "prior day" for a single day-plan
+         *     request -- see `app.services.day_planner`'s module docstring). It
+         *     never changes which recipes are safety-cleared above, and never
+         *     weakens the macro-fit primary sort.
          */
         post: operations["plan_day_plan_day_post"];
         delete?: never;
@@ -724,6 +732,8 @@ export interface components {
             fiber_relative_error?: number | null;
             /** Within Tolerance */
             within_tolerance: boolean;
+            /** Pantry Coverage */
+            pantry_coverage?: number | null;
         };
         /**
          * DayPlanRequest
@@ -740,6 +750,14 @@ export interface components {
          *     app.api.routes_day_planner.plan_day) -- letting a client hand in a
          *     pre-filtered candidate list would open a second, client-controlled path
          *     around that mandatory safety filter.
+         *
+         *     `inventory` (2026-07-22 pantry-tiebreak follow-up) mirrors
+         *     `WeeklyPlanRequest.inventory` in shape and purpose: it feeds
+         *     `DayPlan.pantry_coverage`'s STRICT sub-macro tiebreak
+         *     (`app.services.day_planner`'s module docstring) -- it never influences
+         *     which recipes are safety-cleared or which macro target is used.
+         *     Defaults to empty (no pantry reconciliation, pantry_coverage stays
+         *     `None`) when omitted, a no-op preserving pre-existing behavior.
          */
         DayPlanRequest: {
             user_profile: components["schemas"]["UserProfile"];
@@ -750,6 +768,8 @@ export interface components {
              * @default 2
              */
             max_per_recipe: number;
+            /** Inventory */
+            inventory?: components["schemas"]["ConfirmedIngredient"][];
         };
         /** DayPlanResponse */
         DayPlanResponse: {

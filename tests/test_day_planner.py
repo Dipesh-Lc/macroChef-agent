@@ -16,6 +16,10 @@ Covers the acceptance criteria from the B3 task spec:
   DayPlan.
 """
 
+import pytest
+
+from app.schemas.ingredient import Ingredient
+from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.nutrition import FoodMacros, GroundingStatus, RecipeNutrition
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets
@@ -53,7 +57,16 @@ def _recipe(recipe_id: str, nutrition: RecipeNutrition | None, **overrides) -> R
     return Recipe(**fields)
 
 
-def _trusted(recipe_id: str, *, calories: float, protein_g: float, carbs_g=0, fat_g=0, fiber_g=0) -> Recipe:
+def _trusted(
+    recipe_id: str,
+    *,
+    calories: float,
+    protein_g: float,
+    carbs_g=0,
+    fat_g=0,
+    fiber_g=0,
+    ingredients: list[Ingredient] | None = None,
+) -> Recipe:
     return _recipe(
         recipe_id,
         _nutrition(
@@ -64,6 +77,7 @@ def _trusted(recipe_id: str, *, calories: float, protein_g: float, carbs_g=0, fa
             fat_g=fat_g,
             fiber_g=fiber_g,
         ),
+        **({"ingredients": ingredients} if ingredients is not None else {}),
     )
 
 
@@ -262,3 +276,175 @@ def test_empty_trusted_pool_returns_explicit_cannot_assemble_result() -> None:
     assert plan.trusted_pool_size == 0
     assert plan.items == []
     assert plan.within_tolerance is False
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-22 pantry-coverage + day-to-day variety tiebreak follow-up (see
+# app.services.day_planner's module docstring for the shipped design: two
+# additional _plan_sort_key tiers, STRICTLY below the three macro-fit tiers
+# above, which are otherwise completely unchanged).
+# ---------------------------------------------------------------------------
+
+
+def test_avoid_recipe_ids_and_inventory_omitted_is_byte_identical_to_prior_behavior() -> None:
+    """Mandatory regression guard: assemble_plan / assemble_day_plan /
+    assemble_remaining_meal's pre-existing behavior is unchanged when the
+    two new kwargs are omitted -- both must be a pure, zero-behavior-change
+    no-op by default (existing scenario reused verbatim from
+    test_finds_true_optimum_on_known_feasible_target)."""
+    a = _trusted("a", calories=300, protein_g=20)
+    b = _trusted("b", calories=500, protein_g=40)
+    c = _trusted("c", calories=900, protein_g=10)
+    target = MacroTargets(calories=800, protein_g=60)
+
+    plan = assemble_plan([a, b, c], target, meals=2, max_per_recipe=2)
+    assert plan.within_tolerance is True
+    assert plan.calories_relative_error == 0.0
+    assert plan.protein_relative_error == 0.0
+    assert {item.recipe_id: item.servings for item in plan.items} == {"a": 1, "b": 1}
+    assert plan.pantry_coverage is None  # no inventory supplied -- nothing to report
+
+    day_plan = assemble_day_plan([a], MacroTargets(calories=900, protein_g=60), meals_range=(2, 3, 4), max_per_recipe=3)
+    assert day_plan.within_tolerance is True
+    assert day_plan.meals_planned == 3
+    assert day_plan.pantry_coverage is None
+
+    remaining = assemble_remaining_meal([a, b], MacroTargets(calories=480, protein_g=38), max_per_recipe=2)
+    direct = assemble_plan([a, b], MacroTargets(calories=480, protein_g=38), meals=1, max_per_recipe=2)
+    assert remaining == direct
+    assert remaining.pantry_coverage is None
+
+
+def test_macro_fit_beats_perfect_pantry_coverage_and_zero_reuse() -> None:
+    """THE SINGLE MOST CORRECTNESS-CRITICAL TEST (2026-07-22 spec): plan A
+    has a strictly better macro fit than plan B, but B has perfect pantry
+    coverage AND zero prior-day reuse -- A must still win. This is exactly
+    the test that would catch a sort-key-tuple-position bug letting a soft
+    tier override the hard macro-fit tiers."""
+    a = _trusted(
+        "a",
+        calories=300,
+        protein_g=20,
+        ingredients=[Ingredient(name="chicken", amount=100, unit="g")],
+    )
+    b = _trusted(
+        "b",
+        calories=315,
+        protein_g=21,
+        ingredients=[Ingredient(name="rice", amount=100, unit="g")],
+    )
+    target = MacroTargets(calories=300, protein_g=20)
+
+    # A: 0% error on both macros. B: 5% calorie error, 5% protein error --
+    # both within tolerance (10%/15%), but A is strictly closer.
+    assert abs(300 - 300) / 300 == 0.0
+    assert abs(315 - 300) / 300 == pytest.approx(0.05)
+    assert abs(21 - 20) / 20 == pytest.approx(0.05)
+
+    # B's ingredient is fully covered by the pantry; A's isn't in the
+    # pantry at all -- maximal incentive for B on the pantry tiebreak.
+    inventory = [ConfirmedIngredient(name="rice", amount=100, unit="g")]
+    # A was already used on a prior day (worst possible on the variety
+    # tiebreak); B is fresh -- maximal incentive for B there too.
+    avoid_recipe_ids = frozenset({"a"})
+
+    plan = assemble_plan(
+        [a, b],
+        target,
+        meals=1,
+        max_per_recipe=2,
+        avoid_recipe_ids=avoid_recipe_ids,
+        inventory=inventory,
+    )
+
+    assert plan.within_tolerance is True
+    selected_ids = {item.recipe_id for item in plan.items}
+    assert selected_ids == {"a"}, (
+        "macro fit must win even though B has perfect pantry coverage and "
+        "zero reuse while A is penalized on both soft tiers"
+    )
+
+
+def test_pantry_coverage_breaks_an_exact_macro_tie() -> None:
+    a = _trusted(
+        "a",
+        calories=150,
+        protein_g=10,
+        ingredients=[Ingredient(name="oats", amount=50, unit="g")],
+    )
+    b = _trusted(
+        "b",
+        calories=150,
+        protein_g=10,
+        ingredients=[Ingredient(name="quinoa", amount=50, unit="g")],
+    )
+    target = MacroTargets(calories=150, protein_g=10)
+
+    # Identical macros -> exact tie on the primary tiers. Pantry fully
+    # covers B's ingredient, not A's -- B must win.
+    inventory = [ConfirmedIngredient(name="quinoa", amount=50, unit="g")]
+
+    plan = assemble_plan([a, b], target, meals=1, max_per_recipe=2, inventory=inventory)
+
+    selected_ids = {item.recipe_id for item in plan.items}
+    assert selected_ids == {"b"}
+
+
+def test_variety_breaks_an_exact_macro_tie() -> None:
+    a = _trusted("a", calories=150, protein_g=10)
+    b = _trusted("b", calories=150, protein_g=10)
+    target = MacroTargets(calories=150, protein_g=10)
+
+    # Identical macros, no inventory (pantry tier is a no-op 0.0 for both)
+    # -- variety must break the tie: "a" was already used, "b" wasn't.
+    plan = assemble_plan([a, b], target, meals=1, max_per_recipe=2, avoid_recipe_ids=frozenset({"a"}))
+
+    selected_ids = {item.recipe_id for item in plan.items}
+    assert selected_ids == {"b"}
+
+
+def test_saturation_avoid_recipe_ids_covering_entire_pool_still_returns_best_fit() -> None:
+    a = _trusted("a", calories=300, protein_g=20)
+    b = _trusted("b", calories=500, protein_g=40)
+    target = MacroTargets(calories=800, protein_g=60)
+
+    plan = assemble_plan(
+        [a, b],
+        target,
+        meals=2,
+        max_per_recipe=2,
+        avoid_recipe_ids=frozenset({"a", "b"}),
+    )
+
+    # Every combo necessarily reuses recipes from an entirely-saturated
+    # pool -- the variety tier is equally "bad" for every candidate, so it
+    # cannot exclude or block assembly; the true macro optimum must still
+    # be returned (graceful repeat), never an error or empty plan.
+    assert plan.within_tolerance is True
+    assert {item.recipe_id: item.servings for item in plan.items} == {"a": 1, "b": 1}
+
+
+def test_determinism_identical_inputs_produce_identical_result() -> None:
+    a = _trusted(
+        "a",
+        calories=300,
+        protein_g=20,
+        ingredients=[Ingredient(name="chicken", amount=100, unit="g")],
+    )
+    b = _trusted(
+        "b",
+        calories=500,
+        protein_g=40,
+        ingredients=[Ingredient(name="rice", amount=100, unit="g")],
+    )
+    target = MacroTargets(calories=800, protein_g=60)
+    inventory = [ConfirmedIngredient(name="chicken", amount=100, unit="g")]
+
+    plan1 = assemble_plan(
+        [a, b], target, meals=2, max_per_recipe=2, avoid_recipe_ids=frozenset({"a"}), inventory=inventory
+    )
+    plan2 = assemble_plan(
+        [a, b], target, meals=2, max_per_recipe=2, avoid_recipe_ids=frozenset({"a"}), inventory=inventory
+    )
+
+    assert plan1 == plan2

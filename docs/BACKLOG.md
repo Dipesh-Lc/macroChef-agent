@@ -1331,6 +1331,18 @@ to act on:
   best combo, or none). Design not started — would need its own FULL
   TREATMENT consult (this module's own tier), since it changes
   `assemble_week`'s per-day selection logic, not just a reporting field.
+  **UPDATE 2026-07-22: built ahead of this trigger, per the project
+  human's explicit request.** `app.services.day_planner._plan_sort_key`
+  now has a `num_reused_recipes` tiebreak tier (serving-count-weighted,
+  STRICTLY below the macro-fit tiers, never overriding them), and
+  `app.services.weekly_planner.assemble_week` threads a cumulative
+  `avoid_recipe_ids` set (every recipe_id used on a prior day this week)
+  into each day's `assemble_day_plan` call. The human accepted that at
+  today's ~15-recipe pool this tiebreak only fires on an exact macro-error
+  tie, which is rare-to-occasional — the original trigger/rationale above
+  remains accurate for when it stops being rare (see
+  `app.services.day_planner`'s and `app.services.weekly_planner`'s module
+  docstrings for the shipped design).
 - **Pantry-utilization as a scored objective — deliberately dropped from
   v1 (thin-composition design, decided), same shape as the batch solver's
   "Ingredient-sharing scoring" entry above.**
@@ -1353,6 +1365,19 @@ to act on:
   weight; this is also a hard PREREQUISITE for perishable sequencing below
   (sequencing which ingredient to use first only matters once utilization
   is actually being optimized for, not just reported).
+  **UPDATE 2026-07-22: built ahead of this trigger, per the project
+  human's explicit request (same override as "Day-to-day variety" above).**
+  Pantry coverage is now a `_plan_sort_key` tiebreak tier
+  (`app.services.day_planner`), computed by the new
+  `app.services.procurement_service.pantry_coverage_fraction` (which
+  `compute_pantry_utilization` also now delegates to) and reported per
+  `DayPlan` as `pantry_coverage`. It remains STRICTLY a tiebreaker, never
+  an objective — it is never described as "maximized" or "optimized," it
+  only ever activates on an exact tie of the macro-fit tiers, and it still
+  never gates `within_tolerance`. The perishable-sequencing prerequisite
+  below is UNCHANGED by this — pantry coverage is still not "being
+  optimized for," only tiebroken on, so sequencing remains blocked on
+  both items below exactly as before.
 - **Perishable sequencing — deferred entirely, not built at all (not even
   a partial version).** The roadmap line ("users log rough purchase dates
   for perishables; system nudges 'use your spinach today'") implies a real

@@ -11,6 +11,7 @@ from app.services.procurement_service import (
     build_shopping_list_for_plan,
     build_shopping_list_for_recipe,
     merge_shopping_lists,
+    pantry_coverage_fraction,
     split_used_and_missing,
 )
 from app.utils.unit_converter import to_grams
@@ -386,3 +387,56 @@ def test_batch_plan_shopping_list_avoids_double_counting_shared_ingredient_acros
     assert item.amount == pytest.approx(expected_shortfall)
     assert item.unit == "g"
     assert item.reason is not None and "Tofu Stir Fry" in item.reason and "Tofu Soup" in item.reason
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-22 pantry-coverage-tiebreak follow-up:
+# app.services.weekly_planner.compute_pantry_utilization's grams-aggregation
+# + coverage math was EXTRACTED into pantry_coverage_fraction (this module)
+# so app.services.day_planner's pantry tiebreak and weekly_planner's
+# reported-only pantry_utilization metric share exactly one implementation.
+# THIS IS THE MANDATORY EXTRACTION-PARITY REGRESSION GUARD: calling the
+# extracted function directly on the exact fixture
+# tests/test_weekly_planner.py's
+# test_pantry_utilization_hand_verified_with_incomparable_ingredient uses
+# (pre-refactor, compute_pantry_utilization computed this inline) must
+# reproduce byte-identical numbers.
+# ---------------------------------------------------------------------------
+
+
+def test_pantry_coverage_fraction_matches_pre_extraction_compute_pantry_utilization() -> None:
+    from app.schemas.recipe import Recipe as _Recipe
+
+    # Same fixture as
+    # test_weekly_planner.test_pantry_utilization_hand_verified_with_incomparable_ingredient:
+    # "rice" (comparable) + "garnish" (unit "sprig", no known density ->
+    # to_grams returns None -> incomparable).
+    recipe = _Recipe(
+        recipe_id="bowl",
+        title="Rice Bowl",
+        servings=1,
+        ingredients=[
+            Ingredient(name="rice", amount=200, unit="g"),
+            Ingredient(name="garnish", amount=1, unit="sprig"),
+        ],
+    )
+    # Two PlanItems of servings=2 each in the original fixture -> combined
+    # (Recipe, count) shape here is (recipe, 4) (2 + 2), since scaling is
+    # linear: contribution = count / recipe.servings * ingredient.amount,
+    # so (recipe, 2) + (recipe, 2) == (recipe, 4) for this math.
+    inventory = [ConfirmedIngredient(name="rice", amount=300, unit="g")]
+
+    coverage, uncompared = pantry_coverage_fraction([(recipe, 4)], inventory)
+
+    # Hand computation (identical to the pre-extraction weekly_planner
+    # test): need = 800 g rice, pantry has 300 g -> covered = min(800, 300)
+    # = 300 -> coverage = 300 / 800 = 0.375. "garnish" is the one
+    # incomparable ingredient -- excluded from num/denom, counted once.
+    assert coverage == pytest.approx(0.375)
+    assert uncompared == 1
+
+
+def test_pantry_coverage_fraction_empty_recipe_counts_is_zero_not_fabricated() -> None:
+    coverage, uncompared = pantry_coverage_fraction([], [ConfirmedIngredient(name="rice", amount=100, unit="g")])
+    assert coverage == 0.0
+    assert uncompared == 0

@@ -316,6 +316,105 @@ def build_shopping_list_for_items(
     return attributed
 
 
+def _pantry_have_grams(name: str, inventory: list[ConfirmedIngredient]) -> float | None:
+    """Total grams on hand across pantry items matching `name` (already a
+    normalized ingredient key), or `None` if any matched item's quantity
+    can't be resolved to grams (unknown unit/density -- an incomparable
+    contribution poisons the whole total, mirroring `_available_grams`'s
+    own all-or-nothing rule for the same reason: a partially-unknown total
+    is not a trustworthy number). No matching pantry item at all is NOT the
+    same as incomparable -- it is a comparable "0 g on hand".
+
+    (Extracted from `app.services.weekly_planner`'s original private
+    helper of the same name -- see `pantry_coverage_fraction` below, which
+    that module now delegates to via `compute_pantry_utilization`.)
+    """
+    matches = [item for item in inventory if ingredient_matches(name, item.name)]
+    if not matches:
+        return 0.0
+    total = 0.0
+    for item in matches:
+        grams = to_grams(item.amount, item.unit, name=item.name or name)
+        if grams is None:
+            return None
+        total += grams
+    return total
+
+
+def pantry_coverage_fraction(
+    recipe_counts: list[tuple[Recipe, int]],
+    inventory: list[ConfirmedIngredient],
+) -> tuple[float, int]:
+    """`(coverage_fraction, uncompared_ingredient_count)` for `recipe_counts`
+    -- `(Recipe, serving_count)` pairs, deliberately NOT `PlanItem`s and NOT
+    a `recipe_lookup` dict (callers such as `app.services.day_planner`
+    already hold `(Recipe, FoodMacros)` pairs and integer combo counts
+    directly, so this shape avoids that module having to fabricate
+    `PlanItem`s just to score a pantry tiebreak).
+
+    Extracted from `app.services.weekly_planner`'s original
+    `_aggregate_grams_needed` / `_pantry_have_grams` /
+    `compute_pantry_utilization` combining logic (that module's
+    `compute_pantry_utilization` now delegates here instead of duplicating
+    the math), so `app.services.day_planner`'s pantry tiebreak and
+    `weekly_planner`'s reported-only `pantry_utilization` metric share
+    exactly one implementation and can never silently drift apart.
+
+    For each `(recipe, count)`, every ingredient's need is scaled by
+    `count / (recipe.servings or 1)` -- the same scaling factor
+    `build_shopping_list_for_items` and the original
+    `_aggregate_grams_needed` use -- summed to grams via `to_grams` across
+    every recipe/ingredient, and compared against pantry grams-available
+    (`_pantry_have_grams`). Any ingredient where either side can't be
+    resolved to grams is EXCLUDED from BOTH the numerator and denominator
+    -- never silently counted as covered or as needed-but-uncovered -- and
+    counted in `uncompared_ingredient_count` instead (mirrors this module's
+    own `present_uncompared` honesty pattern: never fabricate a coverage
+    number out of an incomparable quantity). Per ingredient, "covered" is
+    capped at `min(need, have)` -- surplus pantry stock beyond what's
+    needed never inflates coverage past 100% for that ingredient. Returns
+    `(0.0, uncompared_count)` when there is no comparable need at all (e.g.
+    an empty `recipe_counts`, or every ingredient incomparable) -- never a
+    fabricated "fully covered" claim on nothing.
+
+    REPORTED / TIEBREAK USE ONLY. See `app.services.day_planner`'s and
+    `app.services.weekly_planner`'s module docstrings: this number is
+    either a strict sub-macro tiebreaker or a display-only metric -- never
+    an objective that gets "maximized" or "optimized", and it never
+    selects or gates a recipe on its own.
+    """
+    grams_by_name: dict[str, float | None] = {}
+    for recipe, count in recipe_counts:
+        factor = count / (recipe.servings or 1)
+        for ingredient in scale_ingredients(recipe.ingredients, factor):
+            key = normalize_ingredient(ingredient.name)
+            if not key:
+                continue
+            grams = to_grams(ingredient.amount, ingredient.unit, name=ingredient.name)
+            if key not in grams_by_name:
+                grams_by_name[key] = 0.0
+            if grams is None or grams_by_name[key] is None:
+                grams_by_name[key] = None
+            else:
+                grams_by_name[key] += grams
+
+    total_needed = 0.0
+    total_covered = 0.0
+    uncompared = 0
+    for name, need in grams_by_name.items():
+        if need is None:
+            uncompared += 1
+            continue
+        have = _pantry_have_grams(name, inventory)
+        if have is None:
+            uncompared += 1
+            continue
+        total_needed += need
+        total_covered += min(need, have)
+    coverage = total_covered / total_needed if total_needed > 0 else 0.0
+    return coverage, uncompared
+
+
 def build_shopping_list_for_plan(
     plan: DayPlan,
     recipe_lookup: dict[str, Recipe],

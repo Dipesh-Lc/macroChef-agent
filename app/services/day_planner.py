@@ -47,6 +47,38 @@ B2's app.schemas.ingredient.scale_ingredients) would make the +/-10%/
 +/-15% tolerance trivially satisfiable for almost any target and gut the
 eval's meaning -- see docs/BACKLOG.md for that as an explicit,
 deliberately-deferred follow-up.
+
+PANTRY-COVERAGE AND DAY-TO-DAY VARIETY TIEBREAKS (2026-07-22 follow-up,
+built ahead of the ~200-trusted-recipe revisit trigger docs/BACKLOG.md
+pre-registers for this -- see "Day-to-day variety" and "Pantry-utilization
+as a scored objective" there -- per the project human's explicit request
+on 2026-07-22, who accepted that ties will be rare-to-occasional at
+today's pool size). `_plan_sort_key` now has two additional tiers, STRICTLY
+BELOW the three pre-existing macro-fit tiers (`within_tolerance`,
+`calories_relative_error`, `protein_relative_error`, unchanged, still
+first and still primary): a serving-count-weighted count of recipes
+already used earlier in the same week (`num_reused_recipes`, ascending --
+lower is better), then pantry coverage (`pantry_coverage`, computed by
+`app.services.procurement_service.pantry_coverage_fraction`, descending --
+higher is better). These are STRICT SUB-MACRO TIEBREAKERS ONLY, never
+objectives -- never described as "optimized", "maximized", or "solved"
+anywhere (comments, docstrings, API text, UI copy): nothing in this pair
+of tiers can ever let a worse-macro-fit plan win over a better one, and
+they only ever activate on an EXACT tie (no epsilon/banding of any kind --
+banding would silently redefine the already-locked primary tiers, which
+stays out of scope). At today's ~15-recipe trusted pool, an exact tie on
+both macro-error tiers for these tiebreakers to ever fire on is
+rare-to-occasional; in practice they will often change nothing.
+
+Per-endpoint tier visibility: `POST /plan/day` and `POST /plan/remaining-
+meal` (via `assemble_plan`/`assemble_day_plan`/`assemble_remaining_meal`
+directly) only ever get the pantry tiebreak live -- the variety tier is a
+structural no-op there, since `avoid_recipe_ids` is always empty on those
+paths (there is no "prior day" concept for a single day-plan/remaining-
+meal request). `POST /plan/week` (via `app.services.weekly_planner.
+assemble_week`) gets BOTH tiebreaks live: pantry coverage per day, and
+variety across the week's days (a cumulative `avoid_recipe_ids` built from
+every prior day's selections -- see that module's own docstring).
 """
 
 from __future__ import annotations
@@ -55,10 +87,12 @@ from dataclasses import dataclass
 from itertools import combinations_with_replacement
 
 from app.schemas.day_plan import DayPlan, PlanItem
+from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.nutrition import FoodMacros
 from app.schemas.recipe import Recipe
 from app.schemas.user import MacroTargets
 from app.services.nutrition_view import trusted_per_serving
+from app.services.procurement_service import pantry_coverage_fraction
 
 
 @dataclass(frozen=True)
@@ -143,6 +177,7 @@ def _build_day_plan(
     target: MacroTargets,
     trusted_pool_size: int,
     tolerance: MacroTolerance,
+    inventory: list[ConfirmedIngredient] | None,
 ) -> DayPlan:
     items: list[PlanItem] = []
     total_calories = total_protein_g = total_carbs_g = total_fat_g = total_fiber_g = 0.0
@@ -168,6 +203,17 @@ def _build_day_plan(
         and protein_relative_error <= tolerance.protein_pct
     )
 
+    # Pantry coverage (REPORTED / TIEBREAK USE ONLY -- see this module's
+    # docstring): `None` when no inventory was supplied at all -- honest
+    # "nothing to report" rather than a fabricated 0.0 -- vs. a real
+    # computed fraction (which can legitimately BE 0.0) once inventory is
+    # supplied. `_plan_sort_key` treats a `None` here as a no-op 0.0 in the
+    # sort tuple either way (see that function).
+    pantry_coverage: float | None = None
+    if inventory:
+        recipe_counts = [(pool[idx][0], count) for idx, count in combo_counts.items()]
+        pantry_coverage, _uncompared = pantry_coverage_fraction(recipe_counts, inventory)
+
     return DayPlan(
         items=items,
         meals_planned=meals_planned,
@@ -185,14 +231,46 @@ def _build_day_plan(
         fat_relative_error=_optional_relative_error(total_fat_g, target.fat_g),
         fiber_relative_error=_optional_relative_error(total_fiber_g, target.fiber_g),
         within_tolerance=within_tolerance,
+        pantry_coverage=pantry_coverage,
     )
 
 
-def _plan_sort_key(plan: DayPlan) -> tuple[int, float, float]:
+def _plan_sort_key(plan: DayPlan, avoid_recipe_ids: frozenset[str]) -> tuple[int, float, float, int, float]:
     """within_tolerance plans always outrank out-of-tolerance ones; within
     the same tolerance bucket, lower kcal relative error wins first (kcal is
-    primary, per the B3 eval design), protein relative error breaks ties."""
-    return (0 if plan.within_tolerance else 1, plan.calories_relative_error, plan.protein_relative_error)
+    primary, per the B3 eval design), protein relative error breaks ties --
+    these first three tiers are UNCHANGED and remain the strict, unweakened
+    primary sort (see this module's docstring's pantry/variety-tiebreak
+    paragraph for why the two tiers below can never override them).
+
+    Two additional STRICT SUB-MACRO TIEBREAK tiers, only ever consulted on
+    an exact tie of the first three (no epsilon/banding):
+
+    - `num_reused_recipes`: serving-count-weighted (NOT a binary "is this
+      recipe id present" check) count of servings in `plan.items` whose
+      recipe_id is in `avoid_recipe_ids` (recipes already used on an
+      earlier day this week -- empty for `/plan/day` and
+      `/plan/remaining-meal`, a structural no-op there). Recomputed
+      directly from `plan.items` (which already carry `recipe_id` and
+      `servings` for the exact combo this plan represents) rather than
+      threaded separately, so this stays valid whether `plan` is one
+      combo's candidate or an already-chosen best-of-K day plan. Lower is
+      better (ascending, same direction as the macro-error terms).
+    - `pantry_coverage`: `plan.pantry_coverage` (computed once, in
+      `_build_day_plan`, via `app.services.procurement_service.
+      pantry_coverage_fraction`), or 0.0 when `None` (no inventory was
+      supplied -- a no-op tier that preserves byte-identical ordering to
+      before this tiebreak existed). Higher coverage is better, hence the
+      negation so ascending sort still works uniformly.
+    """
+    num_reused_recipes = sum(item.servings for item in plan.items if item.recipe_id in avoid_recipe_ids)
+    return (
+        0 if plan.within_tolerance else 1,
+        plan.calories_relative_error,
+        plan.protein_relative_error,
+        num_reused_recipes,
+        -(plan.pantry_coverage or 0.0),
+    )
 
 
 def assemble_plan(
@@ -202,6 +280,8 @@ def assemble_plan(
     *,
     max_per_recipe: int = 2,
     tolerance: MacroTolerance = DEFAULT_TOLERANCE,
+    avoid_recipe_ids: frozenset[str] = frozenset(),
+    inventory: list[ConfirmedIngredient] | None = None,
 ) -> DayPlan:
     """The one primitive (B3 design consult). Exhaustively enumerates every
     way to pick `meals` whole recipe-servings from the TRUSTED subset of
@@ -214,6 +294,20 @@ def assemble_plan(
     -- "remaining macros" mode is exactly `meals=1` (see
     `assemble_remaining_meal`); "day plan" mode sweeps this over a small
     range (see `assemble_day_plan`).
+
+    `avoid_recipe_ids` and `inventory` are both purely additive, DEFAULTED
+    keyword-only params (2026-07-22 pantry/variety-tiebreak follow-up, see
+    this module's docstring): omitting both is a ZERO-behavior-change
+    no-op, byte-identical to this function's pre-existing output --
+    `_plan_sort_key`'s two extra tiers only ever activate on an exact tie
+    of the unweakened macro-fit tiers, and collapse to a no-op when
+    `avoid_recipe_ids` is empty and `inventory` is `None`/empty.
+    `avoid_recipe_ids` marks recipes already used on an earlier day this
+    week (empty for a single day-plan/remaining-meal call -- see
+    `app.services.weekly_planner.assemble_week` for the only caller that
+    passes a nonempty set). `inventory` feeds the pantry-coverage tiebreak
+    (`app.services.procurement_service.pantry_coverage_fraction`) -- never
+    the recipe-selection macro math itself.
 
     Trust boundary: reads macros ONLY via
     `app.services.nutrition_view.trusted_per_serving` -- PARTIAL,
@@ -250,8 +344,10 @@ def assemble_plan(
             # assemble" result, never a padded guess.
             combos = [{}]
 
-    plans = [_build_day_plan(pool, combo, target, trusted_pool_size, tolerance) for combo in combos]
-    return min(plans, key=_plan_sort_key)
+    plans = [
+        _build_day_plan(pool, combo, target, trusted_pool_size, tolerance, inventory) for combo in combos
+    ]
+    return min(plans, key=lambda plan: _plan_sort_key(plan, avoid_recipe_ids))
 
 
 def assemble_remaining_meal(
@@ -260,17 +356,23 @@ def assemble_remaining_meal(
     *,
     max_per_recipe: int = 2,
     tolerance: MacroTolerance = DEFAULT_TOLERANCE,
+    avoid_recipe_ids: frozenset[str] = frozenset(),
+    inventory: list[ConfirmedIngredient] | None = None,
 ) -> DayPlan:
     """"Remaining macros" mode: the K=1 case of `assemble_plan`, called
     reactively with whatever macros are still needed today (target minus
     what's already been eaten) as `remaining_target`. Thin wrapper only --
-    no separate algorithm, per the B3 design consult."""
+    no separate algorithm, per the B3 design consult. `avoid_recipe_ids`/
+    `inventory` are pure passthroughs to `assemble_plan` (see its
+    docstring) -- both default to a no-op."""
     return assemble_plan(
         candidates,
         remaining_target,
         meals=1,
         max_per_recipe=max_per_recipe,
         tolerance=tolerance,
+        avoid_recipe_ids=avoid_recipe_ids,
+        inventory=inventory,
     )
 
 
@@ -281,15 +383,28 @@ def assemble_day_plan(
     meals_range: tuple[int, ...] = DEFAULT_MEALS_RANGE,
     max_per_recipe: int = 2,
     tolerance: MacroTolerance = DEFAULT_TOLERANCE,
+    avoid_recipe_ids: frozenset[str] = frozenset(),
+    inventory: list[ConfirmedIngredient] | None = None,
 ) -> DayPlan:
     """"Day plan" mode: sweeps `assemble_plan` over `meals_range` (default
     2-4 recipe-servings) and returns the single globally best DayPlan across
     every K tried, per `_plan_sort_key`. Thin wrapper only -- no separate
-    algorithm, per the B3 design consult."""
+    algorithm, per the B3 design consult. `avoid_recipe_ids`/`inventory` are
+    pure passthroughs to every `assemble_plan` call in the sweep, and also
+    used for the final cross-K `_plan_sort_key` comparison (see
+    `assemble_plan`'s docstring) -- both default to a no-op."""
     if not meals_range:
         raise ValueError("meals_range must be non-empty")
     plans = [
-        assemble_plan(candidates, target, k, max_per_recipe=max_per_recipe, tolerance=tolerance)
+        assemble_plan(
+            candidates,
+            target,
+            k,
+            max_per_recipe=max_per_recipe,
+            tolerance=tolerance,
+            avoid_recipe_ids=avoid_recipe_ids,
+            inventory=inventory,
+        )
         for k in meals_range
     ]
-    return min(plans, key=_plan_sort_key)
+    return min(plans, key=lambda plan: _plan_sort_key(plan, avoid_recipe_ids))
