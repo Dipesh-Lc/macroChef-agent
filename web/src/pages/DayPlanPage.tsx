@@ -11,14 +11,13 @@ import { getShoppingList, planDay } from "../api/endpoints";
 import type { DayPlanRequest, DayPlanResponse, ShoppingListResponse } from "../api/types";
 import { DEFAULT_PROFILE_FORM_VALUE, toUserProfile } from "../lib/profile";
 
-// Exact 422 wording from `app.api.routes_day_planner.plan_day` -- validated
-// client-side too so the (rare) case of a caller-supplied profile missing
-// either target shows the same message before a round-trip, not a
-// different paraphrase of it.
+// Macro targets are now OFF by default (see `lib/profile.ts`'s
+// `DEFAULT_PROFILE_FORM_VALUE`), so a value can already be present in the
+// Calories/Protein inputs but simply not enabled -- tell the user to
+// enable the toggle, not just "enter" a value they may have already typed.
 const MISSING_TARGETS_MESSAGE =
-  "macro_targets.calories and macro_targets.protein_g are both required to " +
-  "assemble a day plan (the +/-10%/+/-15% tolerance gate is undefined " +
-  "without them).";
+  "Enable the Calories and Protein targets in your profile to assemble a " +
+  "day plan (the +/-10%/+/-15% tolerance gate is undefined without them).";
 
 const SLOW_STATUS_AFTER_MS = 8_000;
 const VERY_SLOW_STATUS_AFTER_MS = 30_000;

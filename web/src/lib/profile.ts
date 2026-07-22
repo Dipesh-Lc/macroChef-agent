@@ -31,23 +31,38 @@ export interface ProfileFormValue {
   dislikedIngredients: string[];
   dietType: DietTypeOption;
   calories: number;
+  caloriesEnabled: boolean;
   proteinG: number;
+  proteinEnabled: boolean;
   carbsG: number;
+  carbsEnabled: boolean;
   fatG: number;
+  fatEnabled: boolean;
   fiberG: number;
+  fiberEnabled: boolean;
   maxCookTimeMin: number | null;
   servings: number;
 }
 
+// Every macro target is OFF by default -- a new user sends no macro targets
+// at all until they explicitly opt in, per the "all five OFF by default"
+// requirement. `macro_fit_score` (app/services/nutrition_scorer.py) already
+// treats an absent/`None`/`<=0` target as "not set" and returns a neutral
+// 0.5 when none are set, so this needs no backend change.
 export const DEFAULT_PROFILE_FORM_VALUE: ProfileFormValue = {
   allergies: [],
   dislikedIngredients: [],
   dietType: "Any",
   calories: 2000,
+  caloriesEnabled: false,
   proteinG: 150,
+  proteinEnabled: false,
   carbsG: 200,
+  carbsEnabled: false,
   fatG: 65,
+  fatEnabled: false,
   fiberG: 25,
+  fiberEnabled: false,
   maxCookTimeMin: null,
   servings: 2,
 };
@@ -60,11 +75,11 @@ export function toUserProfile(value: ProfileFormValue): UserProfile {
     diet_type: value.dietType === "Any" ? null : value.dietType,
     preferred_cuisines: [],
     macro_targets: {
-      calories: value.calories,
-      protein_g: value.proteinG,
-      carbs_g: value.carbsG,
-      fat_g: value.fatG,
-      fiber_g: value.fiberG,
+      calories: value.caloriesEnabled ? value.calories : null,
+      protein_g: value.proteinEnabled ? value.proteinG : null,
+      carbs_g: value.carbsEnabled ? value.carbsG : null,
+      fat_g: value.fatEnabled ? value.fatG : null,
+      fiber_g: value.fiberEnabled ? value.fiberG : null,
     },
     max_cook_time_min: value.maxCookTimeMin,
   };
