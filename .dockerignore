@@ -26,5 +26,12 @@ macrochef.db
 data/chroma/
 data/raw/uploads
 data/library/*.jsonl
-frontend/.streamlit
 .DS_Store
+
+# SPA rebuild W6: the Dockerfile builds `web/dist` fresh, inside the
+# `webbuild` stage, from a clean `npm ci` + `npm run build` -- these must
+# stay excluded from the build context so a stale/incomplete host-side
+# `npm run dev`/`npm run build` artifact (e.g. from local Vite dev usage)
+# can never be copied in instead of that stage's own fresh output.
+web/node_modules
+web/dist

@@ -19,6 +19,105 @@ were pre-registered before anyone saw a result.
 
 ---
 
+## SPA W6 cutover — Streamlit test-parity gaps (2026-07-21)
+
+Context: W6 deleted `frontend/` (Streamlit) and its dedicated pytest files
+now that the React SPA (`web/`) is the single served frontend. Every
+deleted test file was checked against `web/src/**/*.test.ts(x)` for an
+equivalent; two categories of gap remain, both left deliberately unfixed
+in W6 since this was a Docker/CI/deletion cutover task, not a UI feature
+task. `test_recipe_library_builder.py` and
+`tests/test_recipe_library_isolation.py` were NOT deleted — despite the
+name pattern, both test backend code directly (`app.graph.library_builder`,
+`app.services.recipe_discovery_service`, `app.main`/`TestClient`), not
+`frontend/`.
+
+### 1. Two real feature regressions (Streamlit had this behavior; the React port doesn't)
+
+- **Shared-plan recipe view omits allergens/diet tags.** Old:
+  `frontend/components/shared_plan_view.py`'s `public_recipe_markup`
+  rendered `recipe.allergens`/`recipe.diet_tags` for an anonymous viewer
+  (asserted by the now-deleted `tests/test_shared_plan_view_frontend.py`).
+  New: `web/src/pages/SharedPlanPage.tsx`'s `PublicRecipeView` renders
+  title/cuisine/meal_type/cook_time/description/ingredients/instructions/
+  substitution_note, but never `allergens` or `diet_tags`, even though
+  `components["schemas"]["PublicRecipe"]` (`web/src/api/types.gen.ts`)
+  already has both fields. This is worth prioritizing above the test-only
+  gaps below: an anonymous visitor deciding whether to cook a shared
+  recipe currently has no way to see its allergens in the new UI, which
+  is in tension with the "allergy users must verify ingredients
+  themselves" disclaimer this project ships under (CLAUDE.md "Honest
+  scope"). Fix: add an allergen/diet-tag chip row to `PublicRecipeView`
+  (mirror the existing chip styling in `RecipeCard.tsx`'s
+  `IngredientChips`), then add the vitest assertions test-gap #4 below
+  would have covered anyway.
+- **Safety-audit panel no longer summarizes rejections by reason
+  category.** Old: `frontend/components/safety_banner.py`'s
+  `safety_banner_markup` grouped rejected recipes into "N excluded for an
+  allergy, M excluded for not being vegetarian, ..." (asserted by the
+  now-deleted `tests/test_safety_banner_frontend.py`). New:
+  `web/src/components/SafetyAuditPanel.tsx` shows only a flat count
+  ("N recipes rejected by the deterministic safety filter") plus a
+  per-recipe reason table when expanded — no grouped-by-category summary
+  line. Not a safety defect (the underlying `RejectedRecipe` data and the
+  deterministic `constraint_engine` decision are unchanged; this is
+  display wording only), but a real UX regression worth restoring: port
+  the grouping/counting logic into a small pure function in
+  `web/src/lib/` (e.g. `safetyBannerSummary.ts`) so it can be unit tested
+  the same way `macroDisplay.ts`/`batchTotals.ts` are, then render its
+  output above the existing table in `SafetyAuditPanel.tsx`.
+
+### 2. Test-coverage gaps (the logic is ported correctly; no dedicated vitest test exists yet)
+
+The underlying pure logic for each of these is present and correct in the
+new component (verified by reading the component source during W6); only
+the dedicated unit test is missing. Escaping/XSS-specific assertions from
+the old Streamlit tests (`tests/test_frontend_escaping.py` and the
+escaping cases embedded in most `*_frontend.py` files) are NOT listed as
+gaps here: React always escapes text children, and `dangerouslySetInnerHTML`
+is `react/no-danger: "error"` repo-wide (`web/eslint.config.js`), so that
+whole bug class is structurally eliminated in the new stack, not merely
+untested.
+
+1. ~~`WasteNudges.tsx` timing phrases ("today"/"tomorrow"/"in N days"),
+   "N way(s)" pluralization, empty/multi-nudge rendering~~ — **closed in
+   W6**: `web/src/components/WasteNudges.test.tsx` added.
+2. ~~`TasteProfilePanel.tsx` empty-state logic (both lists empty / profile
+   missing entirely renders nothing) and partial-list rendering~~ —
+   **closed in W6**: `web/src/components/TasteProfilePanel.test.tsx`
+   added.
+3. ~~`RecipeCard.tsx`'s "Restored from source" badge
+   (`recipe.restored_from_quarantine`)~~ — **closed in W6**:
+   `web/src/components/RecipeCard.test.tsx` added (badge presence/absence
+   only — the rest of `RecipeCard` remains untested, see #5 below).
+4. **`SharedPlanPage.tsx`'s `PublicRecipeView`** — no dedicated vitest
+   test file exists (`web/src/pages/` has no `*.test.tsx` files at all
+   today). Old `tests/test_shared_plan_view_frontend.py` covered title/
+   meta/description/ingredients/instructions/allergens/diet-tags
+   rendering plus the empty-ingredients and empty-instructions fallback
+   lines. When fixing the allergen/diet-tag regression above, add the
+   test file at the same time (`web/src/pages/SharedPlanPage.test.tsx`),
+   mocking `getSharedPlan` (`web/src/api/endpoints.ts`).
+5. **No component test exists for `RecipeCard.tsx` or
+   `SafetyAuditPanel.tsx` beyond the one badge test added in W6** — the
+   ingredient-scaling arithmetic and batch-totals arithmetic they render
+   are covered indirectly via `web/src/lib/scaling.test.ts` and
+   `web/src/lib/batchTotals.test.ts`, but the empty-ingredients fallback
+   line ("No structured ingredient amounts recorded.") that both
+   `RecipeCard.tsx` and `SharedPlanPage.tsx` render is not asserted at
+   the component level anywhere (it was asserted at the pure-function
+   level in the old `tests/test_serving_scaler_frontend.py`, which tested
+   `_ingredient_amount_lines` directly — there is no equivalent
+   standalone function in the new stack, since `RecipeCard.tsx` builds
+   that JSX inline).
+
+None of the above blocks the W6 cutover: the Docker/CI/deletion work is
+independent of these UI test/feature gaps, and `pytest` +
+`scripts/evaluate_demo_set.py` (allergy_violation_rate 0.000) both stay
+green regardless of them.
+
+---
+
 ## Safety-adjacent (frozen pending the adversarial benchmark)
 
 ### From the 2026-07-17 vocabulary consult (advisor ADVISE on soy-sauce/

@@ -202,8 +202,13 @@ claim states both numbers. Under-claim until the number is real.
 - Run tests: `pytest`
 - Run the demo evaluation: `python scripts/evaluate_demo_set.py`
 - Run the safety benchmark (Phase 2+): `python scripts/run_safety_benchmark.py`
-- Local app: `uvicorn app.main:app --reload --port 8000` +
-  `streamlit run frontend/streamlit_app.py` (or `docker compose up --build`)
+- Local app (SPA rebuild W6, single-process cutover — no more Streamlit):
+  `uvicorn app.main:app --reload --port 8000` in one terminal +
+  `cd web && npm run dev` in another (Vite dev server, proxies the backend
+  API prefixes to :8000 — see `web/vite.config.ts`). For a build-parity
+  smoke test of the production single-process image instead, use
+  `docker compose up --build` (API-only; see `docker-compose.yml`'s
+  comment for why the SPA dev loop runs outside Docker).
 
 ## Model guidance for this repo
 

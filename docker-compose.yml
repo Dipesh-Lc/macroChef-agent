@@ -1,3 +1,18 @@
+# SPA rebuild W6 (single-process cutover): this compose file only runs the
+# FastAPI/uvicorn API container -- there is no `frontend` service anymore.
+# For local dev with the React SPA, run two terminals OUTSIDE Docker
+# instead (hot reload for both sides, which a container rebuild loop can't
+# give you):
+#
+#   uvicorn app.main:app --reload --port 8000      # terminal 1: API
+#   cd web && npm run dev                            # terminal 2: Vite dev server
+#
+# Vite's dev server (default http://localhost:5173) proxies the backend API
+# prefixes to :8000 (see web/vite.config.ts's API_PROXY_PREFIXES) -- open
+# the Vite URL, not :8000, while developing. `docker compose up --build`
+# below is for exercising the built image's single-process API only (e.g.
+# smoke-testing the production topology); it does not include the SPA dev
+# loop.
 services:
   api:
     build: .
@@ -8,17 +23,3 @@ services:
       - .env
     volumes:
       - .:/app
-
-  frontend:
-    build: .
-    command: streamlit run frontend/streamlit_app.py --server.address 0.0.0.0 --server.port 8501
-    ports:
-      - "8501:8501"
-    env_file:
-      - .env
-    environment:
-      - MACROCHEF_API_URL=http://api:8000
-    volumes:
-      - .:/app
-    depends_on:
-      - api

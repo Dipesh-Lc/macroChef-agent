@@ -111,27 +111,32 @@ python scripts/ingest_recipes.py
 
 # 5. Run the API and the UI (two terminals)
 uvicorn app.main:app --reload --port 8000
-streamlit run frontend/streamlit_app.py
+cd web && npm install && npm run dev
 ```
 
-Then open **http://localhost:8501**.
+Then open the Vite dev server's URL, **http://localhost:5173** (it proxies
+the backend API prefixes to `:8000` — see `web/vite.config.ts`).
 
 The default `.env` uses mock/local mode and requires no external API keys.
 
-### One-command local run (Docker)
+### One-command local run (Docker, API only)
 
-If you have Docker, skip the manual steps — this starts both the API and the
-Streamlit UI:
+If you have Docker, this runs the FastAPI/uvicorn API in a container with
+live code reload off the host bind mount:
 
 ```bash
 docker compose up --build
 ```
 
 - API: http://localhost:8000  (health check: `GET /health`)
-- UI:  http://localhost:8501
 
-Deploying the API to Azure Container Apps is automated (CI/CD, manual
-production trigger) — see `docs/DEPLOY.md`.
+This mode is JSON-API-only, not the SPA — the bind-mounted host `web/`
+directory hides whatever `web/dist` the image itself baked in, and a fresh
+checkout has no local `web/dist` build. Use the two-terminal flow above for
+the full app locally. The production image (built without a bind mount)
+serves both the API and the SPA from one process — see `docs/DEPLOY.md`.
+Deploying to Azure Container Apps is automated (CI/CD, manual production
+trigger) — also `docs/DEPLOY.md`.
 
 ---
 
@@ -173,7 +178,7 @@ surviving the safety filter.
 ### Architecture
 
 ```text
-Streamlit UI
+React SPA (web/, served same-origin by FastAPI in production)
    |
    v
 FastAPI routes
@@ -222,7 +227,7 @@ CC0).
   indexing personal recipes
 - Structured Pydantic v2 API contracts
 - SQLite user-feedback memory
-- Streamlit frontend with recipe cards, scores, shopping list, and debug trace
+- React SPA frontend with recipe cards, scores, shopping list, and debug trace
 - Pytest coverage for parsing, constraints, scoring, retrieval, and graph flow
 
 ### Optional / experimental: fridge-photo (vision) inventory
@@ -247,7 +252,7 @@ answers "Given my pantry and constraints, what should I cook?" The library build
 answers "Help me build a personalized recipe database."
 
 ```text
-Streamlit Library Page
+My Recipes page (web/src/pages/MyRecipesPage.tsx)
   -> POST /library/discover  -> discovery_node -> normalization_node
   -> recipe_validation_node  -> deduplication_node -> candidate_presentation_node
   -> POST /library/save      -> SQLite structured recipe store -> ChromaDB index
@@ -432,7 +437,7 @@ pytest
 ## Tech stack
 
 - Backend: FastAPI, Pydantic v2, Uvicorn, SQLAlchemy, SQLite
-- Frontend: Streamlit, Requests, Pandas
+- Frontend: React, TypeScript, Vite, TanStack Query, Tailwind CSS
 - Agent: LangGraph
 - RAG: ChromaDB, sentence-transformers, deterministic embedding fallback
 - Optional AI providers: Gemini, OpenAI, Claude, local Ollama

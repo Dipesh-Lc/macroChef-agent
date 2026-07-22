@@ -51,16 +51,55 @@ jobs:
       - name: Diet-leak safety gate
         run: python scripts/audit_diet_leaks.py
 
+  # SPA rebuild W6: web/ has its own toolchain (Node/npm), so it gets its
+  # own job rather than being folded into `test` above — runs on every
+  # push/PR too, same as `test`. `preflight` (below) gates on BOTH this job
+  # and `test`, so a broken SPA build/lint/typecheck/test blocks deploy
+  # exactly like a broken pytest run does.
+  web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: web
+        run: npm run test -- --run
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
   # ---------------------------------------------------------------------
   # Everything below this line only runs for a manual workflow_dispatch on
-  # the default branch. Ordinary pushes and PRs stop at the `test` job.
-  # Production promotion is a deliberate human action (CLAUDE.md "Human
-  # gates: Public actions" — deploy pushes are pulled, not automatic).
+  # the default branch. Ordinary pushes and PRs stop at the `test`/`web`
+  # jobs. Production promotion is a deliberate human action (CLAUDE.md
+  # "Human gates: Public actions" — deploy pushes are pulled, not
+  # automatic).
   # ---------------------------------------------------------------------
 
   preflight:
     name: Azure permission preflight
-    needs: test
+    needs: [test, web]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
@@ -174,13 +213,12 @@ jobs:
       - name: Create Container App (if absent)
         run: |
           set -euo pipefail
-          # --target-port 8501 must match the port Streamlit binds inside the
-          # container (docker-entrypoint.sh), NOT the FastAPI/uvicorn port.
-          # The API binds 127.0.0.1:8000 only -- internal, unreachable from
-          # outside the container -- so ACA's public ingress has to point at
-          # Streamlit or there would be no usable public URL, just a bare
-          # JSON API.
-          # 1.0/2.0Gi: torch + MiniLM + Chroma + dual process needs >1Gi; default
+          # SPA rebuild W6 cutover: --target-port is now 8000 (uvicorn),
+          # not 8501 (the old Streamlit port). Streamlit and
+          # docker-entrypoint.sh are gone -- FastAPI/uvicorn is now the
+          # ONLY process in the container, serving both the JSON API and
+          # the built React SPA (app/spa.py) on the same public port.
+          # 1.0/2.0Gi: torch + MiniLM + Chroma needs >1Gi; default
           # 0.5/1Gi crash-looped (OOM/probe-fail) on first deploy 2026-07-18
           az containerapp show \
             --name "$ACA_APP_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
@@ -189,13 +227,32 @@ jobs:
               --resource-group "$RESOURCE_GROUP" \
               --environment "$ACA_ENV_NAME" \
               --image "${{ needs.build-and-push.outputs.image }}" \
-              --target-port 8501 \
+              --target-port 8000 \
               --ingress external \
               --registry-server "$ACR_NAME.azurecr.io" \
               --registry-identity system \
               --min-replicas 1 \
               --max-replicas 1 \
               --cpu 1.0 --memory 2.0Gi
+
+      - name: SPA cutover — update ingress target port on an EXISTING app
+        # `az containerapp create`'s --target-port above only takes effect
+        # the FIRST time it creates the app -- it is a no-op on every
+        # subsequent run for an app that already exists (the branch above
+        # takes the `az containerapp show` success path and skips
+        # `create` entirely). Since ca-macrochef already existed at
+        # --target-port 8501 before this cutover, an explicit
+        # `ingress update` is required so an EXISTING app's public ingress
+        # actually gets repointed at 8000 -- without this step the
+        # container would serve on 8000 internally while ACA kept
+        # forwarding public traffic to 8501, which nothing is listening on
+        # anymore, and the live URL would go dark.
+        run: |
+          set -euo pipefail
+          az containerapp ingress update \
+            --name "$ACA_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --target-port 8000
 
       - name: Update revision — image, secrets, env vars
         run: |
@@ -215,8 +272,10 @@ jobs:
           # with 2 revisions briefly active) risks corrupting the index. Do
           # NOT raise max-replicas above 1 without moving to an external
           # vector store first (tracked in docs/BACKLOG.md).
-          # 1.0/2.0Gi: torch + MiniLM + Chroma + dual process needs >1Gi; default
+          # 1.0/2.0Gi: torch + MiniLM + Chroma needs >1Gi; default
           # 0.5/1Gi crash-looped (OOM/probe-fail) on first deploy 2026-07-18
+          # PORT=8000: SPA cutover (W6) -- uvicorn is now the only process
+          # and the only port, replacing the old Streamlit PORT=8501.
           az containerapp update \
             --name "$ACA_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
@@ -232,7 +291,7 @@ jobs:
               MODEL_PROVIDER=gemini \
               MODEL_PROVIDER_FALLBACKS=mock \
               EMBEDDING_PROVIDER=local \
-              PORT=8501
+              PORT=8000
 
       - name: Print live URL
         run: |
