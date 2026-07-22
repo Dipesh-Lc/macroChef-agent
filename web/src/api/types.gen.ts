@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recipes/instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Detailed Instructions */
+        post: operations["get_detailed_instructions_recipes_instructions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library/discover": {
         parameters: {
             query?: never;
@@ -756,6 +773,49 @@ export interface components {
         DeriveAllergenLabelsToolResponse: {
             /** Allergens */
             allergens: string[];
+        };
+        /**
+         * DetailedInstructionsRequest
+         * @description Request to rewrite an already-shown recipe's terse instructions as
+         *     detailed, beginner-friendly steps (phrasing/elaboration only -- see
+         *     app.services.model_provider.generate_detailed_instructions_with_provider_chain).
+         *
+         *     `ingredients` are already-formatted display strings (e.g.
+         *     "2 cups flour", the frontend's `ingredientDisplay(ingredient)` output),
+         *     not structured `{name, amount, unit}` objects -- this is presentation-
+         *     layer elaboration of a recipe already validated safe elsewhere, never a
+         *     safety-relevant computation, so the wire contract doesn't need the
+         *     structured Ingredient model here.
+         */
+        DetailedInstructionsRequest: {
+            /** Title */
+            title: string;
+            /** Ingredients */
+            ingredients?: string[];
+            /** Instructions */
+            instructions?: string[];
+            /** Servings */
+            servings?: number | null;
+            /** Cuisine */
+            cuisine?: string | null;
+        };
+        /**
+         * DetailedInstructionsResponse
+         * @description `generated=False` means `steps` is just the original `instructions`
+         *     echoed back unmodified (no provider configured, or every provider
+         *     failed/returned unparseable output) -- never fabricated detailed
+         *     content. `provider_note` is set to a short human-readable explanation
+         *     whenever `generated=False`, so the frontend can tell the user why the
+         *     steps look unchanged rather than silently presenting them as if they
+         *     were freshly elaborated.
+         */
+        DetailedInstructionsResponse: {
+            /** Steps */
+            steps?: string[];
+            /** Generated */
+            generated: boolean;
+            /** Provider Note */
+            provider_note?: string | null;
         };
         /** FeedbackRequest */
         FeedbackRequest: {
@@ -1774,6 +1834,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecommendationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_detailed_instructions_recipes_instructions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DetailedInstructionsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DetailedInstructionsResponse"];
                 };
             };
             /** @description Validation Error */

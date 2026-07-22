@@ -16,6 +16,16 @@ from app.services.text_inventory_parser import merge_inventory_observations, par
 from app.services.vision_service import extract_inventory_from_image
 from app.services.waste_tracking import build_waste_nudges
 
+# Retrieval-stage candidate count (recipe_retriever_node). Widened from 14 so
+# that after safety_filter_node removes unsafe/disliked/over-time candidates,
+# roughly MAX_RECOMMENDATIONS can still survive to be ranked.
+RETRIEVAL_CANDIDATE_LIMIT = 40
+
+# Ranked recommendations returned by meal_ranking_node. Widened from 3 so the
+# frontend can paginate (top 5 shown, then "See more" reveals more, up to
+# this cap) instead of a fixed top-3.
+MAX_RECOMMENDATIONS = 20
+
 
 def _trace(state: MacroChefState, message: str) -> list[str]:
     return [*state.debug_trace, message]
@@ -156,7 +166,7 @@ def recipe_retriever_node(state: MacroChefState | dict):
         ingredients=ingredients,
         cuisine_preference=current.cuisine_preference,
         meal_type=current.meal_type,
-        limit=14,
+        limit=RETRIEVAL_CANDIDATE_LIMIT,
         user_id=current.user_id,
         include_user_recipes=True,
         include_base_recipes=True,
@@ -367,7 +377,7 @@ def nutrition_scoring_node(state: MacroChefState | dict):
 def meal_ranking_node(state: MacroChefState | dict):
     current = ensure_state(state)
     scores_by_id = {score.recipe_id: score for score in current.scored_recipes}
-    ranked = rank_recipes(current.candidate_recipes, scores_by_id, limit=3)
+    ranked = rank_recipes(current.candidate_recipes, scores_by_id, limit=MAX_RECOMMENDATIONS)
     recommendations = [
         MealRecommendation(
             recipe=recipe,

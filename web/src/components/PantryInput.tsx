@@ -2,20 +2,15 @@ import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { extractInventory } from "../api/endpoints";
 import type { ConfirmedIngredient } from "../api/types";
+import { CUISINE_OPTIONS as CANONICAL_CUISINE_OPTIONS } from "../lib/cuisines";
 
 const SAMPLE_TYPED_INGREDIENTS =
   "chicken breast, spinach, eggs, garlic, olive oil, rice, lemon, Greek yogurt, bell peppers, onions";
 
-const CUISINE_OPTIONS = [
-  "Any",
-  "Mediterranean",
-  "Mexican",
-  "Italian",
-  "Indian",
-  "Japanese",
-  "American",
-  "Thai",
-];
+// "Any" is specific to this component's single-select semantics (maps to
+// `cuisine: null`), so it's prepended locally rather than part of the
+// canonical list in `lib/cuisines.ts`.
+const CUISINE_OPTIONS = ["Any", ...CANONICAL_CUISINE_OPTIONS];
 
 const MEAL_TYPE_OPTIONS = ["breakfast", "lunch", "dinner"];
 

@@ -62,12 +62,45 @@ export function ProfileForm({
         <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/60">
           Macro targets
         </span>
+        <p className="text-xs text-cast-iron/50">
+          Off by default -- switch a target on to have it count toward recipe scoring.
+        </p>
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="Calories" value={value.calories} onChange={(v) => update("calories", v)} />
-          <NumberField label="Protein (g)" value={value.proteinG} onChange={(v) => update("proteinG", v)} />
-          <NumberField label="Carbs (g)" value={value.carbsG} onChange={(v) => update("carbsG", v)} />
-          <NumberField label="Fat (g)" value={value.fatG} onChange={(v) => update("fatG", v)} />
-          <NumberField label="Fiber (g)" value={value.fiberG} onChange={(v) => update("fiberG", v)} />
+          <NumberField
+            label="Calories"
+            value={value.calories}
+            enabled={value.caloriesEnabled}
+            onChange={(v) => update("calories", v)}
+            onEnabledChange={(v) => update("caloriesEnabled", v)}
+          />
+          <NumberField
+            label="Protein (g)"
+            value={value.proteinG}
+            enabled={value.proteinEnabled}
+            onChange={(v) => update("proteinG", v)}
+            onEnabledChange={(v) => update("proteinEnabled", v)}
+          />
+          <NumberField
+            label="Carbs (g)"
+            value={value.carbsG}
+            enabled={value.carbsEnabled}
+            onChange={(v) => update("carbsG", v)}
+            onEnabledChange={(v) => update("carbsEnabled", v)}
+          />
+          <NumberField
+            label="Fat (g)"
+            value={value.fatG}
+            enabled={value.fatEnabled}
+            onChange={(v) => update("fatG", v)}
+            onEnabledChange={(v) => update("fatEnabled", v)}
+          />
+          <NumberField
+            label="Fiber (g)"
+            value={value.fiberG}
+            enabled={value.fiberEnabled}
+            onChange={(v) => update("fiberG", v)}
+            onEnabledChange={(v) => update("fiberEnabled", v)}
+          />
         </div>
       </div>
 
@@ -140,22 +173,38 @@ export function ProfileForm({
 function NumberField({
   label,
   value,
+  enabled,
   onChange,
+  onEnabledChange,
 }: {
   label: string;
   value: number;
+  enabled: boolean;
   onChange: (value: number) => void;
+  onEnabledChange: (enabled: boolean) => void;
 }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs text-cast-iron/60">{label}</span>
-      <input
-        type="number"
-        min={0}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="rounded-md border border-sage-line bg-white px-2 py-1.5 font-mono text-sm text-cast-iron focus:border-basil"
-      />
-    </label>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5 text-xs text-cast-iron/60">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => onEnabledChange(event.target.checked)}
+          aria-label={`Enable ${label} target`}
+        />
+        <span>{label}</span>
+      </div>
+      <label className="flex flex-col gap-1">
+        <span className="sr-only">{label}</span>
+        <input
+          type="number"
+          min={0}
+          value={value}
+          disabled={!enabled}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="rounded-md border border-sage-line bg-white px-2 py-1.5 font-mono text-sm text-cast-iron focus:border-basil disabled:opacity-40"
+        />
+      </label>
+    </div>
   );
 }

@@ -16,6 +16,9 @@ import { DEFAULT_PROFILE_FORM_VALUE, toUserProfile } from "../lib/profile";
 const SLOW_STATUS_AFTER_MS = 10_000;
 const VERY_SLOW_STATUS_AFTER_MS = 40_000;
 
+const INITIAL_VISIBLE_COUNT = 5;
+const VISIBLE_COUNT_STEP = 5;
+
 function useElapsedMs(active: boolean): number {
   const [elapsed, setElapsed] = useState(0);
 
@@ -65,6 +68,7 @@ export default function HomePage() {
     confirmedInventory: [],
   });
   const [rateLimitToast, setRateLimitToast] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
 
   const recommendMutation = useMutation({
     mutationFn: (request: RecommendationRequest) => recommendRecipes(request),
@@ -86,6 +90,7 @@ export default function HomePage() {
   }, [rateLimitToast]);
 
   function handleFindRecipes() {
+    setVisibleCount(INITIAL_VISIBLE_COUNT);
     const request: RecommendationRequest = {
       input_type: "text",
       typed_ingredients: pantryState.typedIngredients || null,
@@ -154,9 +159,23 @@ export default function HomePage() {
               </p>
             ) : (
               <div className="flex flex-col gap-4">
-                {(result.recommendations ?? []).map((recommendation) => (
+                {(result.recommendations ?? []).slice(0, visibleCount).map((recommendation) => (
                   <RecipeCard key={recommendation.recipe.recipe_id} recommendation={recommendation} />
                 ))}
+
+                {visibleCount < (result.recommendations ?? []).length && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setVisibleCount((current) =>
+                        Math.min(current + VISIBLE_COUNT_STEP, (result.recommendations ?? []).length),
+                      )
+                    }
+                    className="rounded-md border border-sage-line px-3 py-1.5 text-sm font-medium text-cast-iron hover:bg-sage-line/40 disabled:opacity-50"
+                  >
+                    See more
+                  </button>
+                )}
               </div>
             )}
 
