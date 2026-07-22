@@ -22,8 +22,9 @@ few seconds; anonymous per-browser sessions, per-session rate limits.)
 
 > **The LLM never enforces your allergies and never computes your macros.
 > Deterministic code does.** The model is used only for non-safety-critical work —
-> parsing messy inventory text, ranking, and phrasing explanations. Anything that
-> could harm you if it were wrong is handled by plain, testable Python.
+> parsing messy inventory text and, on request, rephrasing already-known steps
+> in more detail. Anything that could harm you if it were wrong is handled by
+> plain, testable Python.
 
 Generic recipe chatbots are confident and wrong about hard constraints — they'll
 happily suggest a peanut-containing "satay" to someone who told them they have a
@@ -31,6 +32,53 @@ peanut allergy. MacroChef treats meal planning as a structured decision workflow
 where safety and nutrition are **not** the model's job.
 
 > Runs with **zero API keys** in mock mode — clone and try in two commands.
+
+---
+
+## What this project demonstrates
+
+I built and operate this end to end — architecture, backend, frontend, eval
+methodology, and deploy pipeline. A few things worth a closer look:
+
+- **Safety-first LLM system design.** The model is architecturally barred from
+  ever deciding an allergy or nutrition outcome — every safety-relevant check
+  runs through deterministic, unit-tested Python
+  (`app/services/constraint_engine.py`). Not a prompt instruction; the LLM's
+  output never reaches that code path at all.
+- **Adversarial red-teaming with real eval discipline.** A 371-case benchmark,
+  authored blind to the implementation, run deterministically (k=3, identical
+  failing sets across runs). Every flagged case gets a written, per-case
+  adjudication with a citable rule — and the raw judge-flagged count is
+  published forever alongside the adjudicated-true count, even after the judge
+  false positives are identified, because the judge itself is never modified
+  to close the gap. See `data/evaluation/`.
+- **Agentic workflows in production, not a demo.** Two LangGraph state
+  machines (meal planner, recipe-library builder) with conditional edges,
+  typed Pydantic node contracts, and a deterministic fallback runner for
+  environments without LangGraph installed.
+- **A solver, not an LLM guess.** The day/week planner is a from-scratch
+  combinatorial search over grounded recipe macros with a pre-registered
+  tolerance gate, extended with pantry-coverage and day-to-day-variety
+  tiebreakers that can mathematically never override a better macro fit — see
+  [Day & week planning](#day--week-planning-a-deterministic-solver) below.
+- **Cost- and latency-aware LLM integration**, including the willingness to
+  cut a shipped feature. An earlier version generated a live LLM "chef
+  explanation" per recommended recipe; once the result set grew, that call
+  started dominating request latency for a paragraph most users skimmed past.
+  It was removed outright rather than kept as a sunk cost — see
+  [Example response shape](#example-response-shape).
+- **Full production lifecycle**, not just a notebook: FastAPI + React/
+  TypeScript SPA served from one container image, GitHub Actions CI gating
+  every push on both backend and frontend suites, a human-approved manual
+  promotion to Azure Container Apps, anonymous session auth with per-session
+  rate limiting, and 1,285 backend + 98 frontend automated tests.
+- **A documented, reviewed AI-agent-assisted engineering process.** Changes to
+  anything allergy- or diet-adjacent go through a mandatory design consult and
+  a mandatory independent review before they ship — the same discipline you'd
+  want on a team, made explicit and checked into the repo (`CLAUDE.md`).
+
+A JD-requirement-to-code mapping lives in `docs/SKILLS_MATRIX.md` for anyone
+doing a closer technical read.
 
 ---
 
@@ -42,7 +90,8 @@ where safety and nutrition are **not** the model's job.
 | What are the macros? | The LLM / recipe self-reported tags | **Deterministic scorer** — `app/services/nutrition_scorer.py` |
 | Which recipes match my pantry & diet? | The LLM | **Deterministic filter + scorer** |
 | Parse "chikcen brest, spinch" into ingredients | — | LLM / fuzzy normalizer (safe to be wrong; user confirms) |
-| Rank and explain the shortlist | — | LLM (phrasing only) |
+| Rank the shortlist | — | Deterministic (pantry-first, then macro/time/preference) |
+| Elaborate a recipe's steps, on request | — | LLM (phrasing only — cannot add/remove an ingredient or state a nutrition/allergy fact) |
 
 Allergies, disliked ingredients, diet type, and maximum cook time are enforced as
 **hard constraints** in `constraint_engine.py`. Macro fit is computed
@@ -82,15 +131,14 @@ rank, never to include or exclude on safety grounds.
 > class) partition of 46 cases — judge-flagged **8/46**, adjudicated
 > separately and non-gating — and a **safe-control** partition of 60 cases
 > used to measure over-blocking, which stayed at **0/60** (no safe recipe was
-> incorrectly rejected); see the dated adjudication files
-> for the current raw counts. The planned comparison vs. direct LLM prompting
-> is deferred (see `docs/BACKLOG.md`). See `docs/ROADMAP.md`.
+> incorrectly rejected). The planned comparison vs. direct LLM prompting is
+> deferred (see `docs/BACKLOG.md`). See `docs/ROADMAP.md`.
 
 ---
 
 ## Quickstart
 
-Requires Python 3.11+.
+Requires Python 3.11+ and Node 22+.
 
 ```bash
 # 1. Clone
@@ -106,10 +154,10 @@ pip install -r requirements.txt
 cp .env.example .env
 
 # 4. Build the recipe index (full grounded corpus: 25 curated seeds +
-#    imported Food.com recipes, ~4,200+ recipes)
+#    imported Food.com recipes, ~3,900 recipes)
 python scripts/ingest_recipes.py
 
-# 5. Run the API and the UI (two terminals)
+# 5. Run the API and the SPA (two terminals)
 uvicorn app.main:app --reload --port 8000
 cd web && npm install && npm run dev
 ```
@@ -144,10 +192,15 @@ trigger) — also `docs/DEPLOY.md`.
 
 > **TODO:** Add screenshots to `assets/screenshots/` and a demo clip, then replace the placeholders below.
 
-- **TODO** `assets/screenshots/recommendations.png` — recommendation cards with scores and shopping list
-- **TODO** `assets/screenshots/inventory.png` — inventory extraction / confirmation view
-- **TODO** `assets/screenshots/library.png` — Recipe Library Builder
-- **TODO** demo GIF/clip (60–90s) — end-to-end: pantry in → safe, macro-aware plan out
+- **TODO** `assets/screenshots/recommendations.png` — a recipe card in its
+  default summary state (name, macros, pantry-match chips, ingredients) with
+  "Show score details" expanded
+- **TODO** `assets/screenshots/day-plan.png` — the Day planner: macro targets
+  in, an assembled plan out
+- **TODO** `assets/screenshots/library.png` — My Recipes / the Recipe Library
+  Builder's candidate-review view
+- **TODO** demo GIF/clip (60–90s) — end-to-end: pantry in → safe, macro-aware
+  plan out → "Get detailed instructions" on one card
 
 ---
 
@@ -163,12 +216,14 @@ flowchart TD
     B --> C[constraint_builder_node]
     C --> D[recipe_retriever_node]
     D --> E[safety_filter_node]
-    E --> F[nutrition_scoring_node]
-    F --> G[meal_ranking_node]
-    G --> H[chef_explanation_node]
-    H --> I[procurement_node]
-    I --> J[memory_update_node]
-    J --> END([END])
+    E -->|no safe candidates| F[fallback_relaxation_node]
+    E -->|safe candidates found| G[substitution_node]
+    F --> G
+    G --> H[nutrition_scoring_node]
+    H --> I[meal_ranking_node]
+    I --> J[procurement_node]
+    J --> K[memory_update_node]
+    K --> END([END])
 ```
 
 The graph handles conditional paths for empty inventory, low-confidence vision
@@ -189,11 +244,16 @@ LangGraph workflow
    |--> inventory confirmation
    |--> constraint builder
    |--> ChromaDB recipe retriever + keyword fallback
-   |--> deterministic safety filter        <-- LLM never touches this
-   |--> deterministic nutrition & pantry scoring  <-- LLM never touches this
-   |--> ranking and explanation (LLM phrasing only)
+   |--> deterministic safety filter                 <-- LLM never touches this
+   |--> deterministic substitution engine (safe ingredient swaps)
+   |--> deterministic pantry-first ranking           <-- LLM never touches this
    |--> shopping list generation
    |--> SQLite memory
+
+Separately, on demand: "Get detailed instructions" rewrites a recipe's
+existing steps into a beginner-friendly walkthrough via the same
+multi-provider LLM chain used elsewhere -- constrained to elaborate only,
+never to add/remove an ingredient or state a nutrition/allergy fact.
 ```
 
 ### RAG design
@@ -218,17 +278,26 @@ CC0).
 
 - Text inventory parsing with optional fuzzy ingredient normalization
   (`chikcen brest` → `chicken breast` when `rapidfuzz` is installed)
-- ChromaDB RAG over a bundled 25-recipe JSONL corpus
+- ChromaDB RAG over the recipe corpus, with a keyword-search fallback
 - LangGraph nodes for intake, inventory confirmation, constraints, retrieval,
-  safety filtering, scoring, ranking, explanation, procurement, and memory
+  safety filtering, safe substitution, scoring, ranking, procurement, and memory
 - **Deterministic** hard constraints for allergies, dislikes, diet type, and cook time
-- **Deterministic** macro scoring
-- Separate Recipe Library Builder Agent for discovering, validating, saving, and
-  indexing personal recipes
-- Structured Pydantic v2 API contracts
+- **Deterministic** pantry-first ranking: recipes are sorted primarily by how
+  much of the pantry they use (bucketed), with macro fit, cook time, and
+  cuisine preference only breaking ties within a bucket
+- Quick macro-target presets ("High Protein," "High Fibre") on top of
+  individually toggleable calorie/protein/carb/fat/fiber targets
+- On-demand, constrained LLM elaboration of a recipe's instructions
+  ("Get detailed instructions") — never changes ingredients or amounts, never
+  states a nutrition or allergy fact
+- Separate Recipe Library Builder agent for discovering, validating, saving,
+  and indexing personal recipes
+- Structured Pydantic v2 API contracts, generated into TypeScript on the frontend
+- Anonymous, HttpOnly-cookie session auth with per-session rate limiting
 - SQLite user-feedback memory
-- React SPA frontend with recipe cards, scores, shopping list, and debug trace
-- Pytest coverage for parsing, constraints, scoring, retrieval, and graph flow
+- React SPA frontend with recipe cards, shopping list, and a debug trace panel
+- 1,285 backend (pytest) + 98 frontend (Vitest) automated tests covering
+  parsing, constraints, scoring, retrieval, planners, and graph flow
 
 ### Optional / experimental: fridge-photo (vision) inventory
 
@@ -242,6 +311,27 @@ inventory and merges both into one editable table. Vision is intentionally isola
 it never influences allergy or nutrition decisions, and detected items are surfaced
 for user confirmation (anything below a confidence threshold is flagged
 `needs_confirmation`). Treat it as experimental.
+
+---
+
+## Day & week planning: a deterministic solver
+
+Given calorie/protein/carb/fat/fiber targets, `app/services/day_planner.py`
+searches recipe-serving combinations from the nutrition-grounded corpus and
+returns the one whose total macros fit a pre-registered tolerance (kcal within
+10%, protein within 15%) — a small, from-scratch combinatorial solver over the
+trusted candidate pool, not an LLM guess, and strictly downstream of the same
+safety filter as the rest of the app.
+
+`app/services/weekly_planner.py` composes this across a week, adding two
+strict tiebreakers on top of the macro-fit gate: pantry-mass coverage and
+day-to-day recipe variety (avoiding repeats across the week when an equally
+macro-fit alternative exists). Both are appended *below* the macro-fit sort
+key in the scoring function, so neither can ever promote a worse-fitting plan
+— provably, by construction. This design went through two independent rounds
+of architecture review (a fresh design consult plus a mandatory post-
+implementation review) before shipping, because it revisited an
+already-locked algorithm; the full paper trail is in `docs/BACKLOG.md`.
 
 ---
 
@@ -305,11 +395,7 @@ from `/library`'s session-keyed limits), default 60 requests/hour/caller
 
 Same disclaimer as the rest of this project: hobby project, not medical
 advice — see the adversarial-benchmark numbers at the top of this README
-(judge-flagged / adjudicated-true, published together, always). MCP-server
-access was evaluated for this pass and deliberately skipped (no MCP
-dependency exists in this repo; adding one just to wrap 4 REST endpoints
-was judged scope creep for a ship-first item) — see `docs/BACKLOG.md` if
-picking that up later.
+(judge-flagged / adjudicated-true, published together, always).
 
 ---
 
@@ -317,7 +403,8 @@ picking that up later.
 
 Mock mode is the default and needs no keys. If you provide API keys or run Ollama
 locally, MacroChef can use hosted or local models for the fuzzy work only (image
-inventory extraction and explanation phrasing) — never for safety or nutrition.
+inventory extraction and on-demand instruction elaboration) — never for safety or
+nutrition.
 
 Supported provider names:
 
@@ -401,7 +488,7 @@ Invoke-RestMethod -Uri "http://localhost:8000/recipes/recommend" -Method Post -C
         "final_score": 0.72,
         "missing_ingredients": ["bell pepper", "Greek yogurt", "lemon"]
       },
-      "explanation": "This recipe fits because...",
+      "explanation": "",
       "shopping_list": ["bell pepper", "Greek yogurt", "lemon"]
     }
   ],
@@ -410,6 +497,12 @@ Invoke-RestMethod -Uri "http://localhost:8000/recipes/recommend" -Method Post -C
   "debug_trace": ["intake_node: extracted 3 ingredients.", "..."]
 }
 ```
+
+`explanation` stays on the wire contract but is intentionally always empty:
+an earlier version populated it with a live per-recipe LLM paragraph, which
+was removed once profiling showed it dominated request latency as the result
+set grew, for a paragraph most users skimmed past — see
+[What this project demonstrates](#what-this-project-demonstrates).
 
 ---
 
@@ -431,8 +524,13 @@ python scripts/evaluate_demo_set.py
 ## Tests
 
 ```bash
-pytest
+pytest                              # 1,285 backend tests
+cd web && npm run test -- --run     # 98 frontend tests
 ```
+
+Both suites gate every push in CI (`.github/workflows/ci.yml`: `test` + `web`
+jobs); a manual `workflow_dispatch` on `main` (human-triggered) is the only
+path to production.
 
 ## Tech stack
 
@@ -441,7 +539,8 @@ pytest
 - Agent: LangGraph
 - RAG: ChromaDB, sentence-transformers, deterministic embedding fallback
 - Optional AI providers: Gemini, OpenAI, Claude, local Ollama
-- Testing: Pytest — Packaging: Docker, docker-compose
+- Testing: Pytest (backend), Vitest + Testing Library + ESLint + tsc (frontend)
+- Packaging & CI/CD: Docker, docker-compose, GitHub Actions, Azure Container Apps
 
 ## Limitations
 
@@ -451,6 +550,13 @@ pytest
   not-yet-run pipeline stage — see `app/services/grounding_job.py`) even
   though most of them now carry real units (see below).
 - The bundled recipe dataset is intentionally small for an MVP.
+- **Day/week planning draws from a small nutrition-grounded "trusted" pool**
+  (only ~15 of the corpus's ~3,900 recipes have USDA-grounded per-serving
+  macros — everything else is silently excluded from that solver's candidate
+  set). The pantry and day-to-day-variety tiebreakers described above are
+  real, but at this pool size an exact macro-fit tie for them to break on is
+  rare; they were built ahead of a pre-registered ~200-recipe revisit
+  trigger, at an explicit accepted tradeoff (see `docs/BACKLOG.md`).
 - Vision extraction is deterministic mock by default and is not a real image
   recognizer.
 - Allergy safety depends on accurate recipe metadata and accurate user input.
