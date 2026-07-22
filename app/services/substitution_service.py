@@ -31,10 +31,11 @@ editing an edge.
 
 LLM boundary: everything in this module is deterministic. The
 `Recipe.substitution_note` a variant carries is a templated string built
-from already-decided data -- never phrased or decided by an LLM. The
-existing `chef_explanation_node` (LLM) may only re-phrase an
-already-validated swap for display; it may never choose, invent, or
-validate one (see `app/graph/prompts.py`).
+from already-decided data -- never phrased or decided by an LLM. No LLM
+call sits downstream of this module (the former `chef_explanation_node`
+LLM re-phrasing step, and its `app/graph/prompts.py`, were removed) --
+choosing, inventing, or validating a swap remains exclusively this
+module's `generate_safe_variants` + `constraint_engine.validate_recipe`.
 
 ====================================================================
 A note on curation, for future editors

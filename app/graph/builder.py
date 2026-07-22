@@ -5,7 +5,6 @@ from app.graph.edges import (
     after_safety_filter,
 )
 from app.graph.nodes import (
-    chef_explanation_node,
     constraint_builder_node,
     fallback_relaxation_node,
     intake_node,
@@ -50,7 +49,6 @@ class SequentialMacroChefGraph:
         for node in [
             nutrition_scoring_node,
             meal_ranking_node,
-            chef_explanation_node,
             procurement_node,
             memory_update_node,
         ]:
@@ -76,7 +74,6 @@ def build_macrochef_graph():
         graph.add_node("substitution_node", substitution_node)
         graph.add_node("nutrition_scoring_node", nutrition_scoring_node)
         graph.add_node("meal_ranking_node", meal_ranking_node)
-        graph.add_node("chef_explanation_node", chef_explanation_node)
         graph.add_node("procurement_node", procurement_node)
         graph.add_node("memory_update_node", memory_update_node)
 
@@ -109,8 +106,7 @@ def build_macrochef_graph():
         )
         graph.add_edge("substitution_node", "nutrition_scoring_node")
         graph.add_edge("nutrition_scoring_node", "meal_ranking_node")
-        graph.add_edge("meal_ranking_node", "chef_explanation_node")
-        graph.add_edge("chef_explanation_node", "procurement_node")
+        graph.add_edge("meal_ranking_node", "procurement_node")
         graph.add_edge("procurement_node", "memory_update_node")
         graph.add_edge("memory_update_node", END)
         return graph.compile()

@@ -75,15 +75,12 @@ export interface MacroDisplay {
   fatG?: number;
   /** Grounding coverage as a whole-number percent -- only set when `state === "partial"`. */
   coveragePercent?: number;
-  /** N of M ingredients matched to a USDA food -- set whenever contributions were recorded. */
-  matchedIngredientCount?: number;
-  totalIngredientCount?: number;
   /**
-   * The exact single-line badge text the Streamlit app rendered
-   * (`_macro_badge`), kept for visual/copy parity: e.g.
-   * "500 kcal | 40P / 50C / 15F | 6/6 ingredients USDA-matched", or
-   * "~300 kcal | 20P / 30C / 8F (partial, 50% grounded, likely
-   * undercounts)", or "Macros unknown".
+   * The single-line badge text rendered in the UI: e.g.
+   * "500 kcal | 40P / 50C / 15F", or "~300 kcal | 20P / 30C / 8F (partial,
+   * 50% grounded, likely undercounts)", or "Macros unknown". No longer
+   * appends a "N/M ingredients USDA-matched" segment -- that display (and
+   * the USDA trust badge) was removed; see RecipeCard.tsx/SharedPlanPage.tsx.
    */
   badgeText: string;
 }
@@ -103,15 +100,6 @@ export function macroDisplay(recipe: RecipeWithNutrition): MacroDisplay {
     badgeText = `~${badgeText} (partial, ${coveragePercent}% grounded, likely undercounts)`;
   }
 
-  const contributions = recipe.nutrition.contributions ?? [];
-  let matchedIngredientCount: number | undefined;
-  let totalIngredientCount: number | undefined;
-  if (contributions.length > 0) {
-    matchedIngredientCount = contributions.filter((item) => item.grounded).length;
-    totalIngredientCount = contributions.length;
-    badgeText = `${badgeText} | ${matchedIngredientCount}/${totalIngredientCount} ingredients USDA-matched`;
-  }
-
   return {
     state,
     calories: macros.calories,
@@ -119,8 +107,6 @@ export function macroDisplay(recipe: RecipeWithNutrition): MacroDisplay {
     carbsG: macros.carbs_g,
     fatG: macros.fat_g,
     coveragePercent,
-    matchedIngredientCount,
-    totalIngredientCount,
     badgeText,
   };
 }

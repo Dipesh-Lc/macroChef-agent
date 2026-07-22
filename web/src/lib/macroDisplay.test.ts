@@ -125,7 +125,7 @@ describe("macroDisplay badge text (port of frontend/components/recommendation_ca
     expect(macroDisplay(recipe)).toEqual({ state: "unknown", badgeText: "Macros unknown" });
   });
 
-  it("grounded renders kcal/P/C/F plus USDA-matched count", () => {
+  it("grounded renders kcal/P/C/F with no USDA-matched count segment", () => {
     const nutrition = buildNutrition("grounded", {
       calories: 500,
       protein_g: 40,
@@ -142,7 +142,7 @@ describe("macroDisplay badge text (port of frontend/components/recommendation_ca
 
     const display = macroDisplay(recipe);
     expect(display.state).toBe("grounded");
-    expect(display.badgeText).toBe("500 kcal | 40P / 50C / 15F | 2/3 ingredients USDA-matched");
+    expect(display.badgeText).toBe("500 kcal | 40P / 50C / 15F");
   });
 
   it("partial renders the approx-prefix + coverage % + undercounts wording", () => {
