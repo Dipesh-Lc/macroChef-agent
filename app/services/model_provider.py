@@ -10,9 +10,6 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
 from app.schemas.inventory import InventoryObservation
-from app.schemas.recipe import Recipe
-from app.schemas.recommendation import RecipeScore
-from app.services.nutrition_view import macro_display_state, trusted_per_serving
 from app.utils.ingredient_normalizer import normalize_ingredient
 from app.utils.logging import get_logger
 
@@ -85,31 +82,6 @@ def provider_chain(settings: Settings | None = None) -> list[ProviderName]:
     return chain
 
 
-def generate_explanation_with_provider_chain(
-    recipe: Recipe,
-    score: RecipeScore,
-    allergy_safe: bool = True,
-) -> str:
-    settings = get_settings()
-    fallback = template_explanation(recipe, score, allergy_safe)
-    prompt = _build_explanation_prompt(recipe, score, allergy_safe)
-
-    for provider in provider_chain(settings):
-        if provider == "mock":
-            return fallback
-        if not _provider_is_configured(provider, settings):
-            logger.info("Skipping %s explanation provider; it is not configured.", provider)
-            continue
-        try:
-            text = _generate_text(provider, prompt, settings)
-            if text:
-                return text
-        except Exception as exc:  # pragma: no cover - optional hosted/local provider paths
-            logger.warning("%s explanation failed, trying fallback provider: %s", provider, exc)
-
-    return fallback
-
-
 def generate_detailed_instructions_with_provider_chain(
     title: str,
     ingredients: list[str],
@@ -118,7 +90,7 @@ def generate_detailed_instructions_with_provider_chain(
     cuisine: str | None = None,
 ) -> tuple[list[str], bool]:
     """Rewrite `instructions` as detailed, numbered, beginner-friendly steps
-    via the same provider chain as `generate_explanation_with_provider_chain`.
+    via the same provider chain used elsewhere in this module.
 
     This is a phrasing/elaboration task ONLY -- see
     `_build_detailed_instructions_prompt` for the exact guardrails given to
@@ -195,68 +167,6 @@ def extract_inventory_with_provider_chain(
     # extraction failed and mock data is being returned rather than quietly
     # substituting canned inventory. Never silently return fake data for a failed call.
     return mock_extractor(image_path)
-
-
-def _macro_summary(recipe: Recipe) -> str:
-    """One line describing what's known about a recipe's macros, gated by the
-    same `macro_display_state` the scorer and frontend card use (see
-    app.services.nutrition_view) -- never the recipe's self-reported tag
-    fields, which may be wrong and are never verified until GROUNDED."""
-    state = macro_display_state(recipe)
-    if state == "unknown":
-        return "Macros have not been verified for this recipe yet."
-
-    macros = trusted_per_serving(recipe) or recipe.nutrition.per_serving
-    base = (
-        f"{macros.calories:.0f} calories, {macros.protein_g:.0f}g protein, "
-        f"{macros.carbs_g:.0f}g carbs, and {macros.fat_g:.0f}g fat"
-    )
-    if state == "partial":
-        pct = round(recipe.nutrition.coverage * 100)
-        return f"Based on {pct}% of ingredients ({base}, likely an undercount)."
-    return f"{base.capitalize()}."
-
-
-def template_explanation(recipe: Recipe, score: RecipeScore, allergy_safe: bool = True) -> str:
-    used = ", ".join(score.used_ingredients) or "your available pantry items"
-    missing = ", ".join(score.missing_ingredients) or "nothing essential"
-    macro_note = f"Macro fit is {score.macro_fit_score:.0%}. {_macro_summary(recipe)}"
-    safety_note = "It passed the deterministic allergy and diet validation." if allergy_safe else ""
-    return (
-        f"{recipe.title} fits because it uses {used} and keeps the shopping gap to "
-        f"{missing}. {macro_note} Pantry match is {score.pantry_match_score:.0%}. {safety_note}"
-    )
-
-
-def _build_explanation_prompt(recipe: Recipe, score: RecipeScore, allergy_safe: bool) -> str:
-    return f"""
-You are MacroChef Agent's chef explanation layer.
-Write one friendly, concise paragraph for a recipe recommendation.
-
-Use only the structured data below. Do not calculate nutrition. Do not decide allergy safety.
-Allergy safety has already been validated by deterministic Python logic. The nutrition summary
-below is the verified truth -- if it says macros are unverified or partial, say so plainly rather
-than inventing or estimating a number.
-
-Recipe:
-- title: {recipe.title}
-- cuisine: {recipe.cuisine}
-- meal type: {recipe.meal_type}
-- cook time minutes: {recipe.cook_time_min}
-- ingredients: {', '.join(item.display() for item in recipe.ingredients)}
-- nutrition summary: {_macro_summary(recipe)}
-
-Scores:
-- final score: {score.final_score:.0%}
-- pantry match: {score.pantry_match_score:.0%}
-- macro fit: {score.macro_fit_score:.0%}
-- used ingredients: {score.used_ingredients}
-- missing ingredients: {score.missing_ingredients}
-- deterministic allergy safe: {allergy_safe}
-
-Mention why it fits, used ingredients, missing ingredients, macro fit, and allergy safety.
-Keep it under 90 words.
-""".strip()
 
 
 def _build_detailed_instructions_prompt(

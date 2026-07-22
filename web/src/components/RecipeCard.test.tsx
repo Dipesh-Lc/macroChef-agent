@@ -65,6 +65,66 @@ function buildRecommendation(recipe: Recipe): MealRecommendation {
   return { recipe, score: buildScore(), explanation: "Because reasons." };
 }
 
+describe("RecipeCard: no explanation paragraph, no trust badge/USDA-matched text", () => {
+  it("never renders the LLM-generated explanation text", () => {
+    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    expect(screen.queryByText("Because reasons.")).toBeNull();
+  });
+
+  it("never renders a TrustBadge state label or USDA-matched count text", () => {
+    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    expect(screen.queryByText("USDA ✓")).toBeNull();
+    expect(screen.queryByText("unverified")).toBeNull();
+    expect(screen.queryByText(/ingredients USDA-matched/)).toBeNull();
+  });
+});
+
+describe("RecipeCard: Matching Info chips are always visible", () => {
+  it("renders used/missing ingredient chips unconditionally, before the score-details toggle", () => {
+    const recipe = buildRecipe();
+    const score = { ...buildScore(), used_ingredients: ["chicken"], missing_ingredients: ["rice"] };
+    renderWithQueryClient(<RecipeCard recommendation={{ recipe, score, explanation: "" }} />);
+
+    expect(screen.getByText("Matching Info")).toBeInTheDocument();
+    const chicken = screen.getByText("chicken");
+    const rice = screen.getByText("rice");
+    const toggle = screen.getByText("Show score details");
+    expect(chicken).toBeInTheDocument();
+    expect(rice).toBeInTheDocument();
+
+    // DOM order: chips appear before the score-details toggle.
+    expect(
+      chicken.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
+describe("RecipeCard: score-details toggle", () => {
+  it("hides the 5 remaining score tiles until 'Show score details' is clicked", () => {
+    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+
+    expect(screen.queryByText("Final")).toBeNull();
+    expect(screen.queryByText("Macros")).toBeNull();
+    expect(screen.queryByText("Time")).toBeNull();
+    expect(screen.queryByText("Preference")).toBeNull();
+    expect(screen.queryByText("Pantry mass")).toBeNull();
+    // The redundant "Pantry" tile was dropped entirely (chips already cover it).
+    expect(screen.queryByText("Pantry")).toBeNull();
+
+    fireEvent.click(screen.getByText("Show score details"));
+
+    expect(screen.getByText("Final")).toBeInTheDocument();
+    expect(screen.getByText("Macros")).toBeInTheDocument();
+    expect(screen.getByText("Time")).toBeInTheDocument();
+    expect(screen.getByText("Preference")).toBeInTheDocument();
+    expect(screen.getByText("Pantry mass")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Hide score details"));
+
+    expect(screen.queryByText("Final")).toBeNull();
+  });
+});
+
 describe("RecipeCard restored-from-quarantine badge", () => {
   it("shows the badge for a restored recipe", () => {
     renderWithQueryClient(
