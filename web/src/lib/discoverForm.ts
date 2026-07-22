@@ -8,16 +8,13 @@
  * exports plain functions/constants.
  */
 import type { RecipeDiscoveryRequest } from "../api/types";
+import { CUISINE_OPTIONS as CANONICAL_CUISINE_OPTIONS } from "./cuisines";
 
-export const CUISINE_OPTIONS = [
-  "Italian",
-  "Indian",
-  "Japanese",
-  "Chinese",
-  "Mexican",
-  "Mediterranean",
-  "American",
-];
+// Re-exports the shared canonical list (`lib/cuisines.ts`) so this module's
+// existing public API (`CUISINE_OPTIONS`) stays stable for `DiscoverForm.tsx`
+// -- previously a local, shorter 7-item list that had drifted from
+// `PantryInput.tsx`'s own list.
+export const CUISINE_OPTIONS: readonly string[] = CANONICAL_CUISINE_OPTIONS;
 export const DEFAULT_CUISINES = ["Japanese", "Indian"];
 
 export const MEAL_TYPE_OPTIONS = ["Any", "breakfast", "lunch", "dinner"];
