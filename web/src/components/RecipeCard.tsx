@@ -9,7 +9,6 @@ import { recipeImageUrl } from "../lib/placeholderImage";
 import { ingredientDisplay, scaleIngredients } from "../lib/scaling";
 import { NutritionBreakdown } from "./NutritionBreakdown";
 import { SubstitutionNoteCard } from "./SubstitutionNoteCard";
-import { TrustBadge } from "./TrustBadge";
 
 function friendlyErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof RateLimitError) {
@@ -171,9 +170,10 @@ function FeedbackButtons({ recipeId }: { recipeId: string }) {
 }
 
 export function RecipeCard({ recommendation }: { recommendation: MealRecommendation }) {
-  const { recipe, score, explanation } = recommendation;
+  const { recipe, score } = recommendation;
   const [imageFailed, setImageFailed] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [scoreDetailsOpen, setScoreDetailsOpen] = useState(false);
   const macros = macroDisplay(recipe);
   const imageUrl = recipeImageUrl(recipe);
   const metaParts = [
@@ -193,9 +193,14 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
   const scaledIngredients = scaleIngredients(recipe.ingredients ?? [], scaleFactor);
   const batchLine = batchTotalsLine(recipe, targetServings);
 
+  // The "Pantry" tile (score.pantry_match_score) is intentionally dropped
+  // from this list -- the always-visible "Matching Info" ingredient chips
+  // above already convey pantry match at a glance, so it would be
+  // redundant inside the (now click-to-reveal) score-details grid below.
+  // "Pantry mass" is kept since it's a distinct, non-redundant signal (the
+  // mass-weighted coverage fraction, not a duplicate of the chips).
   const scoreTiles: { label: string; value: number }[] = [
     { label: "Final", value: score.final_score },
-    { label: "Pantry", value: score.pantry_match_score },
     { label: "Macros", value: score.macro_fit_score },
     { label: "Time", value: score.time_score },
     { label: "Preference", value: score.preference_score },
@@ -219,43 +224,30 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
         )}
 
         <div className="flex flex-col gap-2">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="font-display text-lg font-semibold text-cast-iron">{recipe.title}</h3>
-              <p className="text-sm text-cast-iron/70">{metaParts.join(" · ")}</p>
-              {recipe.restored_from_quarantine && (
-                <span
-                  title="Recovered from an earlier import's quarantine after the 2026-07-19 corpus rebuild verified it against the original recipe page."
-                  className="mt-1 inline-flex w-fit items-center rounded-full border border-dashed border-honey-dark bg-honey/10 px-2 py-0.5 text-xs text-honey-dark"
-                >
-                  Restored from source
-                </span>
-              )}
-            </div>
-            <TrustBadge state={macros.state} />
+          <div>
+            <h3 className="font-display text-lg font-semibold text-cast-iron">{recipe.title}</h3>
+            <p className="text-sm text-cast-iron/70">{metaParts.join(" · ")}</p>
+            {recipe.restored_from_quarantine && (
+              <span
+                title="Recovered from an earlier import's quarantine after the 2026-07-19 corpus rebuild verified it against the original recipe page."
+                className="mt-1 inline-flex w-fit items-center rounded-full border border-dashed border-honey-dark bg-honey/10 px-2 py-0.5 text-xs text-honey-dark"
+              >
+                Restored from source
+              </span>
+            )}
           </div>
-
-          <p className="font-mono text-sm text-cast-iron">{macros.badgeText}</p>
 
           <p className="text-sm text-cast-iron/80">
             {recipe.description ??
               "A practical meal match based on your pantry, nutrition targets, and hard safety constraints."}
           </p>
-          <p className="text-sm italic text-cast-iron/70">{explanation}</p>
 
-          <div className="grid grid-cols-3 gap-2 text-xs text-cast-iron/70 sm:grid-cols-6">
-            {scoreTiles.map((tile) => (
-              <span
-                key={tile.label}
-                className="flex flex-col items-center rounded-md border border-sage-line px-2 py-1 text-center"
-              >
-                <span className="font-mono text-sm text-cast-iron">{Math.round(tile.value * 100)}%</span>
-                <span className="text-[0.65rem] text-cast-iron/50">{tile.label}</span>
-              </span>
-            ))}
-          </div>
+          <p className="font-mono text-sm text-cast-iron">{macros.badgeText}</p>
 
           <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
+              Matching Info
+            </span>
             <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
               Used ingredients
             </span>
@@ -306,6 +298,33 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
               )}
             </ul>
             {batchLine && <p className="font-mono text-xs text-cast-iron/70">{batchLine}</p>}
+          </div>
+
+          {/* Secondary/detail cluster: everything below is hidden behind a
+              click (this toggle, the instructions toggle, "Get detailed
+              instructions", or NutritionBreakdown's own internal toggle) --
+              nothing here is part of the always-visible summary above. */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setScoreDetailsOpen((value) => !value)}
+              className="text-xs font-medium uppercase tracking-wide text-cast-iron/60 underline underline-offset-2"
+            >
+              {scoreDetailsOpen ? "Hide score details" : "Show score details"}
+            </button>
+            {scoreDetailsOpen && (
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-cast-iron/70 sm:grid-cols-5">
+                {scoreTiles.map((tile) => (
+                  <span
+                    key={tile.label}
+                    className="flex flex-col items-center rounded-md border border-sage-line px-2 py-1 text-center"
+                  >
+                    <span className="font-mono text-sm text-cast-iron">{Math.round(tile.value * 100)}%</span>
+                    <span className="text-[0.65rem] text-cast-iron/50">{tile.label}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <NutritionBreakdown recipe={recipe} />

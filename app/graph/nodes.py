@@ -5,7 +5,6 @@ from app.rag.loaders import load_recipes
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recommendation import MealRecommendation, RejectedRecipe
 from app.services.constraint_engine import validate_recipe
-from app.services.llm_service import explain_recommendation, template_explanation
 from app.services.memory_service import derive_taste_profile, get_user_memory, save_session_summary
 from app.services.nutrition_scorer import score_recipe
 from app.services.procurement_service import build_shopping_list_for_recipe, merge_shopping_lists
@@ -25,19 +24,6 @@ RETRIEVAL_CANDIDATE_LIMIT = 40
 # frontend can paginate (top 5 shown, then "See more" reveals more, up to
 # this cap) instead of a fixed top-3.
 MAX_RECOMMENDATIONS = 20
-
-# Real per-recipe LLM chef-explanation calls (chef_explanation_node) are
-# capped at this count, independent of MAX_RECOMMENDATIONS, because each
-# one is a live network call to the configured LLM provider (see
-# app.services.model_provider) -- letting this scale with
-# MAX_RECOMMENDATIONS (20) turned a 3-call step into a 20-call one last
-# session, which plausibly exceeded the frontend's 90s recommend timeout.
-# Recommendations beyond this cap get the deterministic
-# template_explanation fallback instead (instant, no network call). Matches
-# web/src/pages/HomePage.tsx's INITIAL_VISIBLE_COUNT (5) -- the number of
-# recommendations shown before the user clicks "see more".
-LLM_EXPLANATION_LIMIT = 5
-
 
 def _trace(state: MacroChefState, message: str) -> list[str]:
     return [*state.debug_trace, message]
@@ -405,38 +391,6 @@ def meal_ranking_node(state: MacroChefState | dict):
         debug_trace=_trace(
             current,
             f"meal_ranking_node: selected {len(recommendations)} top recipes.",
-        ),
-    )
-
-
-def chef_explanation_node(state: MacroChefState | dict):
-    current = ensure_state(state)
-    explained = []
-    llm_calls = 0
-    for index, recommendation in enumerate(current.final_recommendations):
-        if index < LLM_EXPLANATION_LIMIT:
-            explanation = explain_recommendation(
-                recommendation.recipe, recommendation.score, allergy_safe=True
-            )
-            llm_calls += 1
-        else:
-            # Beyond LLM_EXPLANATION_LIMIT: skip the live LLM call and use the
-            # deterministic template fallback directly (see the constant's
-            # comment above) -- keeps this node's latency bounded regardless
-            # of MAX_RECOMMENDATIONS.
-            explanation = template_explanation(
-                recommendation.recipe, recommendation.score, allergy_safe=True
-            )
-        explained.append(recommendation.model_copy(update={"explanation": explanation}))
-    return state_update(
-        current,
-        final_recommendations=explained,
-        debug_trace=_trace(
-            current,
-            (
-                "chef_explanation_node: generated structured explanations "
-                f"({llm_calls} via live LLM, {len(explained) - llm_calls} via template fallback)."
-            ),
         ),
     )
 

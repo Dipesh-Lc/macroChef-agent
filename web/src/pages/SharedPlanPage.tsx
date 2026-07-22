@@ -8,7 +8,6 @@ import { ComingSoonPage } from "../components/ComingSoonPage";
 import { PlanMacroSummary } from "../components/PlanMacroSummary";
 import { RecipeFitTable } from "../components/RecipeFitTable";
 import { SubstitutionNoteCard } from "../components/SubstitutionNoteCard";
-import { TrustBadge } from "../components/TrustBadge";
 import { WeekCalendarGrid } from "../components/WeekCalendarGrid";
 import { macroDisplay } from "../lib/macroDisplay";
 import { ingredientDisplay } from "../lib/scaling";
@@ -40,12 +39,9 @@ function PublicRecipeView({ recipe }: { recipe: PublicRecipe }) {
 
   return (
     <article className="flex flex-col gap-3 rounded-lg border border-sage-line bg-white p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h1 className="font-display text-xl font-semibold text-cast-iron">{recipe.title}</h1>
-          <p className="text-sm text-cast-iron/70">{metaParts.join(" · ")}</p>
-        </div>
-        <TrustBadge state={macros.state} />
+      <div>
+        <h1 className="font-display text-xl font-semibold text-cast-iron">{recipe.title}</h1>
+        <p className="text-sm text-cast-iron/70">{metaParts.join(" · ")}</p>
       </div>
 
       <p className="font-mono text-sm text-cast-iron">{macros.badgeText}</p>
