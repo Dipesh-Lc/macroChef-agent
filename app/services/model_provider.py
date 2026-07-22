@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,63 @@ def generate_explanation_with_provider_chain(
     return fallback
 
 
+def generate_detailed_instructions_with_provider_chain(
+    title: str,
+    ingredients: list[str],
+    instructions: list[str],
+    servings: int | None = None,
+    cuisine: str | None = None,
+) -> tuple[list[str], bool]:
+    """Rewrite `instructions` as detailed, numbered, beginner-friendly steps
+    via the same provider chain as `generate_explanation_with_provider_chain`.
+
+    This is a phrasing/elaboration task ONLY -- see
+    `_build_detailed_instructions_prompt` for the exact guardrails given to
+    the model (use only the given ingredients/steps; never add, remove, or
+    substitute an ingredient or quantity; never state or imply a calorie,
+    nutrition, or allergy/diet safety claim). The LLM never decides a safety
+    or nutrition outcome here, matching this file's existing pattern.
+
+    Returns `(steps, generated)`. `generated=False` means the fallback (the
+    ORIGINAL `instructions`, unmodified) was used -- either because no real
+    provider is configured (mock mode) or because every configured provider
+    failed / returned unparseable output. Never fabricate detailed content
+    in that case; echoing the original terse steps back is the only honest
+    fallback, mirroring the "never silently fabricate" principle documented
+    on `extract_inventory_with_provider_chain`'s TODO above (simpler here:
+    there's no ambiguity to guess at, so the fallback is just the input).
+    """
+    settings = get_settings()
+    fallback = list(instructions)
+    prompt = _build_detailed_instructions_prompt(title, ingredients, instructions, servings, cuisine)
+
+    for provider in provider_chain(settings):
+        if provider == "mock":
+            return fallback, False
+        if not _provider_is_configured(provider, settings):
+            logger.info(
+                "Skipping %s detailed-instructions provider; it is not configured.", provider
+            )
+            continue
+        try:
+            text = _generate_text(provider, prompt, settings)
+            steps = _parse_numbered_steps(text)
+            if steps:
+                return steps, True
+            logger.warning(
+                "%s detailed-instructions response parsed to zero steps, trying fallback provider.",
+                provider,
+            )
+        except Exception as exc:  # pragma: no cover - optional hosted/local provider paths
+            logger.warning(
+                "%s detailed-instructions generation failed, trying fallback provider: %s",
+                provider,
+                exc,
+            )
+
+    return fallback, False
+
+
 def extract_inventory_with_provider_chain(
     image_path: str | Path | None,
     mock_extractor: MockVisionExtractor,
@@ -199,6 +257,60 @@ Scores:
 Mention why it fits, used ingredients, missing ingredients, macro fit, and allergy safety.
 Keep it under 90 words.
 """.strip()
+
+
+def _build_detailed_instructions_prompt(
+    title: str,
+    ingredients: list[str],
+    instructions: list[str],
+    servings: int | None,
+    cuisine: str | None,
+) -> str:
+    numbered_steps = "\n".join(f"{index}. {step}" for index, step in enumerate(instructions, start=1))
+    servings_line = f"- servings: {servings}" if servings else ""
+    cuisine_line = f"- cuisine: {cuisine}" if cuisine else ""
+    return f"""
+You are MacroChef Agent's cooking-instructions layer. Rewrite the given
+recipe steps as detailed, clearly numbered instructions for someone cooking
+this exact recipe for the first time. Explain technique, timing, and
+doneness cues in more depth than the terse original steps.
+
+Use ONLY the ingredients and steps given below. Do NOT add, remove, or
+substitute any ingredient. Do NOT invent a quantity that wasn't given.
+
+Do NOT state or imply anything about calories, nutrition, or allergy/diet
+safety -- that has already been handled elsewhere by deterministic code and
+is out of scope for this rewrite.
+
+Recipe:
+- title: {title}
+{cuisine_line}
+{servings_line}
+- ingredients: {", ".join(ingredients) if ingredients else "none given"}
+- original steps:
+{numbered_steps if numbered_steps else "none given"}
+
+Output ONLY a numbered list of steps (e.g. "1. ...", "2. ..."), nothing else.
+""".strip()
+
+
+def _parse_numbered_steps(text: str) -> list[str]:
+    """Parse an LLM's numbered-list response into `list[str]`, one entry per
+    step -- strips a leading "1.", "2)", "3 -", etc. marker per line and
+    drops blank lines. Returns [] (never a fabricated step) if nothing
+    usable is found, so the caller can treat that provider as failed and
+    fall through the chain, same as an empty-text response elsewhere in
+    this module."""
+    steps: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.match(r"^\d+\s*[.):\-]\s*(.+)$", line)
+        cleaned = match.group(1).strip() if match else line
+        if cleaned:
+            steps.append(cleaned)
+    return steps
 
 
 def _generate_text(provider: ProviderName, prompt: str, settings: Settings) -> str:
