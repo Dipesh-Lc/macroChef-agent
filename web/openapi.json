@@ -1,0 +1,4007 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MacroChef Agent",
+    "description": "A multimodal, constraint-aware meal planning system.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Check Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api-info": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Api Info",
+        "operationId": "api_info_api_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Api Info Api Info Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inventory/extract": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Extract Inventory",
+        "operationId": "extract_inventory_inventory_extract_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extract_inventory_inventory_extract_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InventoryObservation"
+                  },
+                  "type": "array",
+                  "title": "Response Extract Inventory Inventory Extract Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/recommend": {
+      "post": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Recommend Recipes",
+        "operationId": "recommend_recipes_recipes_recommend_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library/discover": {
+      "post": {
+        "tags": [
+          "recipe-library"
+        ],
+        "summary": "Discover Recipes",
+        "operationId": "discover_recipes_library_discover_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeDiscoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeDiscoveryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library/save": {
+      "post": {
+        "tags": [
+          "recipe-library"
+        ],
+        "summary": "Save Recipe Candidates",
+        "operationId": "save_recipe_candidates_library_save_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRecipeCandidatesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveRecipeCandidatesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library/reindex": {
+      "post": {
+        "tags": [
+          "recipe-library"
+        ],
+        "summary": "Reindex Recipe Library",
+        "operationId": "reindex_recipe_library_library_reindex_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReindexLibraryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library": {
+      "get": {
+        "tags": [
+          "recipe-library"
+        ],
+        "summary": "List User Recipe Library",
+        "operationId": "list_user_recipe_library_library_get",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRecipeLibraryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library/{recipe_id}": {
+      "delete": {
+        "tags": [
+          "recipe-library"
+        ],
+        "summary": "Delete User Recipe",
+        "operationId": "delete_user_recipe_library__recipe_id__delete",
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRecipeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback": {
+      "post": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Post Feedback",
+        "operationId": "post_feedback_feedback_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Post Feedback Feedback Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/plan/day": {
+      "post": {
+        "tags": [
+          "day-planner"
+        ],
+        "summary": "Plan Day",
+        "description": "B3: macro-targeted day-plan assembly.\n\nSAFETY (mandatory, verifiable): every recipe in the corpus is run\nthrough `app.services.constraint_engine.validate_recipe` -- the exact\nsame deterministic check `app.graph.nodes.safety_filter_node` uses\n(app/graph/nodes.py:172-200) -- BEFORE `app.services.day_planner` ever\nsees it. Only the survivors (`safe_candidates`) are passed into\n`assemble_plan`/`assemble_day_plan`; rejected recipes are reported back\n(mirroring `safety_filter_node`'s own rejected_recipes bookkeeping) but\nnever reach the planner. This is the sole point in this file where\nsafety is decided, and it happens purely in deterministic code -- no LLM\ncall anywhere on this path.",
+        "operationId": "plan_day_plan_day_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DayPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DayPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/plan/batch": {
+      "post": {
+        "tags": [
+          "day-planner"
+        ],
+        "summary": "Plan Batch",
+        "description": "Phase 4 item 1: meal-prep batch solver -- pick 2-3 recipes, scale to\nN whole containers, each container individually hitting a per-container\nkcal/protein target, with one consolidated shopping list.\n\nSAFETY (mandatory, verifiable, identical pattern to `plan_day` above):\nevery recipe in the corpus is run through\n`app.services.constraint_engine.validate_recipe` BEFORE\n`app.services.batch_planner` ever sees it. Only the survivors\n(`safe_candidates`) are passed into `assemble_batch_plan`; rejected\nrecipes are reported back in `rejected_recipes` but never reach the\nplanner. This is the sole point in this file where safety is decided\nfor this endpoint, and it happens purely in deterministic code -- no\nLLM call anywhere on this path.\n\nThe consolidated shopping list is built via\n`app.services.procurement_service.build_shopping_list_for_items`\nagainst the assembled `plan.items` and `request.inventory` -- the same\ncombine-then-reconcile-once logic `plan_shopping_list` uses for a\n`DayPlan`, reused unmodified rather than reimplemented (see that\nfunction's docstring for the double-counting bug it avoids).",
+        "operationId": "plan_batch_plan_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/plan/week": {
+      "post": {
+        "tags": [
+          "day-planner"
+        ],
+        "summary": "Plan Week",
+        "description": "Phase 4 item 2: full weekly meal-plan solver -- a THIN COMPOSITION of\nB3 (`app.services.day_planner`), NOT a new solver. `request.days`\nindependent calls to `assemble_day_plan` (same target every time, since\nmacro selection is pantry-independent -- see\n`app.services.weekly_planner`'s module docstring), plus ONE consolidated\nshopping-list reconciliation across every day's `PlanItem`s pooled\ntogether.\n\nSAFETY (mandatory, verifiable, identical pattern to `plan_day`/\n`plan_batch` above): every recipe in the corpus is run through\n`app.services.constraint_engine.validate_recipe` BEFORE\n`app.services.weekly_planner` ever sees it. Only the survivors\n(`safe_candidates`) are passed into `assemble_week`; rejected recipes\nare reported back in `rejected_recipes` but never reach the planner.\nThis is the sole point in this file where safety is decided for this\nendpoint, and it happens purely in deterministic code -- no LLM call\nanywhere on this path.\n\nTHE SINGLE MOST CORRECTNESS-CRITICAL STEP: the consolidated shopping\nlist is built by exactly ONE call to\n`app.services.procurement_service.build_shopping_list_for_items`, over\nevery day's `PlanItem`s pooled into one flat list, with\n`request.inventory` reconciled EXACTLY ONCE -- never a naive\nper-day-then-merge composition, which would reintroduce the exact B4\ndouble-counting bug class (two days each individually \"satisfied\" by\nthe same undepleted pantry, both shortfalls artificially zeroed). See\n`build_shopping_list_for_items`'s own docstring for the full\nexplanation.",
+        "operationId": "plan_week_plan_week_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeeklyPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/plan/shopping-list": {
+      "post": {
+        "tags": [
+          "day-planner"
+        ],
+        "summary": "Plan Shopping List",
+        "description": "B4: shopping-list aggregation across an already-assembled DayPlan.\n\nNOT a safety endpoint: `request.plan` was already safety-cleared by\nPOST /plan/day (every recipe_id in `plan.items` passed\nconstraint_engine.validate_recipe there); this endpoint does pure\nquantity arithmetic (app.services.procurement_service.\nbuild_shopping_list_for_plan) against the full corpus looked up by id,\nand makes no allergy/diet decision of its own -- see that function's\ndocstring for the servings-scaling and merge logic.",
+        "operationId": "plan_shopping_list_plan_shopping_list_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShoppingListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/validate-recipe": {
+      "post": {
+        "tags": [
+          "safety-tools"
+        ],
+        "summary": "Validate Recipe Tool",
+        "description": "Direct pass-through to constraint_engine.validate_recipe -- runs every\nhard constraint (allergens, disliked ingredients, diet type, cook time)\nin the same order and returns the exact same ValidationResult a caller\nwould get by importing and calling that function themselves.",
+        "operationId": "validate_recipe_tool_tools_validate_recipe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRecipeToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/check-allergen": {
+      "post": {
+        "tags": [
+          "safety-tools"
+        ],
+        "summary": "Check Allergen Tool",
+        "description": "Direct pass-through to constraint_engine.contains_allergen.",
+        "operationId": "check_allergen_tool_tools_check_allergen_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckAllergenToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckAllergenToolResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/check-diet-violation": {
+      "post": {
+        "tags": [
+          "safety-tools"
+        ],
+        "summary": "Check Diet Violation Tool",
+        "description": "Direct pass-through to constraint_engine.violates_diet_type.\n\nviolates_diet_type raises ValueError for a diet_type it was never taught\nto enforce (see that function's docstring: it fails loudly rather than\nsilently claiming a recipe is safe) -- surfaced here as 422, mirroring\nthe existing ValueError->422 pattern in routes_day_planner.py, not\nswallowed or reinterpreted.",
+        "operationId": "check_diet_violation_tool_tools_check_diet_violation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckDietViolationToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckDietViolationToolResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/derive-allergen-labels": {
+      "post": {
+        "tags": [
+          "safety-tools"
+        ],
+        "summary": "Derive Allergen Labels Tool",
+        "description": "Direct pass-through to constraint_engine.derive_allergen_labels.",
+        "operationId": "derive_allergen_labels_tool_tools_derive_allergen_labels_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeriveAllergenLabelsToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeriveAllergenLabelsToolResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/share": {
+      "post": {
+        "tags": [
+          "share"
+        ],
+        "summary": "Create Share Link",
+        "description": "Builds the public snapshot via `app.services.share_service.\ncreate_share` -- the caller's own request object (a `Recipe`/`DayPlan`/\n`BatchPlan`/`WeeklyPlan` it already holds) is READ from, mapped through\nthe server-side allowlist, and never persisted or echoed verbatim (see\n`share_service`'s module docstring, the load-bearing safety property of\nthis whole feature). `user_id` is the verified session identity (see\n`app.dependencies.get_session_user`, which `require_share_create_rate_\nlimit` itself depends on) -- never a client-supplied value.",
+        "operationId": "create_share_link_share_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/share/{share_id}": {
+      "get": {
+        "tags": [
+          "share"
+        ],
+        "summary": "Get Share View",
+        "description": "UNAUTHENTICATED by design. Returns 404 for BOTH a missing id and a\nrevoked (`is_active=False`) one -- `app.services.share_service.\nget_share` already collapses those two cases into a single `None`, so\nthere is no oracle here for \"exists but was revoked\" vs \"never\nexisted\". Never returns the ORM row or `owner_user_id` -- only the\n`SharedPlanView` schema's own fields (`plan_type`, `content`,\n`disclaimer`), built from `SharedPlan.content` + `SharedPlan.plan_type`\nalone.",
+        "operationId": "get_share_view_share__share_id__get",
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Share Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedPlanView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Mint Or Validate Session",
+        "description": "Confirm an existing valid session (204, no Set-Cookie, no rotation)\nor mint a brand-new one (204 + Set-Cookie).\n\nReads BOTH possible existing-session carriers directly (never via\n`app.dependencies.get_session_user`, which enforces the CSRF header\ncheck this endpoint deliberately does not apply): the `X-Session-Token`\nheader first, then the `mc_session` cookie -- an invalid/expired value\non either is treated exactly like \"absent\" here (mint fresh), never as\nan error, since minting a new anonymous session is always a safe,\nalways-available fallback for this endpoint.",
+        "operationId": "mint_or_validate_session_session_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BatchPlan": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "containers": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Containers"
+          },
+          "per_container_target_calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Per Container Target Calories"
+          },
+          "per_container_target_protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Per Container Target Protein G"
+          },
+          "recipes_selected": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Recipes Selected"
+          },
+          "within_tolerance": {
+            "type": "boolean",
+            "title": "Within Tolerance"
+          },
+          "trusted_pool_size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Trusted Pool Size"
+          },
+          "recipe_fits": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeFit"
+            },
+            "type": "array",
+            "title": "Recipe Fits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "containers",
+          "per_container_target_calories",
+          "per_container_target_protein_g",
+          "recipes_selected",
+          "within_tolerance",
+          "trusted_pool_size"
+        ],
+        "title": "BatchPlan",
+        "description": "Result of `app.services.batch_planner.assemble_batch_plan` (roadmap\nitem: meal-prep batch solver, Phase 4 item 1). Deliberately NOT a\nrepurposed `DayPlan` -- `DayPlan`'s `total_*`/`target_*` fields encode a\nSUMMED-vs-summed target (B3 semantics: many servings summed against one\nday-level target), while a `BatchPlan`'s fit is PER CONTAINER: every\nselected recipe's OWN per-serving macros must individually sit within\ntolerance of the per-container target. Jamming that into `DayPlan`\nwould misrepresent the numbers, so this is a new, independent schema.\nSee `app.services.batch_planner`'s module docstring for the full\nalgorithm and the exact degenerate-case rules (0 eligible / 1 up to\n`min_recipes` eligible / >= `min_recipes` eligible, and an empty\ntrusted pool).\n\n`items` lists the selected recipes and how many whole containers each\nfills (`PlanItem.servings` is reused AS the container count for that\nrecipe) -- container counts across `items` always sum to exactly\n`containers`, never a fractional split. `recipe_fits` carries the same\nselection's per-recipe fit detail (relative errors, per-serving\nmacros) for display/debugging, aligned 1:1 with `items`.\n\n`within_tolerance` is True iff every selected recipe was individually\ncontainer-eligible (its own per-serving kcal AND protein each within\nthe pre-registered +/-10%/+/-15% band of the per-container target,\nreused verbatim from `app.services.day_planner.DEFAULT_TOLERANCE`) --\nFalse only in the \"0 eligible recipes, closest recipe used as an\nhonest fallback\" case (see module docstring); callers must check this\nflag explicitly rather than assume a non-empty `items` means the\ntarget was met.\n\n`recipes_selected` can be LESS than the caller's requested\n`min_recipes` when fewer than `min_recipes` trusted recipes were\ncontainer-eligible -- a real, distinct \"recipe variety not achieved\"\nsignal (still `within_tolerance=True` per-container in that case), not\nan error condition; callers must check this explicitly too."
+      },
+      "BatchPlanRequest": {
+        "properties": {
+          "user_profile": {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          "per_container_target_calories": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Per Container Target Calories"
+          },
+          "per_container_target_protein_g": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Per Container Target Protein G"
+          },
+          "containers": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Containers",
+            "default": 10
+          },
+          "min_recipes": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Min Recipes",
+            "default": 2
+          },
+          "max_recipes": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Max Recipes",
+            "default": 3
+          },
+          "inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "title": "Inventory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_profile",
+          "per_container_target_calories",
+          "per_container_target_protein_g"
+        ],
+        "title": "BatchPlanRequest",
+        "description": "Wire contract for POST /plan/batch (meal-prep batch solver).\n\nNo `candidate_recipe_ids` field, deliberately -- same reasoning as\n`DayPlanRequest` (`app/schemas/day_plan.py`): the endpoint always\nstarts from the full corpus and applies\n`app.services.constraint_engine.validate_recipe` itself (see\n`app.api.routes_day_planner.plan_batch`) -- letting a client hand in a\npre-filtered candidate list would open a second, client-controlled\npath around that mandatory safety filter.\n\n`inventory` mirrors `ShoppingListRequest.inventory`\n(`app/schemas/day_plan.py`) in shape, but is consumed differently: this\nendpoint builds the batch plan's ONE CONSOLIDATED shopping list itself\n(via `app.services.procurement_service.build_shopping_list_for_items`)\nas part of the same request/response round trip, rather than requiring\na second call through POST /plan/shopping-list (which only accepts a\n`DayPlan`, not a `BatchPlan`) -- see `app.api.routes_day_planner.\nplan_batch`. Defaults to empty (no pantry reconciliation, full\nquantities listed) when omitted."
+      },
+      "BatchPlanResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/BatchPlan"
+          },
+          "rejected_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedRecipe"
+            },
+            "type": "array",
+            "title": "Rejected Recipes"
+          },
+          "shopping_list": {
+            "items": {
+              "$ref": "#/components/schemas/ShoppingItem"
+            },
+            "type": "array",
+            "title": "Shopping List"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "title": "BatchPlanResponse"
+      },
+      "Body_extract_inventory_inventory_extract_post": {
+        "properties": {
+          "typed_ingredients": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Typed Ingredients"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          }
+        },
+        "type": "object",
+        "title": "Body_extract_inventory_inventory_extract_post"
+      },
+      "CheckAllergenToolRequest": {
+        "properties": {
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          },
+          "allergies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe"
+        ],
+        "title": "CheckAllergenToolRequest"
+      },
+      "CheckAllergenToolResponse": {
+        "properties": {
+          "contains_allergen": {
+            "type": "boolean",
+            "title": "Contains Allergen"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contains_allergen"
+        ],
+        "title": "CheckAllergenToolResponse"
+      },
+      "CheckDietViolationToolRequest": {
+        "properties": {
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          },
+          "diet_type": {
+            "type": "string",
+            "title": "Diet Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe",
+          "diet_type"
+        ],
+        "title": "CheckDietViolationToolRequest"
+      },
+      "CheckDietViolationToolResponse": {
+        "properties": {
+          "violates_diet_type": {
+            "type": "boolean",
+            "title": "Violates Diet Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "violates_diet_type"
+        ],
+        "title": "CheckDietViolationToolResponse"
+      },
+      "ConfirmedIngredient": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "purchase_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Date"
+          },
+          "expires_soon": {
+            "type": "boolean",
+            "title": "Expires Soon",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ConfirmedIngredient"
+      },
+      "DayPlan": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "meals_planned": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Meals Planned"
+          },
+          "trusted_pool_size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Trusted Pool Size"
+          },
+          "total_calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Calories"
+          },
+          "total_protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Protein G"
+          },
+          "total_carbs_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Carbs G"
+          },
+          "total_fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Fat G"
+          },
+          "total_fiber_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Fiber G"
+          },
+          "target_calories": {
+            "type": "number",
+            "title": "Target Calories"
+          },
+          "target_protein_g": {
+            "type": "number",
+            "title": "Target Protein G"
+          },
+          "calories_relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Calories Relative Error"
+          },
+          "protein_relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Protein Relative Error"
+          },
+          "carbs_relative_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs Relative Error"
+          },
+          "fat_relative_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat Relative Error"
+          },
+          "fiber_relative_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber Relative Error"
+          },
+          "within_tolerance": {
+            "type": "boolean",
+            "title": "Within Tolerance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meals_planned",
+          "trusted_pool_size",
+          "total_calories",
+          "total_protein_g",
+          "total_carbs_g",
+          "total_fat_g",
+          "total_fiber_g",
+          "target_calories",
+          "target_protein_g",
+          "calories_relative_error",
+          "protein_relative_error",
+          "within_tolerance"
+        ],
+        "title": "DayPlan",
+        "description": "Result of app.services.day_planner.assemble_plan (or its\nassemble_day_plan / assemble_remaining_meal thin wrappers).\n\n`items` lists the selected recipes and how many whole servings of each\n(multiplicity capped by `max_per_recipe` at assembly time). `meals_planned`\nis the actual number of recipe-servings assembled (== the requested K\nwhen a feasible combo existed; 0 when the enumerator could not build ANY\ncombo of the requested size -- e.g. an empty trusted pool, or K exceeding\n`max_per_recipe * trusted_pool_size` -- never a padded or partial guess).\n\n`within_tolerance` is the SOLE fit gate: True iff summed kcal is within\nthe pre-registered +/-10% of target calories AND summed protein is\nwithin +/-15% of target protein_g (see\napp.services.day_planner.MacroTolerance). carbs/fat/fiber relative\nerrors are reported for visibility only and never affect this flag (a\ndeliberate v1 scope decision from the B3 design consult).\n\nWhen nothing fits, the CLOSEST plan is still returned with\nwithin_tolerance=False -- callers must check this flag explicitly rather\nthan assume a non-empty `items` means the target was met."
+      },
+      "DayPlanRequest": {
+        "properties": {
+          "user_profile": {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          "meals": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meals"
+          },
+          "max_per_recipe": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Max Per Recipe",
+            "default": 2
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_profile"
+        ],
+        "title": "DayPlanRequest",
+        "description": "Wire contract for POST /plan/day. `user_profile.macro_targets` is\nused directly as the assembly target -- for \"remaining macros\" mode the\ncaller computes the remainder client-side (target minus what's already\nbeen eaten today) and puts it here; this endpoint holds no eaten-today\nstate itself (see app.services.day_planner.assemble_remaining_meal's\ndocstring).\n\nNo `candidate_recipe_ids` field, deliberately: the endpoint always\nstarts from the full corpus and applies\napp.services.constraint_engine.validate_recipe itself (see\napp.api.routes_day_planner.plan_day) -- letting a client hand in a\npre-filtered candidate list would open a second, client-controlled path\naround that mandatory safety filter."
+      },
+      "DayPlanResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/DayPlan"
+          },
+          "rejected_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedRecipe"
+            },
+            "type": "array",
+            "title": "Rejected Recipes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "title": "DayPlanResponse"
+      },
+      "DeleteRecipeResponse": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "deleted"
+        ],
+        "title": "DeleteRecipeResponse"
+      },
+      "DeriveAllergenLabelsToolRequest": {
+        "properties": {
+          "ingredient_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ingredient Names"
+          }
+        },
+        "type": "object",
+        "title": "DeriveAllergenLabelsToolRequest"
+      },
+      "DeriveAllergenLabelsToolResponse": {
+        "properties": {
+          "allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allergens"
+        ],
+        "title": "DeriveAllergenLabelsToolResponse"
+      },
+      "FeedbackRequest": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "feedback_type": {
+            "type": "string",
+            "enum": [
+              "liked",
+              "disliked",
+              "cooked",
+              "skipped"
+            ],
+            "title": "Feedback Type"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "feedback_type"
+        ],
+        "title": "FeedbackRequest"
+      },
+      "FoodMacros": {
+        "properties": {
+          "calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Calories"
+          },
+          "protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Protein G"
+          },
+          "carbs_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Fat G"
+          },
+          "fiber_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Fiber G"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calories",
+          "protein_g",
+          "carbs_g",
+          "fat_g",
+          "fiber_g"
+        ],
+        "title": "FoodMacros",
+        "description": "Macro nutrients per 100g of a food, as reported by USDA FDC."
+      },
+      "FoodMatch": {
+        "properties": {
+          "fdc_id": {
+            "type": "integer",
+            "title": "Fdc Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "data_type": {
+            "type": "string",
+            "title": "Data Type"
+          },
+          "macros": {
+            "$ref": "#/components/schemas/FoodMacros"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fdc_id",
+          "description",
+          "data_type",
+          "macros",
+          "query"
+        ],
+        "title": "FoodMatch",
+        "description": "A single FDC food matched for a normalized ingredient query."
+      },
+      "GroundingStatus": {
+        "type": "string",
+        "enum": [
+          "grounded",
+          "partial",
+          "ungrounded"
+        ],
+        "title": "GroundingStatus",
+        "description": "How much of a recipe's macros were derived from real ingredient data.\n\nThis is deliberately a first-class, explicit result rather than a bare\nnumber or `None` \u2014 a recipe with no grounded ingredients must never be\nmistaken for one that is genuinely low-calorie. Callers should branch on\nthis before trusting `RecipeNutrition.total` / `per_serving`."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Ingredient": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "preparation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "raw",
+                  "cooked",
+                  "canned"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preparation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "Ingredient"
+      },
+      "IngredientContribution": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "grams": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grams"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FoodMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "macros": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FoodMacros"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grounded": {
+            "type": "boolean",
+            "title": "Grounded",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "IngredientContribution",
+        "description": "The grounding outcome for a single recipe ingredient."
+      },
+      "InventoryObservation": {
+        "properties": {
+          "raw_name": {
+            "type": "string",
+            "title": "Raw Name"
+          },
+          "normalized_name": {
+            "type": "string",
+            "title": "Normalized Name"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "vision",
+              "text",
+              "manual"
+            ],
+            "title": "Source"
+          },
+          "needs_confirmation": {
+            "type": "boolean",
+            "title": "Needs Confirmation",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "raw_name",
+          "normalized_name",
+          "confidence",
+          "source"
+        ],
+        "title": "InventoryObservation"
+      },
+      "MacroTargets": {
+        "properties": {
+          "calories": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calories"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "fiber_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber G"
+          }
+        },
+        "type": "object",
+        "title": "MacroTargets"
+      },
+      "MealRecommendation": {
+        "properties": {
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          },
+          "score": {
+            "$ref": "#/components/schemas/RecipeScore"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "shopping_list": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Shopping List"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe",
+          "score",
+          "explanation"
+        ],
+        "title": "MealRecommendation"
+      },
+      "PlanItem": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "servings": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Servings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title",
+          "servings"
+        ],
+        "title": "PlanItem",
+        "description": "One recipe's contribution to a DayPlan: how many whole servings of it\nwere selected. v1 is whole-servings-only (roadmap item B3) -- no\nfractional/continuous portion scaling, which would make the +/-10%/\n+/-15% tolerance trivially satisfiable and gut the eval's meaning (see\napp.services.day_planner's module docstring and docs/BACKLOG.md for the\ncontinuous-scaling follow-up, which could reuse\napp.schemas.ingredient.scale_ingredients from roadmap item B2)."
+      },
+      "PublicBatchPlan": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "containers": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Containers"
+          },
+          "per_container_target_calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Per Container Target Calories"
+          },
+          "per_container_target_protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Per Container Target Protein G"
+          },
+          "recipes_selected": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Recipes Selected"
+          },
+          "within_tolerance": {
+            "type": "boolean",
+            "title": "Within Tolerance"
+          },
+          "recipe_fits": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeFit"
+            },
+            "type": "array",
+            "title": "Recipe Fits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "containers",
+          "per_container_target_calories",
+          "per_container_target_protein_g",
+          "recipes_selected",
+          "within_tolerance"
+        ],
+        "title": "PublicBatchPlan",
+        "description": "Share-safe projection of `app.schemas.batch_plan.BatchPlan`.\n\nExcludes `trusted_pool_size` (same reasoning as `PublicDayPlan`)."
+      },
+      "PublicDayPlan": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "meals_planned": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Meals Planned"
+          },
+          "total_calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Calories"
+          },
+          "total_protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Protein G"
+          },
+          "total_carbs_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Carbs G"
+          },
+          "total_fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Fat G"
+          },
+          "total_fiber_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Fiber G"
+          },
+          "target_calories": {
+            "type": "number",
+            "title": "Target Calories"
+          },
+          "target_protein_g": {
+            "type": "number",
+            "title": "Target Protein G"
+          },
+          "calories_relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Calories Relative Error"
+          },
+          "protein_relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Protein Relative Error"
+          },
+          "carbs_relative_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs Relative Error"
+          },
+          "fat_relative_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat Relative Error"
+          },
+          "fiber_relative_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber Relative Error"
+          },
+          "within_tolerance": {
+            "type": "boolean",
+            "title": "Within Tolerance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meals_planned",
+          "total_calories",
+          "total_protein_g",
+          "total_carbs_g",
+          "total_fat_g",
+          "total_fiber_g",
+          "target_calories",
+          "target_protein_g",
+          "calories_relative_error",
+          "protein_relative_error",
+          "within_tolerance"
+        ],
+        "title": "PublicDayPlan",
+        "description": "Share-safe projection of `app.schemas.day_plan.DayPlan`.\n\nExcludes `trusted_pool_size` (leaks how many corpus recipes were\navailable to the sharer, not a property of the plan itself)."
+      },
+      "PublicRecipe": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/Ingredient"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergens"
+          },
+          "diet_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diet Tags"
+          },
+          "cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cook Time Min"
+          },
+          "nutrition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeNutrition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "servings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Servings"
+          },
+          "equipment": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Equipment"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "substitution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substitution Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title"
+        ],
+        "title": "PublicRecipe",
+        "description": "Share-safe projection of `app.schemas.recipe.Recipe`.\n\nDeliberately excludes (compare against the current `Recipe` field list\nin `app/schemas/recipe.py`): `owner_user_id` (the sharer's session\nidentity -- THE headline leak this feature exists to prevent),\n`is_user_saved`, `image_path` (a server-local filesystem path),\n`is_active`, `restored_from_quarantine` (an internal display flag), and\nthe SELF-REPORTED TAG MACROS `calories`/`protein_g`/`carbs_g`/`fat_g`/\n`fiber_g` (per `Recipe`'s own docstring, nothing should trust these\ndirectly -- only the grounded `nutrition` field is presentable)."
+      },
+      "PublicWeeklyPlan": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/PublicDayPlan"
+            },
+            "type": "array",
+            "title": "Days"
+          }
+        },
+        "type": "object",
+        "title": "PublicWeeklyPlan",
+        "description": "Share-safe projection of `app.schemas.weekly_plan.WeeklyPlan`.\n\nExcludes `trusted_pool_size` (same reasoning as `PublicDayPlan`) and\n`pantry_utilization`/`uncompared_ingredient_count` (both are\npantry-derived and would leak \"here's what's in the sharer's kitchen\"\nto an anonymous viewer)."
+      },
+      "Recipe": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/Ingredient"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergens"
+          },
+          "diet_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diet Tags"
+          },
+          "cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cook Time Min"
+          },
+          "calories": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calories"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "fiber_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber G"
+          },
+          "nutrition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeNutrition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "servings": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Servings",
+            "default": 1
+          },
+          "equipment": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Equipment"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Path"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type",
+            "default": "base"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "is_user_saved": {
+            "type": "boolean",
+            "title": "Is User Saved",
+            "default": false
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "restored_from_quarantine": {
+            "type": "boolean",
+            "title": "Restored From Quarantine",
+            "default": false
+          },
+          "substitution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substitution Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title"
+        ],
+        "title": "Recipe"
+      },
+      "RecipeCandidate": {
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "title": "Candidate Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/Ingredient"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cook Time Min"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "servings": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Servings",
+            "default": 1
+          },
+          "calories": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calories"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "fiber_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber G"
+          },
+          "allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergens"
+          },
+          "diet_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diet Tags"
+          },
+          "equipment": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Equipment"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Path"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "ai_generated",
+              "external",
+              "curated",
+              "user_added"
+            ],
+            "title": "Source Type"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "home_cookable_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Home Cookable Score",
+            "default": 1.0
+          },
+          "validation_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "title",
+          "source_type"
+        ],
+        "title": "RecipeCandidate"
+      },
+      "RecipeDiscoveryRequest": {
+        "properties": {
+          "cuisines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cuisines"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "diet_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diet Type"
+          },
+          "max_cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Cook Time Min"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "count": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "default": 10
+          },
+          "home_cookable": {
+            "type": "boolean",
+            "title": "Home Cookable",
+            "default": true
+          },
+          "excluded_ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excluded Ingredients"
+          },
+          "allergies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergies"
+          },
+          "extra_preferences": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Preferences"
+          },
+          "source_mode": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "llm",
+              "external",
+              "hybrid"
+            ],
+            "title": "Source Mode",
+            "default": "mock"
+          }
+        },
+        "type": "object",
+        "title": "RecipeDiscoveryRequest",
+        "description": "The `/library/discover` request body.\n\nDeliberately has no `user_id` field: the caller's identity comes only\nfrom the verified session token (see app.dependencies.get_session_user),\nnever from client-supplied request data. Route handlers thread the\nverified user id into the graph separately."
+      },
+      "RecipeDiscoveryResponse": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "debug_trace": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Debug Trace"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "title": "RecipeDiscoveryResponse"
+      },
+      "RecipeFit": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "per_serving_calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Per Serving Calories"
+          },
+          "per_serving_protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Per Serving Protein G"
+          },
+          "kcal_relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Kcal Relative Error"
+          },
+          "protein_relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Protein Relative Error"
+          },
+          "container_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Container Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title",
+          "per_serving_calories",
+          "per_serving_protein_g",
+          "kcal_relative_error",
+          "protein_relative_error",
+          "container_count"
+        ],
+        "title": "RecipeFit",
+        "description": "One selected recipe's fit against the batch plan's per-container\nmacro target -- the public-facing projection of\n`app.services.batch_planner._container_eligible` for a recipe that\nended up in `BatchPlan.items`. Display/debugging detail, not a second\nsource of truth: `recipe_id` and `container_count` always line up 1:1\nwith `BatchPlan.items` (same recipe_id, `container_count ==\nPlanItem.servings`) for the same `BatchPlan`."
+      },
+      "RecipeNutrition": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/GroundingStatus"
+          },
+          "servings": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Servings"
+          },
+          "total": {
+            "$ref": "#/components/schemas/FoodMacros"
+          },
+          "per_serving": {
+            "$ref": "#/components/schemas/FoodMacros"
+          },
+          "contributions": {
+            "items": {
+              "$ref": "#/components/schemas/IngredientContribution"
+            },
+            "type": "array",
+            "title": "Contributions"
+          },
+          "ungrounded_ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ungrounded Ingredients"
+          },
+          "coverage": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Coverage"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Flags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "servings",
+          "total",
+          "per_serving",
+          "coverage"
+        ],
+        "title": "RecipeNutrition",
+        "description": "Computed macros for a recipe, with explicit grounding coverage.\n\n`total` and `per_serving` only ever sum grounded contributions. When\n`status` is `PARTIAL`, they undercount the true recipe macros by\nwhatever `ungrounded_ingredients` is missing \u2014 callers must check\n`status` (and/or `coverage`) before presenting these as authoritative.\n\n`flags` holds trust-DEMOTING reason codes computed from this object's\nOWN computed values (e.g. an implausible per-serving kcal figure) --\nnever from the recipe's self-reported tag macros, and never set by an\nLLM. A non-empty `flags` overrides `status` for trust purposes: see\n`app.services.nutrition_view.trusted_per_serving`/`macro_display_state`,\nthe single chokepoint that enforces this, even for an otherwise\n`GROUNDED` recipe. Populated by `app.services.grounding_job.run_grounding`\nat grounding time, not by this schema itself."
+      },
+      "RecipeScore": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "pantry_match_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pantry Match Score"
+          },
+          "pantry_mass_coverage": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pantry Mass Coverage",
+            "default": 0.0
+          },
+          "macro_fit_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Macro Fit Score"
+          },
+          "time_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Time Score"
+          },
+          "preference_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Preference Score"
+          },
+          "final_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Final Score"
+          },
+          "missing_ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Ingredients"
+          },
+          "used_ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Used Ingredients"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "pantry_match_score",
+          "macro_fit_score",
+          "time_score",
+          "preference_score",
+          "final_score"
+        ],
+        "title": "RecipeScore"
+      },
+      "RecommendationRequest": {
+        "properties": {
+          "input_type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "manual",
+              "mixed"
+            ],
+            "title": "Input Type",
+            "default": "text"
+          },
+          "image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Path"
+          },
+          "typed_ingredients": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Typed Ingredients"
+          },
+          "confirmed_inventory": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConfirmedIngredient"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Inventory"
+          },
+          "user_profile": {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          "cuisine_preference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine Preference"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_profile"
+        ],
+        "title": "RecommendationRequest"
+      },
+      "RecommendationResponse": {
+        "properties": {
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/MealRecommendation"
+            },
+            "type": "array",
+            "title": "Recommendations"
+          },
+          "shopping_list": {
+            "items": {
+              "$ref": "#/components/schemas/ShoppingItem"
+            },
+            "type": "array",
+            "title": "Shopping List"
+          },
+          "rejected_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedRecipe"
+            },
+            "type": "array",
+            "title": "Rejected Recipes"
+          },
+          "inventory_observations": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryObservation"
+            },
+            "type": "array",
+            "title": "Inventory Observations"
+          },
+          "debug_trace": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Debug Trace"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "taste_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TasteProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waste_nudges": {
+            "items": {
+              "$ref": "#/components/schemas/WasteNudge"
+            },
+            "type": "array",
+            "title": "Waste Nudges"
+          }
+        },
+        "type": "object",
+        "title": "RecommendationResponse"
+      },
+      "ReindexLibraryResponse": {
+        "properties": {
+          "indexed_count": {
+            "type": "integer",
+            "title": "Indexed Count"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "indexed_count",
+          "status"
+        ],
+        "title": "ReindexLibraryResponse"
+      },
+      "RejectedRecipe": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title",
+          "reason"
+        ],
+        "title": "RejectedRecipe"
+      },
+      "SaveRecipeCandidatesRequest": {
+        "properties": {
+          "selected_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeCandidate"
+            },
+            "type": "array",
+            "title": "Selected Candidates"
+          }
+        },
+        "type": "object",
+        "title": "SaveRecipeCandidatesRequest",
+        "description": "The `/library/save` request body. No `user_id` field -- see\n`RecipeDiscoveryRequest`'s docstring."
+      },
+      "SaveRecipeCandidatesResponse": {
+        "properties": {
+          "saved_recipe_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Saved Recipe Ids"
+          },
+          "skipped_duplicates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped Duplicates"
+          },
+          "failed_candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Failed Candidates"
+          },
+          "debug_trace": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Debug Trace"
+          }
+        },
+        "type": "object",
+        "title": "SaveRecipeCandidatesResponse"
+      },
+      "ShareCreateRequest": {
+        "properties": {
+          "plan_type": {
+            "type": "string",
+            "enum": [
+              "recipe",
+              "day",
+              "batch",
+              "week"
+            ],
+            "title": "Plan Type"
+          },
+          "recipe": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Recipe"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "day_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DayPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "batch_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BatchPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weekly_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeeklyPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_type"
+        ],
+        "title": "ShareCreateRequest",
+        "description": "Body for POST /share.\n\n`plan_type` selects exactly one of the four optional fields below --\nthe matching object the (authenticated) client already holds in its own\nUI state. This is intentionally NOT the wire-level shape that gets\npersisted: `app.services.share_service.create_share` maps whichever\nfield is populated through the server-side allowlist functions above\nbefore anything is written to `SharedPlan.content` -- the client object\nis read from, never echoed or persisted verbatim (see that module's\ndocstring for why)."
+      },
+      "ShareCreateResponse": {
+        "properties": {
+          "share_id": {
+            "type": "string",
+            "title": "Share Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "share_id"
+        ],
+        "title": "ShareCreateResponse",
+        "description": "Response for POST /share. Deliberately just the opaque id -- no\nhardcoded public hostname (see app.api.routes_share.create_share);\nthe frontend composes the full share URL itself."
+      },
+      "SharedPlanView": {
+        "properties": {
+          "plan_type": {
+            "type": "string",
+            "enum": [
+              "recipe",
+              "day",
+              "batch",
+              "week"
+            ],
+            "title": "Plan Type"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicRecipe"
+              },
+              {
+                "$ref": "#/components/schemas/PublicDayPlan"
+              },
+              {
+                "$ref": "#/components/schemas/PublicBatchPlan"
+              },
+              {
+                "$ref": "#/components/schemas/PublicWeeklyPlan"
+              }
+            ],
+            "title": "Content"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_type",
+          "content",
+          "disclaimer"
+        ],
+        "title": "SharedPlanView",
+        "description": "Response for GET /share/{id} -- the ONLY thing an anonymous caller\never receives. Never the ORM row, never `owner_user_id`, never any field\nnot declared here."
+      },
+      "ShoppingItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ShoppingItem"
+      },
+      "ShoppingListRequest": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/DayPlan"
+          },
+          "inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "title": "Inventory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "title": "ShoppingListRequest",
+        "description": "Wire contract for POST /plan/shopping-list (roadmap item B4).\n\n`plan` is an already-assembled DayPlan (its recipe_ids were already\nsafety-cleared by /plan/day's constraint_engine.validate_recipe pass --\nthis endpoint makes no new safety decision, it only does quantity\narithmetic, so it takes no user_profile and never re-filters). `inventory`\nis the pantry to reconcile against, same shape POST /plan/day's caller\nalready has on hand from app.api.routes_inventory."
+      },
+      "ShoppingListResponse": {
+        "properties": {
+          "shopping_list": {
+            "items": {
+              "$ref": "#/components/schemas/ShoppingItem"
+            },
+            "type": "array",
+            "title": "Shopping List"
+          }
+        },
+        "type": "object",
+        "title": "ShoppingListResponse"
+      },
+      "SuggestedRecipe": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title"
+        ],
+        "title": "SuggestedRecipe",
+        "description": "One corpus recipe suggested as a way to use an expiring ingredient\nbefore it goes bad. Deliberately minimal -- just enough to link/display,\nnot a full `app.schemas.recipe.Recipe` (the caller already has the full\ncorpus if it needs more)."
+      },
+      "TasteProfile": {
+        "properties": {
+          "avoided_ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Avoided Ingredients"
+          },
+          "preferred_cuisines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preferred Cuisines"
+          }
+        },
+        "type": "object",
+        "title": "TasteProfile",
+        "description": "Generalizing taste-profile signal derived from a user's own feedback\nhistory (Phase 3: visible personalization loop -- see\napp.services.memory_service.derive_taste_profile for the derivation).\n\nRanking/UX only, never a safety signal: this is deliberately blind to,\nand never consulted by, app.services.constraint_engine. Both fields stay\nempty (never populated from a single data point) until the deriving\nuser has enough feedback history to clear the minimum-sample-size floor\ndocumented alongside derive_taste_profile -- an empty list here always\nmeans \"no signal yet\", never \"fabricated from one recipe\"."
+      },
+      "UserProfile": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "demo_user"
+          },
+          "allergies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergies"
+          },
+          "disliked_ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Disliked Ingredients"
+          },
+          "diet_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diet Type"
+          },
+          "preferred_cuisines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preferred Cuisines"
+          },
+          "macro_targets": {
+            "$ref": "#/components/schemas/MacroTargets"
+          },
+          "max_cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Cook Time Min"
+          }
+        },
+        "type": "object",
+        "title": "UserProfile"
+      },
+      "UserRecipeLibraryResponse": {
+        "properties": {
+          "recipes": {
+            "items": {
+              "$ref": "#/components/schemas/Recipe"
+            },
+            "type": "array",
+            "title": "Recipes"
+          }
+        },
+        "type": "object",
+        "title": "UserRecipeLibraryResponse"
+      },
+      "ValidateRecipeToolRequest": {
+        "properties": {
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          },
+          "user_profile": {
+            "$ref": "#/components/schemas/UserProfile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe",
+          "user_profile"
+        ],
+        "title": "ValidateRecipeToolRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValidationResult": {
+        "properties": {
+          "is_valid": {
+            "type": "boolean",
+            "title": "Is Valid"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_valid"
+        ],
+        "title": "ValidationResult"
+      },
+      "WasteNudge": {
+        "properties": {
+          "ingredient_name": {
+            "type": "string",
+            "title": "Ingredient Name"
+          },
+          "days_until_expiry": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Until Expiry"
+          },
+          "suggested_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestedRecipe"
+            },
+            "type": "array",
+            "title": "Suggested Recipes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ingredient_name"
+        ],
+        "title": "WasteNudge",
+        "description": "One expiring-soon inventory ingredient plus up to a few corpus\nrecipes that use it. `days_until_expiry` is the same rough,\nflat-shelf-life-window estimate as\n`app.schemas.inventory.ConfirmedIngredient.days_until_expiry` -- None\nwhen the ingredient's `expires_soon` flag was set explicitly rather than\nderived from a logged `purchase_date` (no date to estimate from).\n`suggested_recipes` can be empty (the ingredient is expiring but no\ncorpus recipe uses it) -- an empty list is still a valid, honest nudge,\nnever suppressed here; the frontend template decides how to phrase that."
+      },
+      "WeeklyPlan": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/DayPlan"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "pantry_utilization": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pantry Utilization"
+          },
+          "uncompared_ingredient_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Uncompared Ingredient Count"
+          },
+          "trusted_pool_size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Trusted Pool Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pantry_utilization",
+          "uncompared_ingredient_count",
+          "trusted_pool_size"
+        ],
+        "title": "WeeklyPlan",
+        "description": "Result of `app.services.weekly_planner.assemble_week` (roadmap item,\nPhase 4 item 2: full weekly meal-plan solver).\n\nTHIS IS A THIN COMPOSITION OF B3 (`app.services.day_planner`), not a new\nsolver: `days` is exactly `app.services.day_planner.assemble_day_plan`\ncalled once per day, same target every time -- see that module's own\ndocstring for the algorithm, tolerance, and trust boundary, all reused\nunchanged.\n\nKNOWN, DELIBERATE, HONEST LIMITATION -- state loudly, do not bury:\nbecause recipe selection is macro-only and pantry-independent (macros\ndon't depend on pantry state, so there is no day-to-day pantry-depletion\nstate carried between calls), and the trusted pool is tiny (~15 recipes\nas of the A3 corpus -- see `app.services.day_planner`'s \"CRUX FINDING\"),\nevery one of `days` calls to `assemble_day_plan` receives the exact same\ncandidates and the exact same target, and is therefore fully\ndeterministic. **All `days` entries in `WeeklyPlan.days` will typically\ncome out IDENTICAL** (the same day-plan repeated `days` times). This is\nan honest artifact of the corpus's current grounding coverage, not a\nbug in this module -- see docs/BACKLOG.md (\"Weekly meal-plan solver\")\nfor the pre-registered \"day-to-day variety\" follow-up.\n\n`pantry_utilization` is REPORTED FOR VISIBILITY ONLY -- it is never\noptimized, maximized, or used to gate/select which recipes are chosen.\nIt is the fraction of the week's total (quantity-comparable) ingredient\nneed that the supplied pantry (`ConfirmedIngredient` inventory) covers,\ncomputed with the same `app.utils.unit_converter.to_grams` arithmetic\n`app.services.procurement_service` uses. Ingredients whose need or\npantry quantity can't be resolved to grams (`to_grams` returns `None`)\nare excluded from BOTH the numerator and denominator -- never silently\ntreated as 0% or 100% covered -- and counted separately in\n`uncompared_ingredient_count` (mirrors `procurement_service`'s own\n`present_uncompared` honesty pattern)."
+      },
+      "WeeklyPlanRequest": {
+        "properties": {
+          "user_profile": {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          "days": {
+            "type": "integer",
+            "maximum": 14.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "default": 7
+          },
+          "max_per_recipe": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Max Per Recipe",
+            "default": 2
+          },
+          "inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "title": "Inventory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_profile"
+        ],
+        "title": "WeeklyPlanRequest",
+        "description": "Wire contract for POST /plan/week.\n\n`user_profile.macro_targets` is used as the SAME target for every day\nof the week (mirrors `DayPlanRequest`'s own use of\n`user_profile.macro_targets` -- see `app/schemas/day_plan.py`).\n\nNo `candidate_recipe_ids` field, deliberately -- same reasoning as\n`DayPlanRequest`/`BatchPlanRequest`: the endpoint always starts from the\nfull corpus and applies `app.services.constraint_engine.validate_recipe`\nitself (see `app.api.routes_day_planner.plan_week`) -- letting a client\nhand in a pre-filtered candidate list would open a second,\nclient-controlled path around that mandatory safety filter.\n\n`inventory` mirrors `BatchPlanRequest.inventory` in shape: this endpoint\nbuilds the week's ONE CONSOLIDATED shopping list itself (via\n`app.services.procurement_service.build_shopping_list_for_items`, pooling\nevery day's `PlanItem`s together) as part of the same request/response\nround trip, and also feeds `pantry_utilization`. Defaults to empty (no\npantry reconciliation, full quantities listed, 0.0 utilization) when\nomitted."
+      },
+      "WeeklyPlanResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/WeeklyPlan"
+          },
+          "rejected_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedRecipe"
+            },
+            "type": "array",
+            "title": "Rejected Recipes"
+          },
+          "shopping_list": {
+            "items": {
+              "$ref": "#/components/schemas/ShoppingItem"
+            },
+            "type": "array",
+            "title": "Shopping List"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "title": "WeeklyPlanResponse"
+      }
+    }
+  }
+}

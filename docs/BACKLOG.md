@@ -19,6 +19,105 @@ were pre-registered before anyone saw a result.
 
 ---
 
+## SPA W6 cutover — Streamlit test-parity gaps (2026-07-21)
+
+Context: W6 deleted `frontend/` (Streamlit) and its dedicated pytest files
+now that the React SPA (`web/`) is the single served frontend. Every
+deleted test file was checked against `web/src/**/*.test.ts(x)` for an
+equivalent; two categories of gap remain, both left deliberately unfixed
+in W6 since this was a Docker/CI/deletion cutover task, not a UI feature
+task. `test_recipe_library_builder.py` and
+`tests/test_recipe_library_isolation.py` were NOT deleted — despite the
+name pattern, both test backend code directly (`app.graph.library_builder`,
+`app.services.recipe_discovery_service`, `app.main`/`TestClient`), not
+`frontend/`.
+
+### 1. Two real feature regressions (Streamlit had this behavior; the React port doesn't)
+
+- **Shared-plan recipe view omits allergens/diet tags.** Old:
+  `frontend/components/shared_plan_view.py`'s `public_recipe_markup`
+  rendered `recipe.allergens`/`recipe.diet_tags` for an anonymous viewer
+  (asserted by the now-deleted `tests/test_shared_plan_view_frontend.py`).
+  New: `web/src/pages/SharedPlanPage.tsx`'s `PublicRecipeView` renders
+  title/cuisine/meal_type/cook_time/description/ingredients/instructions/
+  substitution_note, but never `allergens` or `diet_tags`, even though
+  `components["schemas"]["PublicRecipe"]` (`web/src/api/types.gen.ts`)
+  already has both fields. This is worth prioritizing above the test-only
+  gaps below: an anonymous visitor deciding whether to cook a shared
+  recipe currently has no way to see its allergens in the new UI, which
+  is in tension with the "allergy users must verify ingredients
+  themselves" disclaimer this project ships under (CLAUDE.md "Honest
+  scope"). Fix: add an allergen/diet-tag chip row to `PublicRecipeView`
+  (mirror the existing chip styling in `RecipeCard.tsx`'s
+  `IngredientChips`), then add the vitest assertions test-gap #4 below
+  would have covered anyway.
+- **Safety-audit panel no longer summarizes rejections by reason
+  category.** Old: `frontend/components/safety_banner.py`'s
+  `safety_banner_markup` grouped rejected recipes into "N excluded for an
+  allergy, M excluded for not being vegetarian, ..." (asserted by the
+  now-deleted `tests/test_safety_banner_frontend.py`). New:
+  `web/src/components/SafetyAuditPanel.tsx` shows only a flat count
+  ("N recipes rejected by the deterministic safety filter") plus a
+  per-recipe reason table when expanded — no grouped-by-category summary
+  line. Not a safety defect (the underlying `RejectedRecipe` data and the
+  deterministic `constraint_engine` decision are unchanged; this is
+  display wording only), but a real UX regression worth restoring: port
+  the grouping/counting logic into a small pure function in
+  `web/src/lib/` (e.g. `safetyBannerSummary.ts`) so it can be unit tested
+  the same way `macroDisplay.ts`/`batchTotals.ts` are, then render its
+  output above the existing table in `SafetyAuditPanel.tsx`.
+
+### 2. Test-coverage gaps (the logic is ported correctly; no dedicated vitest test exists yet)
+
+The underlying pure logic for each of these is present and correct in the
+new component (verified by reading the component source during W6); only
+the dedicated unit test is missing. Escaping/XSS-specific assertions from
+the old Streamlit tests (`tests/test_frontend_escaping.py` and the
+escaping cases embedded in most `*_frontend.py` files) are NOT listed as
+gaps here: React always escapes text children, and `dangerouslySetInnerHTML`
+is `react/no-danger: "error"` repo-wide (`web/eslint.config.js`), so that
+whole bug class is structurally eliminated in the new stack, not merely
+untested.
+
+1. ~~`WasteNudges.tsx` timing phrases ("today"/"tomorrow"/"in N days"),
+   "N way(s)" pluralization, empty/multi-nudge rendering~~ — **closed in
+   W6**: `web/src/components/WasteNudges.test.tsx` added.
+2. ~~`TasteProfilePanel.tsx` empty-state logic (both lists empty / profile
+   missing entirely renders nothing) and partial-list rendering~~ —
+   **closed in W6**: `web/src/components/TasteProfilePanel.test.tsx`
+   added.
+3. ~~`RecipeCard.tsx`'s "Restored from source" badge
+   (`recipe.restored_from_quarantine`)~~ — **closed in W6**:
+   `web/src/components/RecipeCard.test.tsx` added (badge presence/absence
+   only — the rest of `RecipeCard` remains untested, see #5 below).
+4. **`SharedPlanPage.tsx`'s `PublicRecipeView`** — no dedicated vitest
+   test file exists (`web/src/pages/` has no `*.test.tsx` files at all
+   today). Old `tests/test_shared_plan_view_frontend.py` covered title/
+   meta/description/ingredients/instructions/allergens/diet-tags
+   rendering plus the empty-ingredients and empty-instructions fallback
+   lines. When fixing the allergen/diet-tag regression above, add the
+   test file at the same time (`web/src/pages/SharedPlanPage.test.tsx`),
+   mocking `getSharedPlan` (`web/src/api/endpoints.ts`).
+5. **No component test exists for `RecipeCard.tsx` or
+   `SafetyAuditPanel.tsx` beyond the one badge test added in W6** — the
+   ingredient-scaling arithmetic and batch-totals arithmetic they render
+   are covered indirectly via `web/src/lib/scaling.test.ts` and
+   `web/src/lib/batchTotals.test.ts`, but the empty-ingredients fallback
+   line ("No structured ingredient amounts recorded.") that both
+   `RecipeCard.tsx` and `SharedPlanPage.tsx` render is not asserted at
+   the component level anywhere (it was asserted at the pure-function
+   level in the old `tests/test_serving_scaler_frontend.py`, which tested
+   `_ingredient_amount_lines` directly — there is no equivalent
+   standalone function in the new stack, since `RecipeCard.tsx` builds
+   that JSX inline).
+
+None of the above blocks the W6 cutover: the Docker/CI/deletion work is
+independent of these UI test/feature gaps, and `pytest` +
+`scripts/evaluate_demo_set.py` (allergy_violation_rate 0.000) both stay
+green regardless of them.
+
+---
+
 ## Safety-adjacent (frozen pending the adversarial benchmark)
 
 ### From the 2026-07-17 vocabulary consult (advisor ADVISE on soy-sauce/
@@ -1409,3 +1508,82 @@ to act on:
   read-path logic, only a new authenticated write endpoint + a repository
   method). Not built now because the task spec was create + anonymous view
   only.
+
+## SPA rebuild W0 (advisor review) / W1a
+
+- **`tests/test_session_endpoint.py::test_valid_header_and_different_valid_cookie_header_identity_wins`
+  is weaker than it looks.** Flagged in the W0 advisor review. It currently
+  asserts on an empty library both ways (header identity and cookie
+  identity), which would pass even if the cookie's identity silently won
+  instead of the header's — an empty list looks the same regardless of
+  which identity actually served the request. Fix: before the assertion,
+  save a real recipe under the header identity (e.g. via `POST /library/save`
+  or directly through the repository, matching the pattern already used
+  elsewhere in that file), then `GET /library` under the *cookie* identity
+  and assert the saved recipe is ABSENT (proving the cookie identity, not
+  the header's, was used for that second call) — and/or assert it IS
+  present when queried under the header identity again. Not fixed in W1a
+  because W1a's scope was FastAPI static serving, not session-test hardening.
+- **Missing standalone "no header + no cookie -> 401" test.** Also flagged
+  in the W0 advisor review. `tests/test_session_endpoint.py` covers this
+  combination only transitively, inside the full recovery-loop test (item
+  14 in that file's module docstring: "dead cookie -> 401 ... -> retried
+  request succeeds"). Add an explicit, standalone test in that file that
+  sends a request to a session-authenticated endpoint (e.g. `GET /library`)
+  with neither `X-Session-Token` nor the `mc_session` cookie set, and
+  asserts a bare 401 — completing the four-combination matrix (header only,
+  cookie only, both, neither) as its own named test rather than relying on
+  it being incidentally exercised elsewhere. Not fixed in W1a for the same
+  reason as above.
+- **Blanket CSRF / `X-Requested-With` gap on anonymous state-changing
+  endpoints.** Deferred by advisor consult on 2026-07-21 (W0 review).
+  `POST /plan/day`, `/plan/batch`, `/plan/week`, `/plan/shopping-list`, and
+  `POST /inventory/extract` accept the `mc_session` cookie (via
+  `app.dependencies.get_session_user`) but do not require the
+  `X-Requested-With` CSRF header the way the cookie-path in
+  `get_session_user` already enforces for other session-authenticated
+  routes (see `app/dependencies.py`, `CSRF_HEADER_NAME`). In the current
+  same-origin deployment topology this is benign (a cross-site request
+  would ride the cookie but the response never reaches the attacker's
+  origin, and none of these endpoints currently expose read access to
+  another user's data through their response body) — but it's inconsistent
+  with the CSRF model applied elsewhere, and worth closing for
+  defense-in-depth / consistency once someone is touching
+  `app/dependencies.py` or these routers again. Fix shape: these routes
+  already depend on `app.dependencies.get_session_user`, which performs the
+  `X-Requested-With` check for the cookie path inline (`app/dependencies.py`,
+  around line 218/233-234, keyed on `CSRF_HEADER_NAME`) — confirm each of
+  the five routes actually routes through `get_session_user` (not a
+  lighter-weight dependency) rather than adding a new check.
+
+## SPA rebuild W2 (nutrition transparency + full recipe cards)
+
+- **`npm audit`: 2 high-severity transitive advisories in `web/`.** Flagged
+  in the W1b report (2026-07-21), not re-triaged in W2. Reproduce with
+  `cd web && npm audit`. Triage (upgrade or accept-with-justification)
+  before public deploy.
+- **Taste-profile / waste-nudge UI is intentionally trivial.** `web/src/
+  components/TasteProfilePanel.tsx` and `web/src/components/WasteNudges.tsx`
+  are plain list renders (tag pills / simple `<ul>`s), matching the W2 task
+  spec's "trivial list renders ... small, quiet panels" instruction. A
+  richer treatment (e.g. trend sparkline for taste drift, inline "add to
+  plan" action on a waste-nudge suggested recipe) was deferred by that plan,
+  not by a discovered constraint — pick this up only if a future roadmap
+  item asks for it explicitly.
+
+## SPA rebuild W5 (recipe library page)
+
+- **`POST /library/reindex` is much slower than it should be (~5 min
+  locally against the 3,884-doc demo corpus, observed 2026-07-21).**
+  Suspected cause: `app/services/recipe_indexing_service.py` (or wherever
+  the embedding provider is instantiated) appears to reload the
+  `sentence-transformers/all-MiniLM-L6-v2` model from scratch --
+  including repeated HTTP HEAD calls to the Hugging Face Hub -- on every
+  call rather than caching one instance across the reindex run. The
+  actual embedding batches only accounted for roughly 63s of the ~5min
+  wall-clock. Action: cache/reuse the embedder instance for the duration
+  of a single reindex job; re-measure. Until fixed, the SPA's client-side
+  `reindexLibrary()` timeout is set generously (10 minutes,
+  `web/src/api/endpoints.ts`) to avoid aborting a request that is still
+  going to succeed -- the 2/hour rate limit is what actually bounds
+  abuse, not this client timeout.

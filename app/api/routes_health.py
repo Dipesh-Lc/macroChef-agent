@@ -8,8 +8,8 @@ def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "macrochef-agent"}
 
 
-@router.get("/")
-def root() -> dict[str, str]:
+@router.get("/api-info")
+def api_info() -> dict[str, str]:
     return {
         "service": "macrochef-agent",
         "status": "ok",

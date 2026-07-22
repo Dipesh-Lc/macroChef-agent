@@ -1,14 +1,39 @@
+# syntax=docker/dockerfile:1
+
+# ---------------------------------------------------------------------------
+# Stage 1: build the React SPA (SPA rebuild W6 -- single-process cutover).
+# Only `web/` is needed here; the Python app is built in stage 2 below and
+# never touches Node.
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS webbuild
+
+WORKDIR /web
+
+# Copy the lockfile-defining files first so `npm ci` stays cached across
+# app-source-only rebuilds, same caching strategy as stage 2's
+# requirements.txt copy below.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2: the FastAPI app, now serving the SPA it just built above as the
+# ONLY process in the container -- no Streamlit, no docker-entrypoint.sh
+# supervisor. See app/spa.py (mount_spa) for how the built `web/dist` is
+# served + its client-side-routing fallback.
+# ---------------------------------------------------------------------------
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Default public port for the Streamlit UI (the only public ingress -- see
-# docker-entrypoint.sh). ACA overrides this by setting PORT on the container;
-# locally `docker run -p 8501:8501` matches this default with no extra config.
-ENV PORT=8501
+# ACA injects PORT at runtime; locally `docker run -p 8000:8000` matches
+# this default with no extra config.
+ENV PORT=8000
 
-# repo root on sys.path: Streamlit only adds the script dir (frontend/), but frontend imports app.config/app.dependencies — first caught in-container 2026-07-18
+# repo root on sys.path -- app/ imports app.config/app.dependencies etc.
 ENV PYTHONPATH=/app
 
 # Pin the HF cache to a known, predictable path so the model baked in below
@@ -55,17 +80,18 @@ COPY . .
 # docs/BACKLOG.md for the staleness fix this closes (2026-07-19).
 RUN python -c "from app.services.recipe_indexing_service import RecipeIndexingService; n = RecipeIndexingService().rebuild_index_clean(include_base=True, include_user=False); print(f'Baked {n} base recipes into the Chroma index at build time.'); assert n > 0, 'Chroma index build produced 0 recipes -- refusing to ship an empty index'"
 
-RUN chmod +x docker-entrypoint.sh
+# The built SPA from stage 1 -- see app/spa.py's mount_spa (settings.web_dist
+# defaults to ./web/dist, matching this path). Copied from the `webbuild`
+# stage's fresh build output, NEVER from the host's own `web/dist` (excluded
+# from the build context by .dockerignore, so a stale local build can never
+# be baked in instead of this stage's output).
+COPY --from=webbuild /web/dist ./web/dist
 
-# Only the Streamlit port is exposed/public. FastAPI/uvicorn binds
-# 127.0.0.1:8000 inside docker-entrypoint.sh and is never reachable from
-# outside the container.
-EXPOSE 8501
+# Single public process: FastAPI/uvicorn serves both the JSON API and the
+# SPA static files (app/spa.py). No internal-only process, no supervisor.
+EXPOSE 8000
 
-# ACA's ingress probe hits the public Streamlit port, not the internal API,
-# so it can't be used to detect an API-only crash. This HEALTHCHECK covers
-# that gap by curling the internal API directly from inside the container.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -f http://127.0.0.1:8000/health || exit 1
+    CMD curl -f http://127.0.0.1:${PORT}/health || exit 1
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}

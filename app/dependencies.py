@@ -20,6 +20,25 @@ SESSION_TOKEN_HEADER = "X-Session-Token"
 # session rather than living indefinitely.
 SESSION_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
+# SPA rebuild W0: HttpOnly cookie carrying the same signed session token as
+# SESSION_TOKEN_HEADER, minted by POST /session (app/api/routes_session.py)
+# and read here as a fallback when the header is absent -- see
+# get_session_user for the exclusive-precedence rule between the two. Same
+# name the (older, non-HttpOnly) Streamlit-side cookie in
+# frontend/session_client.py already uses; both are the same underlying
+# anonymous-session concept, just minted/persisted by different transports.
+SESSION_COOKIE_NAME = "mc_session"
+
+# CSRF defense for the cookie path ONLY (the header path needs none -- see
+# get_session_user's docstring for why a custom header is inherently
+# cross-site-request-forgery-resistant). A cross-site form or bare <img>/
+# fetch-with-mode-no-cors submission cannot attach an arbitrary header name
+# to a request; requiring ANY value under this header name alongside the
+# cookie is therefore sufficient to prove the request was made by
+# JavaScript that can read/set headers on this origin -- the header's
+# *value* is irrelevant, only its presence is checked.
+CSRF_HEADER_NAME = "X-Requested-With"
+
 # itsdangerous salt namespacing this token from any other signed value that
 # might someday share the same secret.
 _SESSION_TOKEN_SALT = "macrochef-session-v1"
@@ -124,28 +143,19 @@ def mint_session_token(user_id: str, settings: Settings | None = None) -> str:
     return _serializer(settings).dumps(user_id)
 
 
-def get_session_user(
-    x_session_token: str | None = Header(default=None, alias=SESSION_TOKEN_HEADER),
-    settings: Settings = Depends(get_app_settings),
-) -> str:
-    """Derive the caller's anonymous user id from a signed, time-limited
-    session token -- the sole source of truth for "who is this request
-    from" on every /library route.
+def _decode_session_token(token: str, settings: Settings) -> str:
+    """Verify `token`'s signature and expiry and return the inner user id.
 
-    This is the load-bearing check: the API is on localhost behind Streamlit
-    in production, but that must never be the only thing protecting user
-    data, so a client-supplied user id is never trusted, and a missing,
-    forged, tampered, or expired token is always rejected with 401 rather
-    than silently treated as a new anonymous session (that would let a
-    dropped/corrupted token silently orphan a user's library instead of
-    failing loudly).
+    The single place this verification happens -- both the header path and
+    the cookie path of `get_session_user` below, and POST /session
+    (app.api.routes_session), call this instead of re-implementing the
+    itsdangerous load/except dance. Always raises HTTPException(401) on any
+    invalid/expired/malformed token; see `try_decode_session_token` for a
+    non-raising variant.
     """
-    if not x_session_token:
-        raise HTTPException(status_code=401, detail="Missing session token")
-
     serializer = _serializer(settings)
     try:
-        user_id = serializer.loads(x_session_token, max_age=SESSION_TOKEN_MAX_AGE_SECONDS)
+        user_id = serializer.loads(token, max_age=SESSION_TOKEN_MAX_AGE_SECONDS)
     except SignatureExpired as exc:
         raise HTTPException(status_code=401, detail="Session token expired") from exc
     except BadSignature as exc:
@@ -154,6 +164,95 @@ def get_session_user(
     if not isinstance(user_id, str) or not user_id:
         raise HTTPException(status_code=401, detail="Invalid session token")
     return user_id
+
+
+def try_decode_session_token(token: str, settings: Settings) -> str | None:
+    """Same verification as `_decode_session_token`, but returns `None`
+    instead of raising on any invalid/expired/malformed token.
+
+    Used exclusively by POST /session (app.api.routes_session), which must
+    tell "no valid session yet" (mint a fresh one) apart from "caller is
+    misbehaving" -- there is no such misbehavior case for that endpoint (an
+    invalid/expired token there just means mint a fresh one, per spec), so
+    it never wants a 401 raised out from under it.
+    """
+    try:
+        return _decode_session_token(token, settings)
+    except HTTPException:
+        return None
+
+
+def resolve_cookie_secure(request: Request, settings: Settings) -> bool:
+    """Resolve whether the `mc_session` cookie's `Secure` attribute should be
+    set, per the tri-state `SESSION_COOKIE_SECURE` setting (app.config):
+
+    - "always" -- Secure regardless of the request. What production sets:
+      a reverse proxy in front of this process terminates TLS, so a spoofed
+      `X-Forwarded-Proto: http` must never be able to silently strip Secure
+      from a cookie that will actually be delivered to the browser over TLS.
+    - "never" -- never Secure (plain http local dev; a Secure cookie is
+      simply dropped by the browser on a non-https origin, which would make
+      the cookie appear to silently not work rather than fail loudly).
+    - "auto" (default) -- Secure when the connection itself is https
+      (`request.url.scheme`), OR a reverse proxy says the original client
+      request was (`X-Forwarded-Proto: https`). That header is only trusted
+      in this permissive default mode -- never in "always"/"never", where
+      the human has stated the answer explicitly and no request-derived
+      signal should override it.
+    """
+    mode = getattr(settings, "session_cookie_secure", "auto")
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    first_proto = forwarded_proto.split(",")[0].strip().lower()
+    if first_proto == "https":
+        return True
+    return request.url.scheme == "https"
+
+
+def get_session_user(
+    request: Request = None,  # type: ignore[assignment]
+    x_session_token: str | None = Header(default=None, alias=SESSION_TOKEN_HEADER),
+    x_requested_with: str | None = Header(default=None, alias=CSRF_HEADER_NAME),
+    settings: Settings = Depends(get_app_settings),
+) -> str:
+    """Derive the caller's anonymous user id -- the sole source of truth for
+    "who is this request from" on every /library (and now cookie-based SPA)
+    route.
+
+    Dual-read, EXCLUSIVE precedence (SPA rebuild W0):
+    - `X-Session-Token` header PRESENT (non-empty) -> used exclusively.
+      Valid -> that identity; invalid/expired -> 401. NEVER falls back to
+      any `mc_session` cookie also present on the same request -- a request
+      that deliberately supplies a header is trusted to mean it, and silent
+      cookie fallback would let a stale/different cookie override an
+      explicit header (or paper over a bug that sends a broken header).
+    - Header ABSENT -> falls back to the `mc_session` cookie. A valid
+      cookie is trusted ONLY alongside a `X-Requested-With` header of any
+      value (see CSRF_HEADER_NAME above for why presence alone is the
+      whole check) -- a cookie without it is rejected 401, because unlike
+      the header path, a browser attaches cookies to a request
+      automatically (including cross-site ones), so the cookie alone is
+      not proof the request came from this app's own JavaScript.
+    - Missing/invalid/expired token via either path -> 401, never silently
+      treated as a new anonymous session (that would let a dropped/
+      corrupted token silently orphan a user's library instead of failing
+      loudly).
+
+    This is the load-bearing check: a client-supplied user id is never
+    trusted, full stop.
+    """
+    if x_session_token:
+        return _decode_session_token(x_session_token, settings)
+
+    cookie_token = request.cookies.get(SESSION_COOKIE_NAME) if request is not None else None
+    if not cookie_token:
+        raise HTTPException(status_code=401, detail="Missing session token")
+    if not x_requested_with:
+        raise HTTPException(status_code=401, detail="Missing session token")
+    return _decode_session_token(cookie_token, settings)
 
 
 # ---------------------------------------------------------------------------

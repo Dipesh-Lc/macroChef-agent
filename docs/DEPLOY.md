@@ -12,12 +12,15 @@ How MacroChef gets from a green `pytest` run to a live public URL. What's
 automated, what's manual, and the exact `az` fallback commands if the
 automated create-if-absent steps ever fail on permissions.
 
-The pipeline lives in `.github/workflows/ci.yml` (jobs: `test` -> `preflight`
--> `build-and-push` -> `deploy`). A single container runs both Streamlit and
-FastAPI, started by `docker-entrypoint.sh`. Streamlit is the only public
-ingress (`0.0.0.0:8501`); FastAPI binds to `127.0.0.1:8000` (loopback only,
-not reachable externally). If either process dies, the container exits
-non-zero and is not reported healthy by the platform.
+The pipeline lives in `.github/workflows/ci.yml` (jobs: `test` + `web` ->
+`preflight` -> `build-and-push` -> `deploy`). **SPA rebuild W6 cutover:** the
+container now runs a SINGLE process — FastAPI/uvicorn, binding
+`0.0.0.0:${PORT}` (default 8000) — serving both the JSON API and the built
+React SPA (`web/`, via `app/spa.py`'s `mount_spa`) from the same origin.
+There is no more Streamlit, no more `docker-entrypoint.sh` two-process
+supervisor, and no more internal-vs-public port split: `PORT` is the one
+port, and it is the public ingress port. `docker-entrypoint.sh` was deleted
+in this cutover; the image's `CMD` runs uvicorn directly.
 
 ## What's automated
 
@@ -26,45 +29,56 @@ branch, with the `deploy` input left at its default `true`:
 
 1. `test` — pytest + `scripts/audit_diet_leaks.py` (unchanged gate; runs on
    every push/PR too).
-2. `preflight` — Azure login, then an explicit role-assignment check that
+2. `web` — the React SPA's own toolchain job (Node 22): `npm ci`, lint,
+   typecheck, `vitest run`, `npm run build` (runs on every push/PR too, same
+   as `test`).
+3. `preflight` — Azure login, then an explicit role-assignment check that
    fails **loudly and in the first few seconds** if `AZURE_CREDENTIALS`
    doesn't have `Contributor`/`Owner` on the subscription, before any
-   resource is touched. Then registers required resource providers
-   (`Microsoft.App`, `Microsoft.ContainerRegistry`,
-   `Microsoft.OperationalInsights`), and creates the resource group and ACR
-   **if absent** (guarded with `az ... show || az ... create` so re-runs are
-   idempotent).
-3. `build-and-push` — builds the existing root `Dockerfile` image, tags it
-   with the commit SHA and `latest`, pushes both to ACR.
-4. `deploy` — creates the Container Apps environment and the app **if
-   absent**, then always runs `az containerapp secret set` +
+   resource is touched. Gated on BOTH `test` and `web` passing. Then
+   registers required resource providers (`Microsoft.App`,
+   `Microsoft.ContainerRegistry`, `Microsoft.OperationalInsights`), and
+   creates the resource group and ACR **if absent** (guarded with
+   `az ... show || az ... create` so re-runs are idempotent).
+4. `build-and-push` — builds the existing root `Dockerfile` image (which now
+   builds `web/` in its own stage before baking the built SPA into the
+   final image — see "Topology" below), tags it with the commit SHA and
+   `latest`, pushes both to ACR.
+5. `deploy` — creates the Container Apps environment and the app **if
+   absent**, updates the ingress `--target-port` to 8000 (SPA cutover, see
+   below), then always runs `az containerapp secret set` +
    `az containerapp update` so every dispatch ships the latest image,
    secrets, and env vars as a new revision.
 
-Ordinary `git push` / pull requests only ever run the `test` job — nothing
-builds, pushes, or deploys automatically. This matches CLAUDE.md's "Public
-actions" human gate: everything is prepared, a human clicks "Run workflow".
+Ordinary `git push` / pull requests only ever run the `test`/`web` jobs —
+nothing builds, pushes, or deploys automatically. This matches CLAUDE.md's
+"Public actions" human gate: everything is prepared, a human clicks "Run
+workflow".
 
-## Topology — single container, Streamlit public + internal FastAPI
+## Topology — single container, single process (SPA rebuild W6 cutover)
 
-The deployed image runs one container with two processes orchestrated by
-`docker-entrypoint.sh`:
+**Changed in this cutover** (previously: two processes, Streamlit public +
+internal FastAPI, orchestrated by a now-deleted `docker-entrypoint.sh` — see
+git history before this commit for that topology). The deployed image now
+runs ONE container with ONE process:
 
-- **Streamlit** (port `0.0.0.0:8501`): the only public ingress. Container Apps
-  injects the `PORT` env var; locally, it defaults to 8501. The workflow
-  deploys with `--target-port 8501`.
-- **FastAPI/uvicorn** (port `127.0.0.1:8000`): loopback only, **not reachable
-  from outside the container**. Streamlit reaches it via the `MACROCHEF_API_URL`
-  env var. This avoids exposing the API to the internet.
+- **FastAPI/uvicorn** (port `0.0.0.0:${PORT}`, default 8000): the only
+  process, and the only ingress. It serves the JSON API routes AND the
+  built React SPA (`web/dist`, baked into the image by the Dockerfile's
+  `webbuild` stage; served via `app/spa.py`'s `mount_spa`) from the same
+  origin. Container Apps injects `PORT` at runtime; the workflow's
+  `--target-port` (and the explicit `az containerapp ingress update` step
+  for the already-existing app, since `create`'s `--target-port` only takes
+  effect the first time an app is created) is 8000, replacing the old 8501.
 
 **Process supervision and health checks:**
 
-- If either process dies, `docker-entrypoint.sh` uses `wait -n` to exit the
-  container with non-zero status, so the platform never reports a half-dead
-  container as healthy.
-- A `HEALTHCHECK` in the Dockerfile curls the internal FastAPI directly. This
-  is necessary because Azure Container Apps' ingress probe only reaches
-  Streamlit on port 8501 and cannot detect an API-only outage.
+- There is nothing left to supervise between two processes — uvicorn dying
+  is the container dying, which the platform detects natively.
+- The Dockerfile's `HEALTHCHECK` still curls `/health` directly (now on the
+  same port as public ingress, `127.0.0.1:${PORT}`, not a separate internal
+  port) — kept for the same defense-in-depth reason as before, just
+  simplified to one port.
 
 **Vector index and embeddings:**
 
@@ -123,12 +137,22 @@ The deployed image runs one container with two processes orchestrated by
   This makes every image build reproducible and tied to whatever corpus is
   currently committed — no manual regeneration step required.
 
-**Local development differs intentionally:**
+**Local development (two terminals, no Docker needed):**
 
-The root `docker-compose.yml` runs Streamlit and FastAPI as two separate
-services (on ports 8501 and 8000 respectively), suitable for local development
-with live reload and separate debugging. This is a separate, intentional path
-from the production single-container topology — not an inconsistency to "fix".
+```bash
+uvicorn app.main:app --reload --port 8000   # terminal 1: API
+cd web && npm run dev                         # terminal 2: Vite dev server
+```
+
+Open the Vite dev server's URL (default `http://localhost:5173`), not
+`:8000` directly — Vite's dev proxy (`web/vite.config.ts`'s
+`API_PROXY_PREFIXES`) forwards the backend API prefixes to `:8000` so the
+browser only ever talks to one origin, matching the production
+same-origin topology in spirit even though the SPA isn't baked into the
+API process yet in this mode. The root `docker-compose.yml`'s `api`
+service runs the built image's single FastAPI/uvicorn process only (no
+`web/` dev loop) — useful for smoke-testing the production topology, not
+for day-to-day SPA development (see that file's own comment).
 
 ## Safety-benchmark gate status
 
