@@ -7,6 +7,7 @@ import app.data.recipe_library_repository as repo_module
 from app.config import get_settings
 from app.data.db import Base
 from app.graph.builder import run_recommendation_graph
+from app.graph.nodes import MAX_RECOMMENDATIONS
 from app.schemas.recommendation import RecommendationRequest
 from app.schemas.user import MacroTargets, UserProfile
 from app.services.constraint_engine import validate_recipe
@@ -60,7 +61,7 @@ def test_full_graph_with_text_input_produces_safe_recommendations() -> None:
     response = run_recommendation_graph(request, "demo_user")
 
     assert response.recommendations
-    assert len(response.recommendations) <= 3
+    assert len(response.recommendations) <= MAX_RECOMMENDATIONS
     assert response.debug_trace
     assert any("inventory_confirmation_node" in item for item in response.debug_trace)
     assert not response.errors
