@@ -1,14 +1,22 @@
 import { useState } from "react";
 import { ApiError, RateLimitError } from "../api/client";
 import { createShare } from "../api/endpoints";
-import type { BatchPlan, DayPlan, Recipe, ShareCreateRequest, WeeklyPlan } from "../api/types";
+import type {
+  BatchPlan,
+  DayPlan,
+  Recipe,
+  ShareCreateRequest,
+  ShoppingItem,
+  WeeklyPlan,
+} from "../api/types";
 import { composeShareUrl } from "../lib/shareUrl";
 
 /**
- * Generic share button for any of the four `POST /share` payload shapes
- * (roadmap item "Shareable plan URLs", Phase 4 item 4). Forwards whichever
- * already-assembled object the caller holds -- it makes NO safety or
- * field-selection decision itself; the server-side allowlist in
+ * Generic share button for any of the five `POST /share` payload shapes
+ * (roadmap item "Shareable plan URLs", Phase 4 item 4, extended by task
+ * "Shareable Shopping Lists" to add the `shopping_list` plan type).
+ * Forwards whichever already-assembled object the caller holds -- it makes
+ * NO safety or field-selection decision itself; the server-side allowlist in
  * `app.services.share_service` is the sole authority on what actually gets
  * persisted/exposed (see that module's docstring), exactly like the
  * Streamlit precursor this ports (`frontend/components/share_button.py`).
@@ -17,7 +25,8 @@ export type ShareButtonProps =
   | { planType: "recipe"; payload: Recipe }
   | { planType: "day"; payload: DayPlan }
   | { planType: "batch"; payload: BatchPlan }
-  | { planType: "week"; payload: WeeklyPlan };
+  | { planType: "week"; payload: WeeklyPlan }
+  | { planType: "shopping_list"; payload: ShoppingItem[] };
 
 // Discriminated switch (not a computed-property object literal) so
 // TypeScript keeps `payload`'s type correlated with `planType` -- see the
@@ -32,6 +41,8 @@ function buildShareCreateRequest(props: ShareButtonProps): ShareCreateRequest {
       return { plan_type: "batch", batch_plan: props.payload };
     case "week":
       return { plan_type: "week", weekly_plan: props.payload };
+    case "shopping_list":
+      return { plan_type: "shopping_list", shopping_list: props.payload };
   }
 }
 

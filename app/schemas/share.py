@@ -25,9 +25,10 @@ from app.schemas.day_plan import DayPlan, PlanItem
 from app.schemas.ingredient import Ingredient
 from app.schemas.nutrition import RecipeNutrition
 from app.schemas.recipe import Recipe
+from app.schemas.shopping import ShoppingItem
 from app.schemas.weekly_plan import WeeklyPlan
 
-PlanType = Literal["recipe", "day", "batch", "week"]
+PlanType = Literal["recipe", "day", "batch", "week", "shopping_list"]
 
 
 class PublicRecipe(BaseModel):
@@ -119,6 +120,23 @@ class PublicWeeklyPlan(BaseModel):
     days: list[PublicDayPlan] = Field(default_factory=list)
 
 
+# `ShoppingItem` (app/schemas/shopping.py) is `{name, quantity, amount, unit,
+# reason}` -- zero PII, no owner-identity field, nothing to strip. It is
+# reused verbatim (not re-declared field-by-field like the four Public*
+# models above) because it is already the first genuinely
+# field-for-field-safe payload in this set; the bare list matches the shape
+# `app.services.share_service.build_shopping_list_for_items`/
+# `merge_shopping_lists` already produce and already the shape
+# `ShoppingListResponse.items` sends over the wire elsewhere in the API, so
+# no new wrapper object is introduced. Named as a type alias (not a
+# `BaseModel`) purely so this module's naming convention
+# (`Public<PlanType>`) still documents, at a glance, that a *future* field
+# added to `ShoppingItem` gets the same allowlist scrutiny this module's
+# docstring mandates for every other Public* type -- see
+# `shopping_list_to_public` in `app.services.share_service`.
+PublicShoppingList = list[ShoppingItem]
+
+
 # ---------------------------------------------------------------------------
 # Wire contracts for POST /share and GET /share/{id}.
 # ---------------------------------------------------------------------------
@@ -127,7 +145,7 @@ class PublicWeeklyPlan(BaseModel):
 class ShareCreateRequest(BaseModel):
     """Body for POST /share.
 
-    `plan_type` selects exactly one of the four optional fields below --
+    `plan_type` selects exactly one of the five optional fields below --
     the matching object the (authenticated) client already holds in its own
     UI state. This is intentionally NOT the wire-level shape that gets
     persisted: `app.services.share_service.create_share` maps whichever
@@ -142,6 +160,7 @@ class ShareCreateRequest(BaseModel):
     day_plan: DayPlan | None = None
     batch_plan: BatchPlan | None = None
     weekly_plan: WeeklyPlan | None = None
+    shopping_list: list[ShoppingItem] | None = None
 
     @model_validator(mode="after")
     def _exactly_one_matching_payload(self) -> "ShareCreateRequest":
@@ -150,12 +169,14 @@ class ShareCreateRequest(BaseModel):
             "day": self.day_plan,
             "batch": self.batch_plan,
             "week": self.weekly_plan,
+            "shopping_list": self.shopping_list,
         }
         expected_field = {
             "recipe": "recipe",
             "day": "day_plan",
             "batch": "batch_plan",
             "week": "weekly_plan",
+            "shopping_list": "shopping_list",
         }[self.plan_type]
         if by_type[self.plan_type] is None:
             raise ValueError(
@@ -186,7 +207,7 @@ class SharedPlanView(BaseModel):
     """
 
     plan_type: PlanType
-    content: PublicRecipe | PublicDayPlan | PublicBatchPlan | PublicWeeklyPlan
+    content: PublicRecipe | PublicDayPlan | PublicBatchPlan | PublicWeeklyPlan | PublicShoppingList
     # Non-optional by design (Q6 of this feature's design consult) -- always
     # populated from app.services.share_service.SHARE_DISCLAIMER, never
     # left to the frontend to add or omit.

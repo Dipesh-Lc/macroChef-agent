@@ -90,6 +90,16 @@ def _recipe_payload(recipe_id: str = "share_route_recipe_1") -> dict:
     }
 
 
+def _shopping_list_payload() -> dict:
+    return {
+        "plan_type": "shopping_list",
+        "shopping_list": [
+            {"name": "flour", "quantity": "short 300 g", "amount": 300, "unit": "g", "reason": None},
+            {"name": "eggs", "quantity": "short 2", "amount": 2, "unit": "count", "reason": None},
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Auth: POST requires a session, GET does not.
 # ---------------------------------------------------------------------------
@@ -180,6 +190,46 @@ def test_get_share_revoked_id_returns_404_same_as_unknown(client: TestClient) ->
     assert known_missing.status_code == 404
     assert revoked.status_code == 404
     assert known_missing.json() == revoked.json()
+
+
+# ---------------------------------------------------------------------------
+# shopping_list plan_type (task: "Shareable Shopping Lists").
+# ---------------------------------------------------------------------------
+
+
+def test_create_share_with_shopping_list_succeeds(client: TestClient) -> None:
+    response = client.post(
+        "/share", json=_shopping_list_payload(), headers=_headers("owner_user")
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "share_id" in body
+    assert isinstance(body["share_id"], str) and body["share_id"]
+
+
+def test_get_share_returns_shopping_list_content_unauthenticated(client: TestClient) -> None:
+    create_response = client.post(
+        "/share", json=_shopping_list_payload(), headers=_headers("owner_user")
+    )
+    share_id = create_response.json()["share_id"]
+
+    # Deliberately NO session header on this call.
+    response = client.get(f"/share/{share_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan_type"] == "shopping_list"
+    assert body["content"] == [
+        {"name": "flour", "quantity": "short 300 g", "amount": 300.0, "unit": "g", "reason": None},
+        {"name": "eggs", "quantity": "short 2", "amount": 2.0, "unit": "count", "reason": None},
+    ]
+    assert body["disclaimer"] == SHARE_DISCLAIMER
+
+
+def test_create_share_shopping_list_rejects_mismatched_payload(client: TestClient) -> None:
+    payload = _shopping_list_payload()
+    payload["day_plan"] = {"items": [], "meals_planned": 0}
+    response = client.post("/share", json=payload, headers=_headers("owner_user"))
+    assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
