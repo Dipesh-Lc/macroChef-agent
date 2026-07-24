@@ -1471,7 +1471,7 @@ export interface components {
          * ShareCreateRequest
          * @description Body for POST /share.
          *
-         *     `plan_type` selects exactly one of the four optional fields below --
+         *     `plan_type` selects exactly one of the five optional fields below --
          *     the matching object the (authenticated) client already holds in its own
          *     UI state. This is intentionally NOT the wire-level shape that gets
          *     persisted: `app.services.share_service.create_share` maps whichever
@@ -1485,11 +1485,13 @@ export interface components {
              * Plan Type
              * @enum {string}
              */
-            plan_type: "recipe" | "day" | "batch" | "week";
+            plan_type: "recipe" | "day" | "batch" | "week" | "shopping_list";
             recipe?: components["schemas"]["Recipe"] | null;
             day_plan?: components["schemas"]["DayPlan"] | null;
             batch_plan?: components["schemas"]["BatchPlan"] | null;
             weekly_plan?: components["schemas"]["WeeklyPlan"] | null;
+            /** Shopping List */
+            shopping_list?: components["schemas"]["ShoppingItem"][] | null;
         };
         /**
          * ShareCreateResponse
@@ -1512,9 +1514,9 @@ export interface components {
              * Plan Type
              * @enum {string}
              */
-            plan_type: "recipe" | "day" | "batch" | "week";
+            plan_type: "recipe" | "day" | "batch" | "week" | "shopping_list";
             /** Content */
-            content: components["schemas"]["PublicRecipe"] | components["schemas"]["PublicDayPlan"] | components["schemas"]["PublicBatchPlan"] | components["schemas"]["PublicWeeklyPlan"];
+            content: components["schemas"]["PublicRecipe"] | components["schemas"]["PublicDayPlan"] | components["schemas"]["PublicBatchPlan"] | components["schemas"]["PublicWeeklyPlan"] | components["schemas"]["ShoppingItem"][];
             /** Disclaimer */
             disclaimer: string;
         };
