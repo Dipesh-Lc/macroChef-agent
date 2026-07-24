@@ -55,6 +55,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recipes/{recipe_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recipe
+         * @description Public call: no session bootstrap, no rate limit -- this is a pure
+         *     lookup by id into the already-loaded corpus (`app.services.
+         *     recipe_retriever.get_recipe_by_id`), the same lookup POST /plan/day and
+         *     friends already do server-side to resolve a `PlanItem.recipe_id` back to
+         *     its full `Recipe`. It computes nothing (no nutrition math, no allergy
+         *     decision) and makes no safety decision of its own -- it only returns
+         *     already-computed, already-grounded data the frontend can't otherwise
+         *     reach from a `PlanItem` (which only carries `{recipe_id, title,
+         *     servings}`, see `app.schemas.day_plan.PlanItem`). Used by the day/week
+         *     plan views' "click a recipe name" detail modal.
+         */
+        get: operations["get_recipe_recipes__recipe_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recipes/recommend": {
         parameters: {
             query?: never;
@@ -1818,6 +1847,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InventoryObservation"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recipe_recipes__recipe_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
                 };
             };
             /** @description Validation Error */

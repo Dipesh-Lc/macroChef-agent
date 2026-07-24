@@ -23,7 +23,20 @@ export interface DayPlanCardPlan {
   within_tolerance: boolean;
 }
 
-export function DayPlanCard({ dayIndex, plan }: { dayIndex: number; plan: DayPlanCardPlan }) {
+export function DayPlanCard({
+  dayIndex,
+  plan,
+  onSelectRecipe,
+}: {
+  dayIndex: number;
+  plan: DayPlanCardPlan;
+  /** Optional -- the shared-plan viewer (a `PublicDayPlan`, no session/API
+   * access) doesn't wire this, so a recipe title there is inert text, not a
+   * click target. See `WeekPlanPage.tsx`, which lifts the single
+   * `selectedRecipeId` state up to the page level (one modal instance for
+   * the whole week grid, not one per card). */
+  onSelectRecipe?: (recipeId: string) => void;
+}) {
   const items = plan.items ?? [];
   return (
     <article className="flex flex-col gap-2 rounded-lg border border-sage-line bg-white p-3">
@@ -51,7 +64,17 @@ export function DayPlanCard({ dayIndex, plan }: { dayIndex: number; plan: DayPla
         <ul className="flex flex-col gap-0.5 text-xs text-cast-iron">
           {items.map((item) => (
             <li key={item.recipe_id} className="flex items-center justify-between gap-2">
-              <span className="truncate">{item.title}</span>
+              {onSelectRecipe ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectRecipe(item.recipe_id)}
+                  className="truncate text-left underline-offset-2 hover:underline"
+                >
+                  {item.title}
+                </button>
+              ) : (
+                <span className="truncate">{item.title}</span>
+              )}
               <span className="shrink-0 font-mono text-cast-iron/60">
                 {item.servings}x
               </span>

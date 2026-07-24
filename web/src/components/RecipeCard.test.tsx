@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import type { MealRecommendation, Recipe, RecipeScore } from "../api/types";
+import type { Recipe, RecipeScore } from "../api/types";
 import { RecipeCard } from "./RecipeCard";
 import { getDetailedInstructions } from "../api/endpoints";
 import { ApiError } from "../api/client";
@@ -61,18 +61,16 @@ function buildScore(): RecipeScore {
   };
 }
 
-function buildRecommendation(recipe: Recipe): MealRecommendation {
-  return { recipe, score: buildScore(), explanation: "Because reasons." };
-}
-
 describe("RecipeCard: no explanation paragraph, no trust badge/USDA-matched text", () => {
   it("never renders the LLM-generated explanation text", () => {
-    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    renderWithQueryClient(
+      <RecipeCard recipe={buildRecipe()} score={buildScore()} explanation="Because reasons." />,
+    );
     expect(screen.queryByText("Because reasons.")).toBeNull();
   });
 
   it("never renders a TrustBadge state label or USDA-matched count text", () => {
-    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    renderWithQueryClient(<RecipeCard recipe={buildRecipe()} score={buildScore()} />);
     expect(screen.queryByText("USDA ✓")).toBeNull();
     expect(screen.queryByText("unverified")).toBeNull();
     expect(screen.queryByText(/ingredients USDA-matched/)).toBeNull();
@@ -83,7 +81,7 @@ describe("RecipeCard: Matching Info chips are always visible", () => {
   it("renders used/missing ingredient chips unconditionally, before the score-details toggle", () => {
     const recipe = buildRecipe();
     const score = { ...buildScore(), used_ingredients: ["chicken"], missing_ingredients: ["rice"] };
-    renderWithQueryClient(<RecipeCard recommendation={{ recipe, score, explanation: "" }} />);
+    renderWithQueryClient(<RecipeCard recipe={recipe} score={score} />);
 
     expect(screen.getByText("Matching Info")).toBeInTheDocument();
     const chicken = screen.getByText("chicken");
@@ -101,7 +99,7 @@ describe("RecipeCard: Matching Info chips are always visible", () => {
 
 describe("RecipeCard: score-details toggle", () => {
   it("hides the 5 remaining score tiles until 'Show score details' is clicked", () => {
-    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    renderWithQueryClient(<RecipeCard recipe={buildRecipe()} score={buildScore()} />);
 
     expect(screen.queryByText("Final")).toBeNull();
     expect(screen.queryByText("Macros")).toBeNull();
@@ -128,14 +126,14 @@ describe("RecipeCard: score-details toggle", () => {
 describe("RecipeCard restored-from-quarantine badge", () => {
   it("shows the badge for a restored recipe", () => {
     renderWithQueryClient(
-      <RecipeCard recommendation={buildRecommendation(buildRecipe({ restored_from_quarantine: true }))} />,
+      <RecipeCard recipe={buildRecipe({ restored_from_quarantine: true })} score={buildScore()} />,
     );
     expect(screen.getByText("Restored from source")).toBeInTheDocument();
   });
 
   it("omits the badge for a normal recipe", () => {
     renderWithQueryClient(
-      <RecipeCard recommendation={buildRecommendation(buildRecipe({ restored_from_quarantine: false }))} />,
+      <RecipeCard recipe={buildRecipe({ restored_from_quarantine: false })} score={buildScore()} />,
     );
     expect(screen.queryByText("Restored from source")).toBeNull();
   });
@@ -152,7 +150,7 @@ describe("RecipeCard 'Get detailed instructions'", () => {
       }),
     );
 
-    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    renderWithQueryClient(<RecipeCard recipe={buildRecipe()} score={buildScore()} />);
 
     fireEvent.click(screen.getByText("Get detailed instructions"));
 
@@ -174,7 +172,7 @@ describe("RecipeCard 'Get detailed instructions'", () => {
       new ApiError(500, "Could not generate detailed instructions. Please try again."),
     );
 
-    renderWithQueryClient(<RecipeCard recommendation={buildRecommendation(buildRecipe())} />);
+    renderWithQueryClient(<RecipeCard recipe={buildRecipe()} score={buildScore()} />);
 
     fireEvent.click(screen.getByText("Get detailed instructions"));
 
@@ -183,5 +181,22 @@ describe("RecipeCard 'Get detailed instructions'", () => {
         screen.getByText("Could not generate detailed instructions. Please try again."),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe("RecipeCard: without a score (plain recipe-detail view)", () => {
+  it("renders base sections but omits every score-dependent section", () => {
+    renderWithQueryClient(<RecipeCard recipe={buildRecipe()} />);
+
+    // Base sections still render.
+    expect(screen.getByText("Test Recipe")).toBeInTheDocument();
+    expect(screen.getByText("Servings")).toBeInTheDocument();
+    expect(screen.getByText("Where these numbers come from")).toBeInTheDocument();
+    expect(screen.getByText("Show instructions")).toBeInTheDocument();
+    expect(screen.getByText("Get detailed instructions")).toBeInTheDocument();
+
+    // Score-dependent sections are absent.
+    expect(screen.queryByText("Matching Info")).toBeNull();
+    expect(screen.queryByText("Show score details")).toBeNull();
   });
 });

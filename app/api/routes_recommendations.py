@@ -1,13 +1,33 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import get_settings
 from app.dependencies import require_recommend_rate_limit
 from app.graph.builder import run_recommendation_graph
 from app.schemas.instructions import DetailedInstructionsRequest, DetailedInstructionsResponse
+from app.schemas.recipe import Recipe
 from app.schemas.recommendation import RecommendationRequest, RecommendationResponse
 from app.services.model_provider import generate_detailed_instructions_with_provider_chain
+from app.services.recipe_retriever import get_recipe_by_id
 
 router = APIRouter(prefix="/recipes", tags=["recommendations"])
+
+
+@router.get("/{recipe_id}", response_model=Recipe)
+def get_recipe(recipe_id: str) -> Recipe:
+    """Public call: no session bootstrap, no rate limit -- this is a pure
+    lookup by id into the already-loaded corpus (`app.services.
+    recipe_retriever.get_recipe_by_id`), the same lookup POST /plan/day and
+    friends already do server-side to resolve a `PlanItem.recipe_id` back to
+    its full `Recipe`. It computes nothing (no nutrition math, no allergy
+    decision) and makes no safety decision of its own -- it only returns
+    already-computed, already-grounded data the frontend can't otherwise
+    reach from a `PlanItem` (which only carries `{recipe_id, title,
+    servings}`, see `app.schemas.day_plan.PlanItem`). Used by the day/week
+    plan views' "click a recipe name" detail modal."""
+    recipe = get_recipe_by_id(recipe_id)
+    if recipe is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
 
 
 @router.post("/recommend", response_model=RecommendationResponse)

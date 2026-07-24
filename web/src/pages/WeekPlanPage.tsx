@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ProfileForm } from "../components/ProfileForm";
 import { PantryInput, type PantryState } from "../components/PantryInput";
+import { RecipeDetailModal } from "../components/RecipeDetailModal";
 import { SafetyAuditPanel } from "../components/SafetyAuditPanel";
 import { ShoppingList } from "../components/ShoppingList";
 import { ShareButton } from "../components/ShareButton";
@@ -84,6 +85,10 @@ export default function WeekPlanPage() {
   const [days, setDays] = useState(DEFAULT_DAYS);
   const [maxPerRecipe, setMaxPerRecipe] = useState(2);
   const [rateLimitToast, setRateLimitToast] = useState<string | null>(null);
+  // Lifted here (not per-`DayPlanCard`) so only one modal instance ever
+  // exists for the whole week grid at a time -- see `WeekCalendarGrid`'s
+  // and `DayPlanCard`'s own docstrings.
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
 
   const planMutation = useMutation({
     mutationFn: (request: WeeklyPlanRequest) => planWeek(request),
@@ -214,6 +219,7 @@ export default function WeekPlanPage() {
                 <WeekCalendarGrid
                   days={result.plan.days ?? []}
                   trustedPoolSize={result.plan.trusted_pool_size}
+                  onSelectRecipe={setSelectedRecipeId}
                 />
 
                 <PantryUtilizationGauge
@@ -238,6 +244,10 @@ export default function WeekPlanPage() {
           </p>
         )}
       </div>
+
+      {selectedRecipeId && (
+        <RecipeDetailModal recipeId={selectedRecipeId} onClose={() => setSelectedRecipeId(null)} />
+      )}
     </div>
   );
 }

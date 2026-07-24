@@ -14,6 +14,7 @@ import type {
   DetailedInstructionsResponse,
   FeedbackRequest,
   InventoryObservation,
+  Recipe,
   RecipeDiscoveryRequest,
   RecipeDiscoveryResponse,
   RecommendationRequest,
@@ -129,6 +130,20 @@ export async function postFeedback(request: FeedbackRequest): Promise<void> {
     method: "POST",
     json: request,
     sessionRequired: true,
+  });
+}
+
+/**
+ * Public call: no session bootstrap, no CSRF header -- same convention as
+ * `planDay`/`getShoppingList` (a pure by-id lookup, see
+ * `app.api.routes_recommendations.get_recipe`'s docstring). Used by
+ * `RecipeDetailModal` to resolve a `PlanItem.recipe_id` (day/week plan rows
+ * only carry `{recipe_id, title, servings}`) back to the full `Recipe` for
+ * display -- computes nothing and makes no safety decision.
+ */
+export async function getRecipe(recipeId: string): Promise<Recipe> {
+  return apiRequest<Recipe>(`/recipes/${encodeURIComponent(recipeId)}`, {
+    method: "GET",
   });
 }
 

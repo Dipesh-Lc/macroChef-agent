@@ -100,6 +100,49 @@
         }
       }
     },
+    "/recipes/{recipe_id}": {
+      "get": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Get Recipe",
+        "description": "Public call: no session bootstrap, no rate limit -- this is a pure\nlookup by id into the already-loaded corpus (`app.services.\nrecipe_retriever.get_recipe_by_id`), the same lookup POST /plan/day and\nfriends already do server-side to resolve a `PlanItem.recipe_id` back to\nits full `Recipe`. It computes nothing (no nutrition math, no allergy\ndecision) and makes no safety decision of its own -- it only returns\nalready-computed, already-grounded data the frontend can't otherwise\nreach from a `PlanItem` (which only carries `{recipe_id, title,\nservings}`, see `app.schemas.day_plan.PlanItem`). Used by the day/week\nplan views' \"click a recipe name\" detail modal.",
+        "operationId": "get_recipe_recipes__recipe_id__get",
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recipe"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/recipes/recommend": {
       "post": {
         "tags": [

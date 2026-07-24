@@ -160,7 +160,12 @@ export default function HomePage() {
             ) : (
               <div className="flex flex-col gap-4">
                 {(result.recommendations ?? []).slice(0, visibleCount).map((recommendation) => (
-                  <RecipeCard key={recommendation.recipe.recipe_id} recommendation={recommendation} />
+                  <RecipeCard
+                    key={recommendation.recipe.recipe_id}
+                    recipe={recommendation.recipe}
+                    score={recommendation.score}
+                    explanation={recommendation.explanation}
+                  />
                 ))}
 
                 {visibleCount < (result.recommendations ?? []).length && (
