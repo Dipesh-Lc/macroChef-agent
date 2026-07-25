@@ -84,6 +84,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recipes/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Recipes
+         * @description Deterministic search/filter over the existing static corpus (loaded
+         *     via `app.rag.loaders.load_corpus`) -- NOT the generative `/library/
+         *     discover` endpoint. Rate-limited the same way as POST /recipes/recommend
+         *     and POST /recipes/instructions above (this file's existing pattern for a
+         *     non-personalized-write, corpus-scale endpoint); see
+         *     `require_recommend_rate_limit`'s own docstring. `session_user_id` is
+         *     otherwise unused: this endpoint reads/writes no per-user data, exactly
+         *     like /recipes/instructions.
+         *
+         *     SAFETY (mandatory, verifiable): allergen exclusion and diet-type
+         *     exclusion are each decided by calling `app.services.constraint_engine`'s
+         *     `contains_allergen`/`violates_diet_type` DIRECTLY -- the same
+         *     deterministic, substring-matching primitives `validate_recipe` itself
+         *     calls -- never an LLM, and never `recipe.allergens`/`recipe.diet_tags`
+         *     tag metadata alone. `validate_recipe` itself is deliberately NOT used
+         *     here: it also enforces `contains_disliked_ingredient`/
+         *     `violates_cook_time`, which have no meaning for a search/browse request
+         *     and would require synthesizing dummy values on a fake `UserProfile`.
+         *
+         *     Calorie/macro range filtering reads ONLY
+         *     `app.services.nutrition_view.trusted_per_serving` -- never
+         *     `recipe.calories`/`recipe.protein_g` (self-reported tag fields, never
+         *     trusted for scoring/filtering per that model's own docstring). When at
+         *     least one calorie/macro filter is supplied and `trusted_per_serving`
+         *     returns `None` for a recipe (ungrounded/partial/flagged nutrition), that
+         *     recipe is excluded and counted in `macro_unavailable_excluded`. When NO
+         *     calorie/macro filter is supplied, nutrition groundedness is never
+         *     checked and nothing is excluded on that basis -- a cuisine/allergen/diet
+         *     -only search must not silently drop ungrounded recipes.
+         *
+         *     Cuisine matching mirrors `RecipeRetriever._keyword_score`'s existing
+         *     convention (app.services.recipe_retriever): case-insensitive exact
+         *     match against `recipe.cuisine`, not a substring/fuzzy match.
+         *
+         *     Linear scan over `load_corpus()`, no index/cache -- the same performance
+         *     posture POST /plan/day, /plan/batch, and /plan/week already use
+         *     (app.api.routes_day_planner) at this corpus size.
+         */
+        post: operations["search_recipes_recipes_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recipes/recommend": {
         parameters: {
             query?: never;
@@ -1420,6 +1476,62 @@ export interface components {
             /** Rejection Reason */
             rejection_reason?: string | null;
         };
+        /**
+         * RecipeSearchRequest
+         * @description The `POST /recipes/search` request body.
+         *
+         *     Deliberately standalone fields (mirroring `RecipeDiscoveryRequest` in
+         *     app.schemas.library), not a synthesized `UserProfile` -- a search/browse
+         *     context has no cook-time or disliked-ingredient semantics, so this
+         *     schema does not invent dummy values for fields `UserProfile` requires
+         *     but that don't apply here. This endpoint filters the existing static
+         *     corpus (loaded via app.rag.loaders.load_corpus); it is NOT the
+         *     generative `/library/discover` endpoint.
+         */
+        RecipeSearchRequest: {
+            /** Cuisines */
+            cuisines?: string[] | null;
+            /** Allergies */
+            allergies?: string[] | null;
+            /** Diet Type */
+            diet_type?: string | null;
+            /** Calorie Min */
+            calorie_min?: number | null;
+            /** Calorie Max */
+            calorie_max?: number | null;
+            /** Protein Min */
+            protein_min?: number | null;
+            /** Protein Max */
+            protein_max?: number | null;
+            /** Carbs Min */
+            carbs_min?: number | null;
+            /** Carbs Max */
+            carbs_max?: number | null;
+            /** Fat Min */
+            fat_min?: number | null;
+            /** Fat Max */
+            fat_max?: number | null;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /** RecipeSearchResponse */
+        RecipeSearchResponse: {
+            /** Results */
+            results?: components["schemas"]["Recipe"][];
+            /**
+             * Total Matched
+             * @default 0
+             */
+            total_matched: number;
+            /**
+             * Macro Unavailable Excluded
+             * @default 0
+             */
+            macro_unavailable_excluded: number;
+        };
         /** RecommendationRequest */
         RecommendationRequest: {
             /**
@@ -1880,6 +1992,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_recipes_recipes_search_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeSearchResponse"];
                 };
             };
             /** @description Validation Error */

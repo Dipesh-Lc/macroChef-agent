@@ -143,6 +143,82 @@
         }
       }
     },
+    "/recipes/search": {
+      "post": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Search Recipes",
+        "description": "Deterministic search/filter over the existing static corpus (loaded\nvia `app.rag.loaders.load_corpus`) -- NOT the generative `/library/\ndiscover` endpoint. Rate-limited the same way as POST /recipes/recommend\nand POST /recipes/instructions above (this file's existing pattern for a\nnon-personalized-write, corpus-scale endpoint); see\n`require_recommend_rate_limit`'s own docstring. `session_user_id` is\notherwise unused: this endpoint reads/writes no per-user data, exactly\nlike /recipes/instructions.\n\nSAFETY (mandatory, verifiable): allergen exclusion and diet-type\nexclusion are each decided by calling `app.services.constraint_engine`'s\n`contains_allergen`/`violates_diet_type` DIRECTLY -- the same\ndeterministic, substring-matching primitives `validate_recipe` itself\ncalls -- never an LLM, and never `recipe.allergens`/`recipe.diet_tags`\ntag metadata alone. `validate_recipe` itself is deliberately NOT used\nhere: it also enforces `contains_disliked_ingredient`/\n`violates_cook_time`, which have no meaning for a search/browse request\nand would require synthesizing dummy values on a fake `UserProfile`.\n\nCalorie/macro range filtering reads ONLY\n`app.services.nutrition_view.trusted_per_serving` -- never\n`recipe.calories`/`recipe.protein_g` (self-reported tag fields, never\ntrusted for scoring/filtering per that model's own docstring). When at\nleast one calorie/macro filter is supplied and `trusted_per_serving`\nreturns `None` for a recipe (ungrounded/partial/flagged nutrition), that\nrecipe is excluded and counted in `macro_unavailable_excluded`. When NO\ncalorie/macro filter is supplied, nutrition groundedness is never\nchecked and nothing is excluded on that basis -- a cuisine/allergen/diet\n-only search must not silently drop ungrounded recipes.\n\nCuisine matching mirrors `RecipeRetriever._keyword_score`'s existing\nconvention (app.services.recipe_retriever): case-insensitive exact\nmatch against `recipe.cuisine`, not a substring/fuzzy match.\n\nLinear scan over `load_corpus()`, no index/cache -- the same performance\nposture POST /plan/day, /plan/batch, and /plan/week already use\n(app.api.routes_day_planner) at this corpus size.",
+        "operationId": "search_recipes_recipes_search_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeSearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/recipes/recommend": {
       "post": {
         "tags": [
@@ -3459,6 +3535,178 @@
           "final_score"
         ],
         "title": "RecipeScore"
+      },
+      "RecipeSearchRequest": {
+        "properties": {
+          "cuisines": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisines"
+          },
+          "allergies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allergies"
+          },
+          "diet_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diet Type"
+          },
+          "calorie_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calorie Min"
+          },
+          "calorie_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calorie Max"
+          },
+          "protein_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein Min"
+          },
+          "protein_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein Max"
+          },
+          "carbs_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs Min"
+          },
+          "carbs_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs Max"
+          },
+          "fat_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat Min"
+          },
+          "fat_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat Max"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "title": "RecipeSearchRequest",
+        "description": "The `POST /recipes/search` request body.\n\nDeliberately standalone fields (mirroring `RecipeDiscoveryRequest` in\napp.schemas.library), not a synthesized `UserProfile` -- a search/browse\ncontext has no cook-time or disliked-ingredient semantics, so this\nschema does not invent dummy values for fields `UserProfile` requires\nbut that don't apply here. This endpoint filters the existing static\ncorpus (loaded via app.rag.loaders.load_corpus); it is NOT the\ngenerative `/library/discover` endpoint."
+      },
+      "RecipeSearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/Recipe"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "total_matched": {
+            "type": "integer",
+            "title": "Total Matched",
+            "default": 0
+          },
+          "macro_unavailable_excluded": {
+            "type": "integer",
+            "title": "Macro Unavailable Excluded",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RecipeSearchResponse"
       },
       "RecommendationRequest": {
         "properties": {
