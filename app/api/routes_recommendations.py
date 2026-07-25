@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.config import get_settings
 from app.dependencies import require_recommend_rate_limit
@@ -11,7 +11,6 @@ from app.schemas.recommendation import RecommendationRequest, RecommendationResp
 from app.services.constraint_engine import contains_allergen, violates_diet_type
 from app.services.model_provider import generate_detailed_instructions_with_provider_chain
 from app.services.nutrition_view import trusted_per_serving
-from app.services.recipe_retriever import get_recipe_by_id
 
 router = APIRouter(prefix="/recipes", tags=["recommendations"])
 
@@ -50,24 +49,6 @@ def _within_macro_ranges(macros, request: RecipeSearchRequest) -> bool:  # type:
     if request.fat_max is not None and macros.fat_g > request.fat_max:
         return False
     return True
-
-
-@router.get("/{recipe_id}", response_model=Recipe)
-def get_recipe(recipe_id: str) -> Recipe:
-    """Public call: no session bootstrap, no rate limit -- this is a pure
-    lookup by id into the already-loaded corpus (`app.services.
-    recipe_retriever.get_recipe_by_id`), the same lookup POST /plan/day and
-    friends already do server-side to resolve a `PlanItem.recipe_id` back to
-    its full `Recipe`. It computes nothing (no nutrition math, no allergy
-    decision) and makes no safety decision of its own -- it only returns
-    already-computed, already-grounded data the frontend can't otherwise
-    reach from a `PlanItem` (which only carries `{recipe_id, title,
-    servings}`, see `app.schemas.day_plan.PlanItem`). Used by the day/week
-    plan views' "click a recipe name" detail modal."""
-    recipe = get_recipe_by_id(recipe_id)
-    if recipe is None:
-        raise HTTPException(status_code=404, detail="Recipe not found")
-    return recipe
 
 
 @router.post("/search", response_model=RecipeSearchResponse)
