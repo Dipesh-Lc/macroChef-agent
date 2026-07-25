@@ -46,6 +46,12 @@ tests/fixtures/scrape/
 scripts/scrape_candidate_ids.py
 tests/test_scrape_candidate_ids.py
 
+# Same reason: tests the resume/skip logic inside the local-only
+# scrape_recipe_pages.py (2026-07-25, resume-logic fix for the candidate-id
+# scraper's not_found handling) -- same "raw scraper code" class, stays
+# local-only.
+tests/test_scrape_recipe_pages_resume.py
+
 frontend/.streamlit/
 dist/
 build/
