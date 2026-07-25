@@ -44,6 +44,10 @@ export type DayPlanResponse = components["schemas"]["DayPlanResponse"];
 
 export type ShoppingListRequest = components["schemas"]["ShoppingListRequest"];
 export type ShoppingListResponse = components["schemas"]["ShoppingListResponse"];
+export type ShoppingListForItemsRequest = components["schemas"]["ShoppingListForItemsRequest"];
+
+export type RecipeSearchRequest = components["schemas"]["RecipeSearchRequest"];
+export type RecipeSearchResponse = components["schemas"]["RecipeSearchResponse"];
 
 export type BatchPlan = components["schemas"]["BatchPlan"];
 export type RecipeFit = components["schemas"]["RecipeFit"];

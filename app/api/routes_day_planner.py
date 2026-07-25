@@ -5,6 +5,7 @@ from app.schemas.batch_plan import BatchPlanRequest, BatchPlanResponse
 from app.schemas.day_plan import (
     DayPlanRequest,
     DayPlanResponse,
+    ShoppingListForItemsRequest,
     ShoppingListRequest,
     ShoppingListResponse,
 )
@@ -251,4 +252,34 @@ def plan_shopping_list(request: ShoppingListRequest) -> ShoppingListResponse:
         if recipe.recipe_id in {item.recipe_id for item in request.plan.items}
     }
     shopping_list = build_shopping_list_for_plan(request.plan, recipe_lookup, request.inventory)
+    return ShoppingListResponse(shopping_list=shopping_list)
+
+
+@router.post("/shopping-list-for-items", response_model=ShoppingListResponse)
+def plan_shopping_list_for_items(request: ShoppingListForItemsRequest) -> ShoppingListResponse:
+    """Frontend recipe search/plan-builder follow-up: shopping-list
+    aggregation across a caller-supplied `list[PlanItem]` that did NOT come
+    from `assemble_plan`/`assemble_day_plan` (e.g. a manually-curated
+    selection assembled client-side from `POST /recipes/search` results --
+    see `app.schemas.day_plan.ShoppingListForItemsRequest`'s docstring).
+
+    NOT a safety endpoint, identical posture to `plan_shopping_list` above:
+    every `recipe_id` in `request.items` was already safety-cleared when the
+    user found it via a safety-filtering search/recommend endpoint, so this
+    endpoint makes no new safety/allergy/diet decision -- it only does pure
+    quantity arithmetic (`app.services.procurement_service.
+    build_shopping_list_for_items`, the exact same aggregate-then-reconcile-
+    once call `plan_batch`/`plan_week` already use for their own
+    `list[PlanItem]`) against the full corpus looked up by id. A
+    `recipe_id` absent from the corpus is silently skipped by
+    `build_shopping_list_for_items` (never fabricated), same as every other
+    caller of that function.
+    """
+    all_recipes = load_corpus()
+    recipe_lookup = {
+        recipe.recipe_id: recipe
+        for recipe in all_recipes
+        if recipe.recipe_id in {item.recipe_id for item in request.items}
+    }
+    shopping_list = build_shopping_list_for_items(request.items, recipe_lookup, request.inventory)
     return ShoppingListResponse(shopping_list=shopping_list)

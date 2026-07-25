@@ -970,6 +970,48 @@
         }
       }
     },
+    "/plan/shopping-list-for-items": {
+      "post": {
+        "tags": [
+          "day-planner"
+        ],
+        "summary": "Plan Shopping List For Items",
+        "description": "Frontend recipe search/plan-builder follow-up: shopping-list\naggregation across a caller-supplied `list[PlanItem]` that did NOT come\nfrom `assemble_plan`/`assemble_day_plan` (e.g. a manually-curated\nselection assembled client-side from `POST /recipes/search` results --\nsee `app.schemas.day_plan.ShoppingListForItemsRequest`'s docstring).\n\nNOT a safety endpoint, identical posture to `plan_shopping_list` above:\nevery `recipe_id` in `request.items` was already safety-cleared when the\nuser found it via a safety-filtering search/recommend endpoint, so this\nendpoint makes no new safety/allergy/diet decision -- it only does pure\nquantity arithmetic (`app.services.procurement_service.\nbuild_shopping_list_for_items`, the exact same aggregate-then-reconcile-\nonce call `plan_batch`/`plan_week` already use for their own\n`list[PlanItem]`) against the full corpus looked up by id. A\n`recipe_id` absent from the corpus is silently skipped by\n`build_shopping_list_for_items` (never fabricated), same as every other\ncaller of that function.",
+        "operationId": "plan_shopping_list_for_items_plan_shopping_list_for_items_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShoppingListForItemsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tools/validate-recipe": {
       "post": {
         "tags": [
@@ -4140,6 +4182,27 @@
           "name"
         ],
         "title": "ShoppingItem"
+      },
+      "ShoppingListForItemsRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "title": "Inventory"
+          }
+        },
+        "type": "object",
+        "title": "ShoppingListForItemsRequest",
+        "description": "Wire contract for POST /plan/shopping-list-for-items (frontend recipe\nsearch/plan-builder follow-up).\n\nUnlike `ShoppingListRequest`, `items` is a caller-supplied `list[PlanItem]`\nthat did NOT come from `assemble_plan`/`assemble_day_plan` -- it is a\nmanually-curated, client-side-only selection (e.g. recipes a user found\nvia `POST /recipes/search` and added to a plan one at a time), so there\nis no `DayPlan` wrapper with macro-fit fields to reuse. This endpoint\nstill makes NO new safety decision: every `recipe_id` here was already\nsafety-cleared when the user found it via a safety-filtering search/\nrecommend endpoint, so this is pure quantity arithmetic (same\n`app.services.procurement_service.build_shopping_list_for_items`\naggregate-then-reconcile-once call `plan_batch`/`plan_week` already use\nfor their own `list[PlanItem]`), never a re-filter and never a dummy\nmacro/target value fabricated to satisfy `ShoppingListRequest`'s\n`DayPlan` shape."
       },
       "ShoppingListRequest": {
         "properties": {

@@ -429,6 +429,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plan/shopping-list-for-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan Shopping List For Items
+         * @description Frontend recipe search/plan-builder follow-up: shopping-list
+         *     aggregation across a caller-supplied `list[PlanItem]` that did NOT come
+         *     from `assemble_plan`/`assemble_day_plan` (e.g. a manually-curated
+         *     selection assembled client-side from `POST /recipes/search` results --
+         *     see `app.schemas.day_plan.ShoppingListForItemsRequest`'s docstring).
+         *
+         *     NOT a safety endpoint, identical posture to `plan_shopping_list` above:
+         *     every `recipe_id` in `request.items` was already safety-cleared when the
+         *     user found it via a safety-filtering search/recommend endpoint, so this
+         *     endpoint makes no new safety/allergy/diet decision -- it only does pure
+         *     quantity arithmetic (`app.services.procurement_service.
+         *     build_shopping_list_for_items`, the exact same aggregate-then-reconcile-
+         *     once call `plan_batch`/`plan_week` already use for their own
+         *     `list[PlanItem]`) against the full corpus looked up by id. A
+         *     `recipe_id` absent from the corpus is silently skipped by
+         *     `build_shopping_list_for_items` (never fabricated), same as every other
+         *     caller of that function.
+         */
+        post: operations["plan_shopping_list_for_items_plan_shopping_list_for_items_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tools/validate-recipe": {
         parameters: {
             query?: never;
@@ -1675,6 +1711,31 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ShoppingListForItemsRequest
+         * @description Wire contract for POST /plan/shopping-list-for-items (frontend recipe
+         *     search/plan-builder follow-up).
+         *
+         *     Unlike `ShoppingListRequest`, `items` is a caller-supplied `list[PlanItem]`
+         *     that did NOT come from `assemble_plan`/`assemble_day_plan` -- it is a
+         *     manually-curated, client-side-only selection (e.g. recipes a user found
+         *     via `POST /recipes/search` and added to a plan one at a time), so there
+         *     is no `DayPlan` wrapper with macro-fit fields to reuse. This endpoint
+         *     still makes NO new safety decision: every `recipe_id` here was already
+         *     safety-cleared when the user found it via a safety-filtering search/
+         *     recommend endpoint, so this is pure quantity arithmetic (same
+         *     `app.services.procurement_service.build_shopping_list_for_items`
+         *     aggregate-then-reconcile-once call `plan_batch`/`plan_week` already use
+         *     for their own `list[PlanItem]`), never a re-filter and never a dummy
+         *     macro/target value fabricated to satisfy `ShoppingListRequest`'s
+         *     `DayPlan` shape.
+         */
+        ShoppingListForItemsRequest: {
+            /** Items */
+            items?: components["schemas"]["PlanItem"][];
+            /** Inventory */
+            inventory?: components["schemas"]["ConfirmedIngredient"][];
+        };
+        /**
          * ShoppingListRequest
          * @description Wire contract for POST /plan/shopping-list (roadmap item B4).
          *
@@ -2430,6 +2491,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ShoppingListRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShoppingListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_shopping_list_for_items_plan_shopping_list_for_items_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShoppingListForItemsRequest"];
             };
         };
         responses: {
