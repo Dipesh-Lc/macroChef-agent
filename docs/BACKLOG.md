@@ -1612,3 +1612,29 @@ to act on:
   `web/src/api/endpoints.ts`) to avoid aborting a request that is still
   going to succeed -- the 2/hour rate limit is what actually bounds
   abuse, not this client timeout.
+
+## Grounding coverage fix follow-up (fix/grounding-coverage-common-staples, 2026-07-25)
+
+- **FDC branded-candidate matching lacks fresh-vs-processed/dehydrated
+  product-form disambiguation for generic pantry ingredients.** Found
+  during an advisor spot-check of the comma-stripping + spice-density
+  grounding fix (commit `80e934b`): widening unit-conversion coverage
+  exposed more occurrences to `app/services/usda_client.py`'s existing,
+  unmodified Branded-candidate search/plausibility gate, and at least one
+  slipped through -- `imp_4ca1e5141054515a` ("onion, Minced") newly
+  resolved to Branded fdc_id 731104 ("MINCED ONION", a dehydrated/dried
+  onion-flake product, 300 kcal/100g, 80g carbs/100g) instead of fresh
+  onion (~40 kcal/100g), inflating that recipe's per-serving calories
+  178->508 kcal (2.85x). The plausibility gate correctly rejects most
+  newly-exposed mismatches (`kcal_too_low_branded` jumped 192->2,613,
+  `branded_high_dispersion` 122->304 in `grounding_report.md`'s
+  rejection tables after the fix) -- this is a bounded-minority miss, not
+  a systemic failure (corpus-wide tag-vs-computed calorie ratio shifted
+  only mildly, mean 0.63x->0.59x). Fix direction: `_best_match`/relevance
+  ranking in `usda_client.py` needs a fresh-vs-processed preference
+  signal for generic single-word pantry ingredient queries (onion,
+  garlic, etc.) -- e.g. deprioritizing Branded records whose description
+  implies a dried/dehydrated/powdered form when the corpus ingredient
+  name has no such qualifier. Not safety-relevant (nutrition-accuracy
+  only), bounded impact -- default-to-backlog per CLAUDE.md rather than
+  blocking the grounding-coverage fix that exposed it.
