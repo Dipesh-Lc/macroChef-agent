@@ -1612,3 +1612,16 @@ to act on:
   `web/src/api/endpoints.ts`) to avoid aborting a request that is still
   going to succeed -- the 2/hour rate limit is what actually bounds
   abuse, not this client timeout.
+
+## Integration branch review (interactive-plans-search-share, 2026-07-25)
+
+- **Dead "Share" button on the anonymous shared-plan shopping-list view.**
+  `web/src/components/ShoppingList.tsx` embeds a `ShareButton` and is reused
+  verbatim by `web/src/pages/SharedPlanPage.tsx`'s public/anonymous
+  `shopping_list` dispatch branch. An anonymous visitor on a public share
+  link sees a "Share" button that will always fail (`POST /share` requires
+  a session) -- `ShareButton.tsx`'s existing catch block degrades this to a
+  visible error message rather than a crash, so there's no security
+  exposure, just a dead affordance. Fix: add a prop to `ShoppingList` (e.g.
+  `showShare?: boolean`) to suppress the embedded `ShareButton` when
+  rendered from `SharedPlanPage.tsx`'s anonymous context.
