@@ -131,6 +131,28 @@ _DAIRY = frozenset(
         #   - "gouda": a Dutch cow's-milk cheese by definition. 0 corpus
         #     hits today -- future-import defense only.
         "gouda",
+        # "cool whip", "whipped topping", "dream whip": whipped-topping/dessert-mix
+        # products whose ingredient statements standardly include sodium caseinate
+        # (a milk-protein derivative) regardless of "non-dairy" labeling -- FARE's
+        # milk-allergy hidden-sources guidance names whipped toppings and non-dairy
+        # creamers explicitly; this is the product class, not the literal word
+        # "non-dairy", so it is pinned by product name rather than by the labeling
+        # phrase (a bare "dairy" substring rule was considered and rejected -- it
+        # would wrongly flag the genuinely dairy-free "soy dairy firm tofu" row on
+        # imp_c028d6ed99ee5945 "Tofu"). Verified 2026-07-25 against the active
+        # corpus: 42 recipes carry one of these three terms; 6
+        # (imp_0d423c1a38025015 "Root Beer Cake", imp_16f4e589c05656e2 "Lemonade
+        # Cake #3", imp_54324a408dcb5e89 "Sour Cherry Jell-O Pie",
+        # imp_5aa78000db5c5464 "Taffy Apple Salad 11", imp_916a677794bb5087
+        # "Holiday Poke Cake", imp_97fda67ff1d45e65 "Spaghetti Fruit Salad") were
+        # genuinely unprotected for a milk allergy before this addition; the
+        # remaining 36 already failed via a co-occurring dairy ingredient, so
+        # measured over-block delta is 0. No collision risk: "Miracle Whip"
+        # (mayonnaise, no dairy) does not contain any of these three phrases as a
+        # substring, verified against the corpus.
+        "cool whip",
+        "whipped topping",
+        "dream whip",
     }
 )
 
