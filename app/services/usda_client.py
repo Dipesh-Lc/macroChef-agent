@@ -770,6 +770,11 @@ _FDC_QUERY_ALIASES: dict[str, str] = {
     "white pepper": "spices pepper white",
     "marjoram": "spices marjoram dried",
     "fennel seed": "spices fennel seed",
+    "cinnamon": "spices cinnamon ground",
+    # Leavening agents: FDC files these under "Leavening agents, X", not the
+    # bare pantry name.
+    "baking powder": "leavening agents baking powder",
+    "baking soda": "leavening agents baking soda",
     # Herbs/other foods FDC files under a different head noun than the bare
     # ingredient name.
     "dill": "dill weed fresh",
