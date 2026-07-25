@@ -62,6 +62,14 @@ export type PublicRecipe = components["schemas"]["PublicRecipe"];
 export type PublicDayPlan = components["schemas"]["PublicDayPlan"];
 export type PublicBatchPlan = components["schemas"]["PublicBatchPlan"];
 export type PublicWeeklyPlan = components["schemas"]["PublicWeeklyPlan"];
+// `PublicShoppingList` has no dedicated `components["schemas"]` entry --
+// `app.schemas.share.PublicShoppingList` is a bare `list[ShoppingItem]` type
+// alias (not a Pydantic `BaseModel`), so FastAPI/openapi-typescript inline
+// it as `ShoppingItem[]` wherever it's used (see `SharedPlanView.content`
+// in `types.gen.ts`) rather than emitting a named schema component. Declared
+// here anyway so call sites can import `PublicShoppingList` the same way
+// they import the other three `Public*` plan types.
+export type PublicShoppingList = ShoppingItem[];
 
 export type UserRecipeLibraryResponse = components["schemas"]["UserRecipeLibraryResponse"];
 

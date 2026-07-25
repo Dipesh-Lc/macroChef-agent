@@ -3704,7 +3704,8 @@
               "recipe",
               "day",
               "batch",
-              "week"
+              "week",
+              "shopping_list"
             ],
             "title": "Plan Type"
           },
@@ -3747,6 +3748,20 @@
                 "type": "null"
               }
             ]
+          },
+          "shopping_list": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ShoppingItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shopping List"
           }
         },
         "type": "object",
@@ -3754,7 +3769,7 @@
           "plan_type"
         ],
         "title": "ShareCreateRequest",
-        "description": "Body for POST /share.\n\n`plan_type` selects exactly one of the four optional fields below --\nthe matching object the (authenticated) client already holds in its own\nUI state. This is intentionally NOT the wire-level shape that gets\npersisted: `app.services.share_service.create_share` maps whichever\nfield is populated through the server-side allowlist functions above\nbefore anything is written to `SharedPlan.content` -- the client object\nis read from, never echoed or persisted verbatim (see that module's\ndocstring for why)."
+        "description": "Body for POST /share.\n\n`plan_type` selects exactly one of the five optional fields below --\nthe matching object the (authenticated) client already holds in its own\nUI state. This is intentionally NOT the wire-level shape that gets\npersisted: `app.services.share_service.create_share` maps whichever\nfield is populated through the server-side allowlist functions above\nbefore anything is written to `SharedPlan.content` -- the client object\nis read from, never echoed or persisted verbatim (see that module's\ndocstring for why)."
       },
       "ShareCreateResponse": {
         "properties": {
@@ -3778,7 +3793,8 @@
               "recipe",
               "day",
               "batch",
-              "week"
+              "week",
+              "shopping_list"
             ],
             "title": "Plan Type"
           },
@@ -3795,6 +3811,12 @@
               },
               {
                 "$ref": "#/components/schemas/PublicWeeklyPlan"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ShoppingItem"
+                },
+                "type": "array"
               }
             ],
             "title": "Content"
