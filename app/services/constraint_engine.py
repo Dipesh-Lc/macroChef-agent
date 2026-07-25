@@ -43,6 +43,18 @@ _DAIRY = frozenset(
         "milk",
         "mozzarella",
         "paneer",
+        # "panir": an accepted alternate transliteration of paneer (Indian
+        # fresh cheese). Does not substring-match "paneer" in either
+        # direction ("panir" and "paneer" share no common substring
+        # relationship) -- two staged candidate recipes ("Pudina Paneer"
+        # imp_53717b715fb95252, "Roomali Paneer" imp_f53043dfe62a5136) use
+        # this spelling ("panir"/"grated panir") and were confirmed to leak
+        # past a milk allergy before this addition. Verified 2026-07-25: no
+        # unrelated ingredient name in the active corpus, staged candidate
+        # batches, or scraped source contains "panir" as a substring, so
+        # this addition carries no lookalike-collision risk requiring a
+        # _LOOKALIKE_EXCLUSIONS carve-out (unlike "brie"/"capon"/"tripe").
+        "panir",
         "parmesan",
         # "parmigiano", "pecorino", "grana padano", and "romano" are hard
         # cheeses (all definitionally milk products) that were missing from
