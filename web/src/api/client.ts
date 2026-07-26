@@ -171,7 +171,15 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     timeoutController && options.timeoutMs !== undefined
       ? setTimeout(() => timeoutController.abort(), options.timeoutMs)
       : undefined;
-  const signal = options.signal ?? timeoutController?.signal;
+  // If both a caller-supplied `signal` and a `timeoutMs` are present, `fetch`
+  // can only listen to one `AbortSignal` -- combine them with `AbortSignal.any`
+  // so either one can cancel the request. (No current caller passes both, but
+  // this was previously a silent bug: the timeout controller's `abort()`
+  // never reached `fetch` when a caller `signal` was also given.)
+  const signal =
+    options.signal && timeoutController
+      ? AbortSignal.any([options.signal, timeoutController.signal])
+      : (options.signal ?? timeoutController?.signal);
 
   try {
     let response = await fetch(path, buildRequestInit(options, signal));

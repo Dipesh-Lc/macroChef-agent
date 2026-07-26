@@ -155,6 +155,32 @@ describe("apiRequest", () => {
     expect((error as ApiError).message).toBe("boom");
   });
 
+  it("aborts the fetch via the timeout controller even when a caller signal is also supplied", async () => {
+    const callerController = new AbortController(); // never aborted by this test
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiRequest("/plan/day", {
+        method: "POST",
+        json: {},
+        signal: callerController.signal,
+        timeoutMs: 5,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("never sends the CSRF header or bootstraps a session for a public call", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       jsonResponse(200, []),

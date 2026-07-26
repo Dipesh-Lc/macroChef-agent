@@ -32,6 +32,39 @@ export interface PantryState {
   confirmedInventory: ConfirmedIngredient[];
 }
 
+/**
+ * Derives the free-text `quantity` display/API field from the structured
+ * `amount`/`unit` pair, so the two never drift apart once a user edits
+ * either input directly (see `updateRow` call sites below). Anything still
+ * reading `quantity` (the extraction flow's initial population, the API
+ * payload) keeps getting a sensible value.
+ */
+function formatQuantity(amount: number | null, unit: string | null): string {
+  const parts: string[] = [];
+  if (amount !== null) {
+    parts.push(String(amount));
+  }
+  if (unit) {
+    parts.push(unit);
+  }
+  return parts.join(" ");
+}
+
+/** Parses a numeric-input's raw string into `amount`: empty string -> null, unparsable -> null. */
+function parseAmountInput(raw: string): number | null {
+  if (raw.trim() === "") {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** Parses a unit-input's raw string into `unit`: trimmed, empty -> null. */
+function parseUnitInput(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function toConfirmedInventory(rows: InventoryRow[]): ConfirmedIngredient[] {
   return rows
     .filter((row) => row.include && row.normalizedName.trim().length > 0)
@@ -50,7 +83,8 @@ export function PantryInput({ onChange }: { onChange: (state: PantryState) => vo
   const [mealType, setMealType] = useState("dinner");
   const [rows, setRows] = useState<InventoryRow[]>([]);
   const [manualName, setManualName] = useState("");
-  const [manualQuantity, setManualQuantity] = useState("");
+  const [manualAmount, setManualAmount] = useState("");
+  const [manualUnit, setManualUnit] = useState("");
 
   const extractMutation = useMutation({
     mutationFn: () => extractInventory(typedIngredients),
@@ -89,21 +123,24 @@ export function PantryInput({ onChange }: { onChange: (state: PantryState) => vo
     if (!name) {
       return;
     }
+    const amount = parseAmountInput(manualAmount);
+    const unit = parseUnitInput(manualUnit);
     setRows((current) => [
       ...current,
       {
         key: `manual-${Date.now()}`,
         normalizedName: name,
-        quantity: manualQuantity.trim(),
-        amount: null,
-        unit: null,
+        quantity: formatQuantity(amount, unit),
+        amount,
+        unit,
         confidence: 1,
         needsConfirmation: false,
         include: true,
       },
     ]);
     setManualName("");
-    setManualQuantity("");
+    setManualAmount("");
+    setManualUnit("");
   }
 
   return (
@@ -181,7 +218,8 @@ export function PantryInput({ onChange }: { onChange: (state: PantryState) => vo
               <tr>
                 <th className="py-1 pr-2 font-medium">Use</th>
                 <th className="py-1 pr-2 font-medium">Ingredient</th>
-                <th className="py-1 pr-2 font-medium">Quantity</th>
+                <th className="py-1 pr-2 font-medium">Amount</th>
+                <th className="py-1 pr-2 font-medium">Unit</th>
                 <th className="py-1 font-medium">Review</th>
               </tr>
             </thead>
@@ -209,9 +247,27 @@ export function PantryInput({ onChange }: { onChange: (state: PantryState) => vo
                   </td>
                   <td className="py-1 pr-2">
                     <input
+                      type="number"
+                      inputMode="decimal"
+                      step="any"
+                      value={row.amount ?? ""}
+                      onChange={(event) => {
+                        const amount = parseAmountInput(event.target.value);
+                        updateRow(row.key, { amount, quantity: formatQuantity(amount, row.unit) });
+                      }}
+                      aria-label={`Amount for ${row.normalizedName}`}
+                      className="w-full rounded border border-sage-line px-1.5 py-0.5"
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <input
                       type="text"
-                      value={row.quantity}
-                      onChange={(event) => updateRow(row.key, { quantity: event.target.value })}
+                      value={row.unit ?? ""}
+                      onChange={(event) => {
+                        const unit = parseUnitInput(event.target.value);
+                        updateRow(row.key, { unit, quantity: formatQuantity(row.amount, unit) });
+                      }}
+                      aria-label={`Unit for ${row.normalizedName}`}
                       className="w-full rounded border border-sage-line px-1.5 py-0.5"
                     />
                   </td>
@@ -237,12 +293,22 @@ export function PantryInput({ onChange }: { onChange: (state: PantryState) => vo
               className="w-1/2 rounded-md border border-sage-line px-2 py-1.5 text-sm"
             />
             <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              value={manualAmount}
+              onChange={(event) => setManualAmount(event.target.value)}
+              placeholder="Amount (optional)"
+              aria-label="Amount (optional)"
+              className="w-1/5 rounded-md border border-sage-line px-2 py-1.5 text-sm"
+            />
+            <input
               type="text"
-              value={manualQuantity}
-              onChange={(event) => setManualQuantity(event.target.value)}
-              placeholder="Quantity (optional)"
-              aria-label="Quantity (optional)"
-              className="w-1/3 rounded-md border border-sage-line px-2 py-1.5 text-sm"
+              value={manualUnit}
+              onChange={(event) => setManualUnit(event.target.value)}
+              placeholder="Unit (optional)"
+              aria-label="Unit (optional)"
+              className="w-1/5 rounded-md border border-sage-line px-2 py-1.5 text-sm"
             />
             <button
               type="button"
