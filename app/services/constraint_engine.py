@@ -285,6 +285,21 @@ _WHEAT = frozenset(
         "macaroni",
         "pasta",
         "pastry",
+        # "pastries" (plural): same y->ies pluralization class as the
+        # "anchovies"/_FISH addition above -- the one-directional substring
+        # match means the existing bare "pastry" term does not match
+        # "pastries" (the trailing "y" vs "ies" breaks the substring
+        # relationship), and `normalize_ingredient`'s depluralization only
+        # rescues this when "ies" is the suffix of the *entire* cleaned
+        # ingredient string, not when a compound/descriptor phrase follows
+        # the plural noun. 0 ingredient-level hits in the active corpus
+        # today (verified 2026-07-26) -- pure future-import defense, mirroring
+        # this file's existing zero-hit defensive entries (e.g. "gouda" in
+        # _DAIRY above). FALCPA wheat designation (21 U.S.C. Sec. 321(qq))
+        # and EU Regulation 1169/2011, Annex II, point 1 ("Cereals containing
+        # gluten") both cover wheat-flour pastries regardless of
+        # singular/plural form.
+        "pastries",
         "phyllo",
         "semolina",
         # "spaghetti" also substring-matches "spaghetti squash" (a vegetable,
@@ -346,7 +361,32 @@ _CRUSTACEAN = frozenset(
         # substring-match.
         "crawfish",
         "lobster",
+        # "langoustine" (also called Norway lobster/Dublin Bay prawn):
+        # Nephrops norvegicus, the same species/family as scampi (below) --
+        # an alternate name for the same crustacean, not a separate species
+        # entry. Substring also catches the plural "langoustines". 0
+        # ingredient-level hits in the active corpus today (verified
+        # 2026-07-26) -- pure future-import defense.
+        "langoustine",
         "prawn",
+        # "scampi" (as an ingredient noun -- Nephrops norvegicus, the same
+        # crustacean as "langoustine" above, prepared whole/as tails): this
+        # is a DELIBERATE, ingredient-level-only addition. Titles/dish names
+        # are never scanned by this file's safety check
+        # (`_recipe_safety_terms` reads only `Recipe.ingredients[].name` and
+        # `Recipe.allergens`, never `Recipe.title`) -- so dish names like
+        # "Chicken Scampi"/"Scampi Style Chicken Thighs" (both real corpus
+        # titles, on the still-unmerged merge/corpus-expansion-10k branch;
+        # neither carries any shrimp/crustacean ingredient) are unaffected by
+        # design; this entry only matches an actual scampi INGREDIENT row.
+        # Verified 2026-07-26: 0 ingredient-level "scampi" occurrences
+        # anywhere in this branch's active corpus today -- this addition
+        # cannot over-block those title-only recipes now or when they land
+        # via a future merge. Pure future-import defense (a bare "scampi"
+        # ingredient row -- as opposed to a "Chicken Scampi"/"Scampi Style"
+        # dish name -- is a genuine crustacean allergen and should fail
+        # closed, the same policy this file applies throughout).
+        "scampi",
         "shrimp",
     }
 )
@@ -366,6 +406,43 @@ _MOLLUSK = frozenset({"calamari", "clam", "mussel", "octopus", "oyster", "scallo
 _FISH = frozenset(
     {
         "anchovy",
+        # "anchovies" (plural): the one-directional substring match
+        # (`_any_term_matches`, `term in candidate` only) means the existing
+        # bare "anchovy" term does NOT match "anchovies" -- the trailing "y"
+        # vs "ies" breaks the substring relationship in either direction.
+        # `normalize_ingredient`'s y->ies-to-y depluralization DOES rescue a
+        # bare/simple ingredient row like "whole anchovies" (the whole
+        # cleaned string ends in "ies", so the suffix check fires and it
+        # becomes "whole anchovy", which then substring-matches "anchovy"),
+        # but it does NOT rescue a compound/descriptor string where trailing
+        # text follows the plural noun -- e.g. "anchovies, drained and
+        # rinsed" or "cans anchovies, chopped" -- because the *suffix* of the
+        # full cleaned string is no longer "ies" (it's "rinsed"/"chopped"),
+        # so the depluralization never fires and neither the raw nor
+        # normalized form contains "anchovy" as a substring. Confirmed
+        # 2026-07-26: `derive_allergen_labels(["anchovies, drained and
+        # rinsed"])` returns `[]` today (should include fish/seafood) --
+        # verified directly against this file before this addition. Measured
+        # fix for `imp_7a18a211facb544f` (a staged recipe on the separate,
+        # still-unmerged `merge/corpus-expansion-10k` branch -- cited here as
+        # motivating evidence only, not a claim about this branch's active
+        # corpus) and would restore correct derivation for
+        # `imp_c83fe717a42c5682` ("Antipasto with Anchovies", ingredient
+        # "cans anchovies, chopped") on that same branch -- NEITHER recipe
+        # exists in this branch's `data/processed/imported_recipes.jsonl`
+        # today (verified 2026-07-26: 0 hits for both recipe_ids), so this
+        # addition is pure vocabulary-completeness/future-import defense on
+        # `main`, not a fix to an active-corpus recipe -- see this task's
+        # report for the corrected citation (the originating advisor consult
+        # believed imp_c83fe717a42c5682 was live on `main`; it is not).
+        # FALCPA fish designation (21 U.S.C. Sec. 321(qq)) and EU Regulation
+        # 1169/2011, Annex II, point 4 ("Fish") both cover anchovy regardless
+        # of singular/plural form. No collision risk: the corpus's one
+        # existing "anchovies" hit (imp_bba40cf8672d5063, "whole anchovies")
+        # was already correctly detected via the depluralization path above,
+        # so this addition's measured delta against the active corpus is 0 --
+        # reported honestly, not overclaimed.
+        "anchovies",
         # "catfish"/"swordfish": fish species. Found 2026-07-20 (this task,
         # "derive_allergen_labels natural-language robustness" Part B --
         # corpus-wide sweep of common fish species against _FISH's then
@@ -460,6 +537,24 @@ _FISH = frozenset(
         "gelatin",
         "haddock",
         "halibut",
+        # "herring": a FALCPA-covered fish species (Clupea spp.), entirely
+        # absent from this set before this addition -- unlike catfish/
+        # swordfish/mackerel/tilapia above, "herring" does not contain the
+        # bare "fish" substring, so the pre-existing generic "fish" term
+        # gave zero coincidental protection here. Measured against this
+        # branch's active 3,859-recipe corpus (2026-07-26): 2 recipes were
+        # genuinely under-blocked for a fish-only allergy before this
+        # addition -- imp_5119deca47535854 ("Heringsalat (Herring Salad)",
+        # ingredient "pickled herring, drained", stored allergens `[]`) and
+        # imp_7736e18fa51c55b9 ("Heringstopf Mit Saurer Sahne", ingredient
+        # "herring fillets, Marinated", stored allergens `["dairy",
+        # "milk"]` -- caught the dairy from sour cream/yogurt but not the
+        # fish). Both are `is_active` and were servable to a fish-allergic
+        # user before this fix. Substring also catches the plural
+        # "herrings". No collision risk: verified "herring" is not a
+        # substring of any other ingredient name anywhere in the active
+        # corpus.
+        "herring",
         "isinglass",
         "salmon",
         "sardine",
