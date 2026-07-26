@@ -1651,3 +1651,94 @@ to act on:
   exposure, just a dead affordance. Fix: add a prop to `ShoppingList` (e.g.
   `showShare?: boolean`) to suppress the embedded `ShareButton` when
   rendered from `SharedPlanPage.tsx`'s anonymous context.
+
+## TO_FIX_AND_UPGRADE.md triage (2026-07-26)
+
+Context: `docs/TO_FIX_AND_UPGRADE.md` (2026-07-26 codebase audit) items picked
+up immediately in parallel (pantry quantity bug, dead timeout code,
+`RecipeCandidate` allergen-label recompute, `on_event` deprecation, ROADMAP/
+DEPLOY doc drift, 74-case adjudication consolidation) are tracked as
+in-flight work, not here. The items below were deliberately deferred.
+
+- **Already shipped, brainstorm doc is stale — no work needed.**
+  `TO_FIX_AND_UPGRADE.md`'s "To Upgrade" item 1 ("Reasoning-trail UI...top
+  pick") describes exposing the LangGraph node trace as a collapsible panel
+  in the SPA. This already exists: `app/graph/state.py`'s `debug_trace:
+  list[str]` field is populated by the graph and rendered by
+  `web/src/components/DebugDrawer.tsx` (a collapsible "Debug" section
+  showing errors, graph trace, and raw JSON), which is wired into
+  `web/src/pages/HomePage.tsx:199`. Same stale-doc pattern as the ROADMAP.md
+  drift findings elsewhere in this audit -- the brainstorm predates the
+  SPA rebuild's DebugDrawer port. No action needed beyond noting it here so
+  nobody re-implements a duplicate.
+
+- **Direction-aware matching bare-word compensation gap (TO_FIX item 10,
+  advisor-flagged, zero current impact).** `app/services/constraint_engine.py`'s
+  direction-aware matching only has bare-word compensation for "nut"/"nuts"
+  (see `_BARE_NUT_WORD`/`_BARE_NUT_TRIGGER_VOCABULARY`). Other multi-word
+  compound allergen/diet terms -- `half and half`, `whipped topping`, `creme
+  fraiche`, `grana padano`, `graham cracker`, `bean curd` -- have no
+  analogous compensation, so a future corpus import with a literal bare
+  ingredient name like "half" or "creme" would not get the same protection
+  `contains_allergen` gives "nuts" today. Verified zero real corpus rows
+  affected as of 2026-07-26. Action: when `_LOOKALIKE_EXCLUSIONS` or
+  direction-aware matching in `constraint_engine.py` is next touched, add
+  equivalent bare-word compensation for these compound terms (or confirm via
+  the same closed-loop-invariant test pattern used for `_BARE_NUT_WORD` that
+  it's still unneeded).
+
+- **PWA install + offline shopping list (To Upgrade item 2).** Service
+  worker + web manifest so the SPA installs to a phone home screen and the
+  shopping list keeps working with no signal in a store. Verified nothing
+  of this exists yet (`web/` has no `manifest.json`/service-worker file).
+  Needs FULL/EVERYTHING classification and a design pass (cache strategy for
+  the shopping-list data specifically, since the rest of the app needs
+  network) before an executor pass -- not started because it's a multi-day
+  feature, not a quick fix, and doesn't block the live URL.
+
+- **ICS/calendar export for the weekly plan (To Upgrade item 3).** Phase 4's
+  solver already produces the data (`app/graph` day/week/batch planner
+  routes); needs a new export endpoint + a "Add to calendar" affordance in
+  `web/`. Verified nothing of this exists yet (no `.ics`/`VCALENDAR`
+  references anywhere in the repo). Small, bounded, no CI/infra/secret
+  gates -- reasonable to pick up as a standalone EVERYTHING ELSE item next
+  session.
+
+- **Accessibility pass (WCAG / screen-reader) on the SPA (To Upgrade item
+  4).** No dedicated pass exists today. Splitting this in two matters:
+  running axe-core once locally against the SPA and fixing flagged
+  violations is a normal EVERYTHING ELSE code task; *wiring axe-core into
+  CI* is a CI/CD pipeline change, which needs explicit human confirmation
+  first (per this project's standing "hard-to-reverse operations" rule, CI
+  modification is a hard stop even without a CLAUDE.md-specific gate). Do
+  the local audit-and-fix first; ask before touching CI config.
+
+- **Structured tracing (OpenTelemetry) across the LangGraph pipeline (To
+  Upgrade item 5).** Latency/error observability per node, distinct from
+  planned analytics event tracking. Architecturally significant (spans
+  every node in `app/graph/nodes.py`/`library_nodes.py`) -- per CLAUDE.md's
+  orchestration protocol this needs an advisor design consult before an
+  executor pass, not a blind implementation. Not started.
+
+- **Dependency/security scanning in CI (To Upgrade item 6).** `pip-audit`
+  or Dependabot -- no supply-chain hygiene check exists yet (verified: no
+  `pip-audit`/`dependabot` references in the repo). Same split as the
+  accessibility item: running `pip-audit` once locally now and fixing any
+  flagged CVEs is fair game as a quick follow-up; adding it as a CI gate is
+  a CI/CD pipeline change needing human confirmation first.
+
+- **Terraform for the Azure Container Apps infra (To Upgrade item 7).**
+  Flagged in `docs/SKILLS_MATRIX.md` as "worth revisiting if the Azure
+  deploy grows" -- worth reconsidering now that it's live. Writing IaC files
+  that describe the existing deployed infra (without running `terraform
+  apply` against it) is technically safe to draft, but this is
+  architecturally significant enough (must exactly mirror whatever was
+  manually clicked/CLI'd into the live Azure Container Apps environment, or
+  a subsequent `apply` would drift/break prod) to warrant an advisor design
+  consult first, not a same-session parallel pass. Not started.
+
+- **Public benchmark leaderboard page (To Upgrade item 8).** Blocked, not
+  just deferred: this needs the external-model comparison arms to actually
+  run first (money-gated, ~$12, requires human approval per CLAUDE.md's
+  "Money" human gate) -- there is no benchmark data to show yet. Revisit
+  once that run happens.

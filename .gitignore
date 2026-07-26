@@ -52,6 +52,10 @@ tests/test_scrape_candidate_ids.py
 # local-only.
 tests/test_scrape_recipe_pages_resume.py
 
+# Local-only working notes from the 2026-07-26 audit session; never intended
+# for the repo, kept out so a broad `git add` can't sweep it in.
+docs/TO_FIX_AND_UPGRADE.md
+
 frontend/.streamlit/
 dist/
 build/
