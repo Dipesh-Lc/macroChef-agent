@@ -1103,11 +1103,21 @@ def test_new_meat_vocabulary_blocks_vegetarian_diet(ingredient: str) -> None:
 
 
 def test_anchovies_plural_already_a_no_op_still_blocks_vegetarian() -> None:
-    # Confirms the task-spec claim directly: "anchovies" is NOT a separate
-    # MEAT_ALIASES entry -- normalize_ingredient depluralizes it to
-    # "anchovy", already a member of ALLERGEN_ALIASES["fish"], which already
-    # flows into _VEGETARIAN_EXCLUDED_TERMS. This is a pre-existing behavior
-    # pin, not a new addition.
+    # Confirms the task-spec claim directly: for a BARE/SIMPLE plural form
+    # like "whole anchovies" (no trailing descriptor clause),
+    # normalize_ingredient's y->ies-to-y depluralization already fires on the
+    # whole cleaned string's suffix, rewriting it to "whole anchovy" --
+    # already a member of ALLERGEN_ALIASES["fish"] via the pre-existing bare
+    # "anchovy" term, which already flows into _VEGETARIAN_EXCLUDED_TERMS.
+    # This "no-op" framing is misleading for a COMPOUND/DESCRIPTOR string
+    # like "anchovies, drained and rinsed" or "cans anchovies, chopped",
+    # where trailing text follows the plural noun: there, the suffix of the
+    # *whole* cleaned string is no longer "ies", so the depluralization never
+    # fires, and this test's "already a no-op" claim does NOT hold -- that
+    # compound-descriptor gap is exactly what the explicit "anchovies" _FISH
+    # entry (added this task) exists to close; see
+    # test_anchovies_compound_descriptor_string_blocks_fish_allergy_and_vegetarian
+    # below for the case this test's original framing did not cover.
     recipe = _recipe(ingredients=["rice", "whole anchovies"], allergens=[], diet_tags=[])
     result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
 
@@ -1482,3 +1492,182 @@ def test_bare_perch_blocks_fish_allergy_future_import_defense() -> None:
     recipe = _recipe(ingredients=["rice", "perch fillet"], allergens=[])
 
     assert contains_allergen(recipe, ["fish"])
+
+
+# --- fix/fish-crustacean-vocabulary-gaps (2026-07-26) -----------------------
+#
+# Closes 5 vocabulary gaps confirmed by an advisor design consult:
+#   1. _FISH missing plural "anchovies" (compound/descriptor strings only --
+#      the depluralization already rescues bare/simple plural forms, see the
+#      updated comment on test_anchovies_plural_already_a_no_op_still_blocks_
+#      vegetarian above).
+#   2. _FISH entirely missing "herring" (a FALCPA-covered fish species).
+#   3. _WHEAT missing plural "pastries" (same y->ies class as anchovies).
+#   4. _CRUSTACEAN missing "scampi" (ingredient-level-only, by design).
+#   5. _CRUSTACEAN missing "langoustine" (same species/family as scampi).
+#
+# FACTUAL CORRECTION on the originating advisor consult (see this task's
+# report): the consult's spec described imp_c83fe717a42c5682 ("Antipasto
+# with Anchovies") as "currently-live" on this branch and framed it as a
+# critical backfill-ordering hazard. Verified 2026-07-26: that recipe (and
+# the "Chicken Scampi" recipe used for the negative-regression test below)
+# do NOT exist in this branch's data/processed/imported_recipes.jsonl at
+# all -- both live only on the separate, still-unmerged
+# merge/corpus-expansion-10k branch. The vocabulary additions themselves are
+# still correct and needed (herring's under-block is real and measured on
+# this branch's active corpus; the others are sourced/future-import
+# defense), but the specific "ordering hazard" scenario the consult
+# described does not have a live instance on this branch today. See "TEST
+# RESULTS" / "ASSUMPTIONS" in this task's report for the full explanation.
+
+
+def test_anchovies_compound_descriptor_string_blocks_fish_allergy_and_vegetarian() -> None:
+    # The gap the new "anchovies" _FISH entry closes: a compound/descriptor
+    # string where trailing text follows the plural noun defeats both the
+    # bare "anchovy" substring match AND normalize_ingredient's suffix-only
+    # depluralization (see the updated comment on
+    # test_anchovies_plural_already_a_no_op_still_blocks_vegetarian above).
+    labels = derive_allergen_labels(["anchovies, drained and rinsed"])
+    assert "fish" in labels
+    assert "seafood" in labels
+
+    recipe = _recipe(ingredients=["rice", "anchovies, drained and rinsed"], allergens=[], diet_tags=[])
+    assert contains_allergen(recipe, ["fish"])
+    assert contains_allergen(recipe, ["seafood"])
+    assert not validate_recipe(recipe, _profile(diet_type="vegetarian")).is_valid
+
+
+def test_cans_anchovies_chopped_blocks_fish_allergy() -> None:
+    # A second compound-descriptor shape (leading, not trailing, extra text)
+    # -- the motivating string cited for imp_c83fe717a42c5682 on the separate
+    # merge/corpus-expansion-10k branch (see module docstring above for why
+    # that recipe isn't in this branch's corpus today).
+    recipe = _recipe(ingredients=["rice", "cans anchovies, chopped"], allergens=[])
+
+    assert contains_allergen(recipe, ["fish"])
+    assert contains_allergen(recipe, ["seafood"])
+
+
+@pytest.mark.parametrize("ingredient", ["pickled herring, drained", "herring fillets"])
+def test_herring_blocks_fish_allergy(ingredient: str) -> None:
+    labels = derive_allergen_labels([ingredient])
+    assert "fish" in labels
+    assert "seafood" in labels
+
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+    assert contains_allergen(recipe, ["fish"])
+    assert contains_allergen(recipe, ["seafood"])
+
+
+def test_herring_recipe_blocks_vegetarian_diet() -> None:
+    # Real corpus shape (imp_5119deca47535854 "Heringsalat (Herring Salad)"):
+    # herring plus produce, no other already-covered meat/fish term in the
+    # ingredient list -- before this task's fix, this recipe's stored
+    # allergens field was `[]` and it was genuinely under-blocked.
+    recipe = _recipe(
+        ingredients=[
+            "pickled herring, drained",
+            "green pepper, seeded and diced",
+            "tart apple, cored and diced",
+            "orange, peeled, sectioned, and diced",
+            "grated onions",
+            "vegetable oil",
+            "vinegar",
+            "lettuce leaves",
+        ],
+        allergens=[],
+        diet_tags=[],
+    )
+    result = validate_recipe(recipe, _profile(diet_type="vegetarian"))
+
+    assert not result.is_valid
+
+
+def test_herring_recipe_blocks_fish_allergy_even_with_stale_dairy_only_label() -> None:
+    # Real corpus shape (imp_7736e18fa51c55b9 "Heringstopf Mit Saurer Sahne"):
+    # stored allergens were `["dairy", "milk"]` (caught via sour cream/
+    # yogurt) but NOT "fish"/"seafood" before this task's fix, despite real
+    # herring content -- a fish-only allergy was not blocked.
+    recipe = _recipe(
+        ingredients=[
+            "sour cream",
+            "yogurt",
+            "lemon, Juice Only",
+            "sugar",
+            "small onions",
+            "medium apples (Tart)",
+            "herring fillets, Marinated",
+            "dill, Fresh OR",
+            "dill weed, Dried",
+        ],
+        allergens=["dairy", "milk"],
+    )
+
+    assert contains_allergen(recipe, ["fish"])
+    assert contains_allergen(recipe, ["seafood"])
+
+
+@pytest.mark.parametrize("ingredient", ["scampi", "langoustine"])
+def test_scampi_and_langoustine_derive_crustacean_shellfish_seafood_labels(ingredient: str) -> None:
+    labels = derive_allergen_labels([ingredient])
+
+    assert "crustacean" in labels
+    assert "shellfish" in labels
+    assert "seafood" in labels
+
+
+@pytest.mark.parametrize("ingredient", ["scampi", "langoustine", "langoustines"])
+def test_scampi_and_langoustine_block_crustacean_shellfish_seafood_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["crustacean"])
+    assert contains_allergen(recipe, ["shellfish"])
+    assert contains_allergen(recipe, ["seafood"])
+
+
+def test_bare_pastries_blocks_wheat_and_gluten_allergy_future_import_defense() -> None:
+    # 0 corpus hits today -- future-import defense, same basis as this
+    # module's other 0-hit additions (e.g. "gouda" in _DAIRY).
+    recipe = _recipe(ingredients=["rice", "assorted pastries"], allergens=[])
+
+    assert contains_allergen(recipe, ["wheat"])
+    assert contains_allergen(recipe, ["gluten"])
+
+
+# --- Negative regression: ingredient-level-only "scampi" scope pin ---------
+#
+# "Chicken Scampi" (imp_6e82b26ebc15569d) is a real recipe, but as of this
+# task it exists only on the separate, still-unmerged
+# merge/corpus-expansion-10k branch, not in this branch's
+# data/processed/imported_recipes.jsonl (verified 2026-07-26). Its REAL
+# ingredient list was pulled read-only from that branch (`git show
+# merge/corpus-expansion-10k:data/processed/imported_recipes.jsonl`) rather
+# than guessed, per the task spec's requirement -- this branch is not
+# modified or merged as part of fetching that data. The ingredient list
+# below is copied verbatim from that recipe and contains no shrimp/
+# crustacean ingredient at all, which is exactly why this pins the
+# ingredient-level-only design decision: the dish name contains "scampi",
+# but the safety check never reads Recipe.title, so this recipe must stay
+# servable to a shellfish/crustacean-allergic user.
+
+
+def test_chicken_scampi_title_does_not_block_shellfish_or_crustacean_allergy() -> None:
+    recipe = _recipe(
+        recipe_id="imp_6e82b26ebc15569d",
+        title="Chicken Scampi",
+        ingredients=[
+            "boneless skinless chicken breast halves",
+            "oregano",
+            "basil",
+            "parsley",
+            "minced garlic",
+            "butter",
+            "olive oil",
+        ],
+        allergens=[],
+        diet_tags=[],
+    )
+
+    assert not contains_allergen(recipe, ["shellfish"])
+    assert not contains_allergen(recipe, ["crustacean"])
+    assert not contains_allergen(recipe, ["seafood"])

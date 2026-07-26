@@ -38,13 +38,13 @@ GROUND_TRUTH_MEAT_POULTRY_FISH = {
     "chicken broth", "chicken stock", "chorizo", "clam", "clams", "cod", "crab",
     "crabmeat", "crawfish", "crayfish", "duck", "fish", "fish sauce", "flounder",
     "gelatin", "goose", "grouper", "haddock", "halibut", "ham", "hamburger",
-    "hot dog", "lamb", "lard", "lobster", "mackerel", "meatball", "mussel",
-    "mussels", "octopus", "oyster", "oysters", "pancetta", "pepperoni", "perch",
-    "pheasant", "pork", "prawn", "prawns", "prosciutto", "quail", "rabbit",
-    "salami", "salmon", "sardine", "sardines", "sausage", "scallop", "scallops",
-    "shrimp", "sirloin", "snapper", "sole", "squid", "steak", "suet", "swordfish",
-    "tilapia", "tripe", "trout", "tuna", "turkey", "veal", "venison",
-    "white fish", "worcestershire",
+    "herring", "hot dog", "lamb", "langoustine", "lard", "lobster", "mackerel",
+    "meatball", "mussel", "mussels", "octopus", "oyster", "oysters", "pancetta",
+    "pepperoni", "perch", "pheasant", "pork", "prawn", "prawns", "prosciutto",
+    "quail", "rabbit", "salami", "salmon", "sardine", "sardines", "sausage",
+    "scallop", "scallops", "scampi", "shrimp", "sirloin", "snapper", "sole",
+    "squid", "steak", "suet", "swordfish", "tilapia", "tripe", "trout", "tuna",
+    "turkey", "veal", "venison", "white fish", "worcestershire",
 }
 
 GROUND_TRUTH_DAIRY = {
@@ -62,7 +62,7 @@ GROUND_TRUTH_HONEY = {"honey"}
 GROUND_TRUTH_GLUTEN = {
     "barley", "biscuit", "bread", "breadcrumb", "breadcrumbs", "bulgur", "cake flour",
     "couscous", "cracker", "crackers", "croutons", "farro", "flour",
-    "graham cracker", "malt", "orzo", "pasta", "pastry",
+    "graham cracker", "malt", "orzo", "pasta", "pastry", "pastries",
     "pita", "pretzel", "rye", "seitan", "semolina", "spaghetti", "tortilla",
     "wheat", "wheat germ",
     # "krispies"/"cereal" (added 2026-07-19, adjudication_20260719T083748Z.md
