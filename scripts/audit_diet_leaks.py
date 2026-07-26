@@ -54,6 +54,7 @@ GROUND_TRUTH_DAIRY = {
     "kefir", "lactose", "mascarpone", "milk", "mozzarella", "paneer", "parmesan",
     "provolone", "queso", "ricotta", "sour cream", "swiss cheese", "whey",
     "whipped cream", "whipping cream", "yogurt", "yoghurt",
+    "cool whip", "whipped topping", "dream whip",
 }
 
 GROUND_TRUTH_EGG = {"egg", "eggs", "egg white", "egg whites", "egg yolk", "mayonnaise", "meringue"}

@@ -225,3 +225,104 @@ def test_shallot_has_no_piece_weight_entry() -> None:
     # weight), and no other citable whole-shallot reference is available
     # without web access -- cite-or-remove, so it's removed.
     assert _piece_weight("shallot") is None
+
+
+# --- Regression: comma-stripping bug (grounding-coverage-common-staples fix).
+# `_strip_handling_words` substituted handling words like "minced"/"chopped"
+# with a space but never removed the resulting trailing comma, so e.g.
+# "garlic, minced" normalized to "garlic," and never exact-matched the
+# existing "garlic" piece-weight entry. Fixed by also converting commas/
+# semicolons to spaces at the `stripped` candidate stage. Cases below are the
+# four highest-volume comma'd ingredient strings from
+# data/processed/grounding_report.md's top-50 ungrounded-ingredient table. ---
+
+
+def test_comma_stripping_regression_garlic_minced() -> None:
+    # The exact motivating example: "garlic, minced" previously normalized to
+    # "garlic," (trailing comma) and failed to match the "garlic" clove
+    # piece-weight entry.
+    assert _piece_weight("garlic, minced") == pytest.approx(5.0)
+    assert to_grams(1.0, "clove", name="garlic, minced") == pytest.approx(5.0)
+
+
+def test_comma_stripping_regression_onion_chopped() -> None:
+    assert _piece_weight("onion, chopped") == pytest.approx(110.0)
+    assert to_grams(1.0, None, name="onion, chopped") == pytest.approx(110.0)
+
+
+def test_comma_stripping_regression_butter_melted() -> None:
+    assert _density("butter, melted") == pytest.approx(0.96)
+    assert to_grams(1.0, "tbsp", name="butter, melted") == pytest.approx(14.7868 * 0.96, rel=1e-3)
+
+
+def test_comma_stripping_regression_parsley_chopped_normalizes_but_still_unresolved() -> None:
+    # The comma-stripping fix correctly normalizes "parsley, chopped" down to
+    # "parsley" (proving the fix applies here too), but there is still no
+    # "parsley" entry in `_DENSITY_G_PER_ML` -- adding one is out of scope for
+    # this fix (no fresh FDC citation was looked up for it), so this stays
+    # unresolved. Guards against silently regressing to a guessed density.
+    assert "parsley" in _normalize_for_density_lookup("parsley, chopped")
+    assert _density("parsley, chopped") is None
+    assert to_grams(1.0, "tbsp", name="parsley, chopped") is None
+
+
+# --- Additive literal keys for comma'd forms whose trailing handling word
+# ("beaten"/"packed"/"grated") is deliberately NOT a _HANDLING_WORDS entry
+# (they're composition/physical-form words per that set's own comment), so
+# the comma-stripping fix alone can't resolve them -- they resolve via an
+# explicit exact-match literal key added alongside the same-value base entry
+# instead (grounding-coverage-common-staples fix). --------------------------
+
+
+def test_eggs_beaten_additive_literal_key_resolves() -> None:
+    assert _piece_weight("eggs, beaten") == pytest.approx(50.0)
+    assert _piece_weight("egg, beaten") == pytest.approx(50.0)
+    assert to_grams(2.0, None, name="eggs, beaten") == pytest.approx(100.0)
+
+
+def test_brown_sugar_packed_additive_literal_key_resolves() -> None:
+    assert _density("brown sugar, packed") == pytest.approx(0.90)
+
+
+def test_parmesan_cheese_grated_additive_literal_key_resolves() -> None:
+    assert _density("parmesan cheese, grated") == pytest.approx(0.42)
+
+
+# --- New density entries for common tsp/tbsp-measured pantry spices
+# (grounding-coverage-common-staples fix). Every value is a live USDA FDC
+# "1 tsp" household-measure gram weight / 4.92892 (1 tsp in ml) -- see the
+# citation comments in _DENSITY_G_PER_ML for the exact fdcId/food name. -----
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("salt", 1.22),
+        ("black pepper", 0.47),
+        ("cinnamon", 0.53),
+        ("baking powder", 1.01),
+        ("baking soda", 0.93),
+        ("nutmeg", 0.45),
+        ("paprika", 0.47),
+        ("garlic powder", 0.63),
+        ("oregano", 0.20),
+        ("dry mustard", 0.41),
+        ("bay leaf", 0.12),
+    ],
+)
+def test_new_spice_density_entries_resolve(name: str, expected: float) -> None:
+    assert _density(name) == pytest.approx(expected)
+    # And a real tsp-measured to_grams call resolves (not None) for each.
+    assert to_grams(1.0, "tsp", name=name) is not None
+
+
+def test_cinnamon_ground_composes_fix1_and_fix3() -> None:
+    # "cinnamon, ground" (116 occurrences per grounding_report.md's top-50
+    # table) does NOT resolve via Fix 1's comma-stripping alone, because
+    # "ground" is deliberately not a _HANDLING_WORDS entry (physical-form
+    # word) -- it resolves via its own additive literal key instead, with
+    # the same density as the plain "cinnamon" entry.
+    assert _density("cinnamon, ground") == pytest.approx(_density("cinnamon"))
+    assert to_grams(1.0, "tsp", name="cinnamon, ground") == pytest.approx(
+        to_grams(1.0, "tsp", name="cinnamon")
+    )

@@ -1047,7 +1047,14 @@ def test_plausibility_gate_falls_through_to_next_ranked_candidate(tmp_path) -> N
     [
         ("salt", "Salt, table", "Foundation"),
         ("water", "Water, tap", "Survey (FNDDS)"),
-        ("baking soda", "Baking soda", "SR Legacy"),
+        # description updated to "Leavening agents, baking soda" (the
+        # grounding-coverage-common-staples fix added a
+        # `_FDC_QUERY_ALIASES["baking soda"] = "leavening agents baking
+        # soda"` entry, so the query FDC actually receives -- and the
+        # relevance/head-noun check runs against -- is the alias, not the
+        # bare "baking soda" string; a bare "Baking soda" description no
+        # longer satisfies the head-noun check under the alias).
+        ("baking soda", "Leavening agents, baking soda", "SR Legacy"),
     ],
 )
 def test_tier_aware_gate_admits_genuine_near_zero_generic_records(
@@ -1293,6 +1300,37 @@ def test_pinned_alias_fixtures_resolve_to_the_real_fdc_record(
     assert _FDC_QUERY_ALIASES[original] == alias
 
     payload = {"foods": [_macro_food(fdc_id, description, "SR Legacy", calories=calories, protein_g=10, fat_g=10, carbs_g=50)]}
+    session = FakeSession(payload=payload)
+    client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
+
+    match = client.search_food(original)
+
+    assert match is not None
+    assert match.fdc_id == fdc_id
+    assert match.description == description
+    assert match.macros.calories == calories
+
+
+# Pinned fixture tests for the three grounding-coverage-fix aliases (baking
+# powder, baking soda, cinnamon), live-verified against real FDC records
+# during the grounding-coverage-common-staples fix pass. protein/fat/carbs
+# are the real FDC-reported values (cinnamon) or plausible stand-ins sized
+# to clear the Atwater-consistency check (baking powder/soda), matching the
+# convention set by `test_pinned_alias_fixtures_resolve_to_the_real_fdc_record`.
+@pytest.mark.parametrize(
+    ("original", "alias", "fdc_id", "description", "calories", "protein_g", "fat_g", "carbs_g"),
+    [
+        ("baking powder", "leavening agents baking powder", 172805, "Leavening agents, baking powder, low-sodium", 97, 0, 0, 21),
+        ("baking soda", "leavening agents baking soda", 175040, "Leavening agents, baking soda", 0, 0, 0, 0),
+        ("cinnamon", "spices cinnamon ground", 171320, "Spices, cinnamon, ground", 247, 3.99, 1.24, 80.59),
+    ],
+)
+def test_pinned_grounding_fix_alias_fixtures_resolve_to_the_real_fdc_record(
+    tmp_path, original, alias, fdc_id, description, calories, protein_g, fat_g, carbs_g
+) -> None:
+    assert _FDC_QUERY_ALIASES[original] == alias
+
+    payload = {"foods": [_macro_food(fdc_id, description, "SR Legacy", calories=calories, protein_g=protein_g, fat_g=fat_g, carbs_g=carbs_g)]}
     session = FakeSession(payload=payload)
     client = _client(session=session, cache=FdcCache(tmp_path / "cache.json"))
 

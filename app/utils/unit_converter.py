@@ -56,6 +56,46 @@ _DENSITY_G_PER_ML: dict[str, float] = {
     "grated parmesan": 0.42,  # USDA FoodData Central: 1 cup grated parmesan cheese = 100 g (re-keyed to natural word order per advisor revision #1; "parmesan grated" was dead code no recipe writes)
     "grated parmesan cheese": 0.42,  # same USDA FDC 100 g/cup citation, alternate natural-word-order phrasing
     "breadcrumbs": 0.46,  # USDA FoodData Central: 1 cup dry bread crumbs = 108 g
+    # --- additive literal keys for corpus-observed comma'd forms whose
+    # handling word ("packed"/"grated") is NOT a _HANDLING_WORDS entry (see
+    # that set's module comment for why "grated"/"packed"/"beaten" must never
+    # be stripped generically) but which DO already have a same-density base
+    # entry above. Added per the grounding-coverage-common-staples fix
+    # (advisor-reviewed), mirroring the "cooked white rice" natural-word-
+    # order-key precedent -- same citation as the base entry, just an
+    # additional exact-match key for the literal corpus string. ---
+    "brown sugar, packed": 0.90,  # same King Arthur "brown sugar" 213 g/cup citation as the base entry above
+    "parmesan cheese, grated": 0.42,  # same USDA FDC "grated parmesan cheese" 100 g/cup citation as the base entry above
+    # --- added for the grounding-coverage-common-staples fix; common
+    # tsp/tbsp-measured pantry spices, previously missing a density entry
+    # entirely (so a real, correctly-unit-tagged corpus row like "1 tsp
+    # cinnamon" still couldn't ground even after Fix 1/Fix 2). Every value
+    # below is `foodPortions` "1 tsp" gram weight (live FDC food/{fdcId}
+    # lookup) / 4.92892 (this module's 1-tsp-in-mL constant, from
+    # quantity_parser.VOLUME_TO_ML) -- same derivation style as the existing
+    # "maple syrup" entry above. No estimated/guessed values. ---
+    "salt": 1.22,  # USDA FDC "Salt, table" (fdcId 173468): 1 tsp = 6.0 g -> 6.0/4.92892 ml
+    "black pepper": 0.47,  # USDA FDC "Spices, pepper, black" (fdcId 170931): 1 tsp, ground = 2.3 g -> 2.3/4.92892 ml
+    "cinnamon": 0.53,  # USDA FDC "Spices, cinnamon, ground" (fdcId 171320): 1 tsp = 2.6 g -> 2.6/4.92892 ml
+    "baking powder": 1.01,  # USDA FDC "Leavening agents, baking powder, low-sodium" (fdcId 172805): 1 tsp = 5.0 g -> 5.0/4.92892 ml
+    "baking soda": 0.93,  # USDA FDC "Leavening agents, baking soda" (fdcId 175040): 1 tsp = 4.6 g -> 4.6/4.92892 ml
+    "nutmeg": 0.45,  # USDA FDC "Spices, nutmeg, ground" (fdcId 171326): 1 tsp = 2.2 g -> 2.2/4.92892 ml
+    "paprika": 0.47,  # USDA FDC "Spices, paprika" (fdcId 171329): 1 tsp = 2.3 g -> 2.3/4.92892 ml
+    "garlic powder": 0.63,  # USDA FDC "Spices, garlic powder" (fdcId 171325): 1 tsp = 3.1 g -> 3.1/4.92892 ml
+    "oregano": 0.20,  # USDA FDC "Spices, oregano, dried" (fdcId 171328): 1 tsp, leaves = 1.0 g -> 1.0/4.92892 ml
+    "dry mustard": 0.41,  # USDA FDC "Spices, mustard seed, ground" (fdcId 170929): 1 tsp = 2.0 g -> 2.0/4.92892 ml
+    "bay leaf": 0.12,  # USDA FDC "Spices, bay leaf" (fdcId 170917): 1 tsp, crumbled = 0.6 g -> 0.6/4.92892 ml
+    # additive literal key: "ground" is deliberately NOT a _HANDLING_WORDS
+    # entry (it's a physical-form word -- whole vs. ground spices genuinely
+    # differ), so Fix 1's comma-stripping alone leaves "cinnamon, ground" as
+    # "cinnamon ground", which doesn't exact-match the "cinnamon" entry
+    # above. This corpus string is high-volume (116 occurrences per
+    # data/processed/grounding_report.md's top-50 table) and IS the same
+    # ground form the "cinnamon" entry above already cites, so it gets its
+    # own exact-match key with the same citation, mirroring the "cooked
+    # white rice" / eggs-brown-sugar-parmesan additive-key precedent rather
+    # than generalizing word-stripping further.
+    "cinnamon, ground": 0.53,  # same USDA FDC "Spices, cinnamon, ground" (fdcId 171320) citation as the "cinnamon" entry above
 }
 
 # Approximate weight of one common piece, in grams, keyed by normalized name.
@@ -83,6 +123,12 @@ _PIECE_WEIGHT_G: dict[str, float] = {
     # shallot portion (only "1 tbsp chopped = 10 g", which isn't a piece
     # weight). Removed per advisor revision #4b: cite-or-remove, and no
     # citable whole-shallot reference is available without web access.
+    # --- additive literal keys for corpus-observed comma'd forms whose
+    # handling word ("beaten") is NOT a _HANDLING_WORDS entry but which
+    # already have a same-weight base entry ("egg") above. See the matching
+    # comment in _DENSITY_G_PER_ML for the full rationale. ---
+    "egg, beaten": 50.0,  # same "egg" 50 g/piece citation as the base entry above
+    "eggs, beaten": 50.0,  # same "egg" 50 g/piece citation as the base entry above
 }
 
 # Handling/preparation words only -- NEVER composition or physical-form words
@@ -112,7 +158,16 @@ def _collapse_whitespace(text: str) -> str:
 
 
 def _strip_handling_words(name: str) -> str:
-    return _collapse_whitespace(_HANDLING_WORD_RE.sub(" ", name))
+    # Convert commas/semicolons to spaces too (at this "stripped" candidate
+    # stage only -- the "raw" candidate above is untouched), so a corpus
+    # string like "garlic, minced" normalizes to "garlic" and can match an
+    # existing single-word table entry, instead of stopping at "garlic,"
+    # with a dangling comma left over from substituting "minced" with a
+    # space. See _normalize_for_density_lookup's docstring for why this is
+    # scoped to `stripped` only (advisor-reviewed fix).
+    without_handling_words = _HANDLING_WORD_RE.sub(" ", name)
+    without_punctuation = re.sub(r"[,;]", " ", without_handling_words)
+    return _collapse_whitespace(without_punctuation)
 
 
 def _normalize_for_density_lookup(name: str) -> list[str]:
@@ -125,8 +180,9 @@ def _normalize_for_density_lookup(name: str) -> list[str]:
          removal at all, so explicit multi-word keys like "cooked rice" or
          "brown sugar" resolve to themselves before anything else can touch
          them.
-      2. the same, with handling/preparation words stripped (e.g. "chopped
-         onion" -> "onion").
+      2. the same, with handling/preparation words stripped and commas/
+         semicolons converted to spaces (e.g. "chopped onion" -> "onion",
+         "garlic, minced" -> "garlic").
       3. the existing `normalize_ingredient(name).lower()` path, unchanged,
          as a legacy fallback (descriptor stripping, synonyms, fuzzy match).
 
