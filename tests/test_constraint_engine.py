@@ -1671,3 +1671,128 @@ def test_chicken_scampi_title_does_not_block_shellfish_or_crustacean_allergy() -
     assert not contains_allergen(recipe, ["shellfish"])
     assert not contains_allergen(recipe, ["crustacean"])
     assert not contains_allergen(recipe, ["seafood"])
+
+
+# --- 2026-07-26 consolidated adjudication cure: hollandaise / marshmallow --
+# cream / named peanut-candy vocabulary gaps
+# (data/evaluation/adjudication_20260726T193000Z_consolidated_74.md,
+# `hidden_009`/`hidden_010`/`subst_001` TRUE_VIOLATIONs). Same "real product,
+# real named allergen, vocabulary didn't know it" gap class as the
+# soy-sauce/Rice-Krispies/enchilada-sauce cures above.
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    ["(1 1/4 ounce) packet hollandaise sauce mix", "hollandaise sauce", "hollandaise"],
+)
+def test_hollandaise_blocks_egg_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["Canadian bacon", "English muffins", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["egg"])
+    assert contains_allergen(recipe, ["eggs"])
+
+
+def test_hollandaise_sauce_mix_survives_egg_substitution_on_full_ingredient_list() -> None:
+    # Reproduces the exact hidden_009 shape: the recipe's OWN egg ingredient
+    # is correctly substituted away (ground flaxseed), but a separate,
+    # untouched hollandaise sauce mix ingredient still carries real egg
+    # content and must still fail an egg allergy.
+    recipe = _recipe(
+        ingredients=[
+            "ground flaxseed",
+            "Canadian bacon",
+            "(1 1/4 ounce) packet hollandaise sauce mix",
+            "milk",
+            "green peppers",
+            "English muffins",
+        ],
+        allergens=[],
+    )
+
+    assert not validate_recipe(recipe, _profile(allergies=["egg"])).is_valid
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    ["marshmallow cream", "marshmallow creme", "marshmallow fluff"],
+)
+def test_marshmallow_cream_blocks_egg_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["apples", "flour", "sugar", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["egg"])
+    assert contains_allergen(recipe, ["eggs"])
+
+
+@pytest.mark.parametrize("ingredient", ["marshmallows", "miniature marshmallows"])
+def test_bare_marshmallow_still_does_not_block_egg_allergy(ingredient: str) -> None:
+    # Regression guard for the existing, deliberate ruling (see
+    # test_marshmallow_blocks_vegan_and_vegetarian_diet's comment): bare,
+    # unqualified marshmallows are gelatin-set, not egg-based, and the new
+    # "marshmallow cream"/"creme"/"fluff" phrase terms must not widen onto
+    # this bare noun via the one-directional matcher (a bare "marshmallows"
+    # ingredient row never contains the substring "cream"/"creme"/"fluff").
+    recipe = _recipe(ingredients=["apples", "flour", "sugar", ingredient], allergens=[])
+
+    assert not contains_allergen(recipe, ["egg"])
+    assert not contains_allergen(recipe, ["eggs"])
+
+
+def test_marshmallow_meringue_apple_pie_survives_egg_substitution_on_full_ingredient_list() -> None:
+    # Reproduces the exact hidden_010 shape: the pie's OWN egg ingredient is
+    # correctly substituted away (ground flaxseed), but a separate,
+    # untouched "marshmallow cream" ingredient still carries real egg
+    # content (Italian-meringue-style, egg-white-based) and must still fail
+    # an egg allergy -- while the bare-marshmallow-is-egg-free ruling
+    # (exercised by other served variants of the same case in production)
+    # is unaffected.
+    recipe = _recipe(
+        ingredients=["apples", "lemon juice", "sugar", "flour", "cinnamon", "nutmeg", "ground flaxseed", "marshmallow cream", "pie crust"],
+        allergens=[],
+    )
+
+    assert not validate_recipe(recipe, _profile(allergies=["egg"])).is_valid
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    [
+        "Snickers miniature candy bars",
+        "Reese's Peanut Butter Cups",
+        "Reeses Pieces",
+        "Butterfinger bites",
+        "Baby Ruth bars",
+        "peanut M&M's",
+        "M&M's Peanut candies",
+        "peanut brittle",
+    ],
+)
+def test_named_peanut_candy_blocks_peanut_allergy(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["butter", "sugar", "flour", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["peanut"])
+    assert contains_allergen(recipe, ["peanuts"])
+    assert contains_allergen(recipe, ["nuts"])
+
+
+def test_snicker_surprise_cookies_survive_peanut_butter_substitution_on_full_ingredient_list() -> None:
+    # Reproduces the exact subst_001 shape: the cookies' OWN peanut butter is
+    # correctly substituted away (sunflower seed butter), but a separate,
+    # untouched "Snickers miniature candy bars" ingredient still carries
+    # real, whole roasted peanuts and must still fail a peanut allergy.
+    recipe = _recipe(
+        ingredients=[
+            "butter",
+            "sunflower seed butter",
+            "brown sugar",
+            "white sugar",
+            "eggs",
+            "vanilla extract",
+            "all-purpose flour",
+            "baking soda",
+            "salt",
+            "Snickers miniature candy bars",
+        ],
+        allergens=[],
+    )
+
+    assert not validate_recipe(recipe, _profile(allergies=["peanut"])).is_valid

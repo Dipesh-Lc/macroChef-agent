@@ -180,18 +180,53 @@ _DAIRY = frozenset(
 # row lives on imp_4632c3cbea4957e4 "Turkey Enchiladas", which is already
 # quarantined for an unrelated reason and therefore doesn't count in the
 # active-corpus over-block figure.
+# Named commercial candy products with real, whole peanuts as a headline,
+# label-declared ingredient (added 2026-07-26, consolidated adjudication
+# `data/evaluation/adjudication_20260726T193000Z_consolidated_74.md`,
+# `subst_001` TRUE_VIOLATION). Snickers bars contain roasted peanuts
+# (declared on every wrapper -- universally known product composition, not a
+# sourced-claim judgment call like amaretto/nougat above); Reese's/Reese's
+# Pieces are a peanut-butter-filled/peanut-candy product line; Butterfinger
+# and Baby Ruth both declare peanuts on their wrapper ingredient statements;
+# peanut M&M's are a named product variant distinct from plain M&M's; peanut
+# brittle is, by definition, a peanut-set candy. Same "real product, real
+# named allergen, engine's vocabulary didn't know it" gap class as
+# "enchilada sauce" above -- this is the exact gap
+# `imp_f99f31bf12c350e7::subst::1::sunflower-seed-butter` ("Snicker Surprise
+# Peanut Butter Cookies") fell through: the recipe's own peanut butter was
+# correctly substituted away, but a co-occurring, untouched "Snickers
+# miniature candy bars" ingredient carried its own, separate peanut content
+# no term here previously caught. Pinned as their own bare product-name
+# terms (not compound phrases): these are proper nouns/brand names with no
+# unrelated-word collision risk in this corpus (verified 2026-07-26 -- none
+# of "snickers"/"reese's"/"reeses"/"butterfinger"/"baby ruth"/"peanut
+# brittle" is a substring of any other known ingredient name). "reese's" and
+# "reeses" are both listed (apostrophe and apostrophe-free spellings), same
+# defensive-spelling pattern as _LOOKALIKE_EXCLUSIONS["brie"]'s "o'brien"/
+# "obrien" pair -- free-text ingredient rows have no guaranteed consistent
+# apostrophe usage. "peanut m&m" and "m&m's peanut" cover both common
+# phrasing orders for the peanut variant specifically (plain M&M's are not
+# peanut-containing and must not be flagged here).
 _PEANUT = frozenset(
     {
+        "baby ruth",
+        "butterfinger",
         "enchilada sauce",
         "groundnut",
+        "m&m's peanut",
         "peanut",
+        "peanut brittle",
         "peanut butter",
+        "peanut m&m",
         "peanut oil",
         "peanuts",
+        "reese's",
+        "reeses",
         "sate",
         "satay",
         "satay sauce",
         "saté",
+        "snickers",
     }
 )
 
@@ -376,7 +411,67 @@ _SOY = frozenset(
     {"bean curd", "edamame", "miso", "soy", "soy sauce", "soya", "tamari", "tempeh", "tofu"}
 )
 
-_EGG = frozenset({"egg", "egg whites", "eggs", "mayonnaise"})
+# "hollandaise"/"hollandaise sauce"/"hollandaise sauce mix": commercial
+# packaged hollandaise sauce mix is category-standard egg-containing, not
+# merely "may contain" -- McCormick's Hollandaise Sauce Mix (the dominant
+# retail product) lists "Whole Egg Solids, Egg Yolk Solids" among its
+# ingredients and is explicitly labeled unsuitable for egg allergy. FARE
+# (Food Allergy Research & Education)'s Egg allergy page explicitly lists
+# "Hollandaise" under "Eggs are sometimes found in." Added 2026-07-26
+# (consolidated adjudication, `hidden_009` TRUE_VIOLATION): the served
+# recipe's own scrambled-egg ingredient was correctly substituted to ground
+# flaxseed, but a separate, untouched "(1 1/4 ounce) packet hollandaise
+# sauce mix" ingredient carried its own egg content no term here previously
+# caught. All three phrasings (bare "hollandaise", "hollandaise sauce",
+# "hollandaise sauce mix") are listed for direct-substring safety even
+# though the shortest ("hollandaise") already substring-matches the other
+# two -- same explicit-redundancy style already used elsewhere in this file
+# (e.g. "peanut"/"peanut butter" both present under _PEANUT above) so this
+# entry's own citation doesn't depend on reasoning about substring
+# containment across three different reader eyes.
+#
+# "marshmallow cream"/"marshmallow creme"/"marshmallow fluff": a materially
+# DIFFERENT product from solid bagged marshmallows (which this codebase's
+# existing precedent -- see test_marshmallow_blocks_vegan_and_vegetarian_
+# diet and its "gelatin-set, no egg" reasoning -- correctly treats as
+# egg-free for the allergen check). Commercial marshmallow creme/fluff (the
+# dominant brand, Jet-Puffed Marshmallow Creme) is made as an Italian
+# meringue -- sugar syrup whipped into egg whites -- and the retail
+# product's own ingredient list includes dried egg whites; FARE's Egg
+# allergy page lists "Marshmallows" and "Meringue" under egg sources. Added
+# 2026-07-26 (consolidated adjudication, `hidden_010` TRUE_VIOLATION): the
+# served "Marshmallow Meringue Apple Pie" variant substituted the recipe's
+# own egg to ground flaxseed but left a separate, untouched "marshmallow
+# cream" ingredient uncaught. Pinned as full two/three-word phrases, never
+# the bare word "marshmallow" -- this is the SAME mechanism (not a new one)
+# already used throughout this file for a phrase that names a materially
+# different, allergen-bearing product from its bare-noun relative (e.g.
+# "soy sauce"/"hoisin sauce"/"teriyaki sauce" under _WHEAT, "enchilada
+# sauce" under _PEANUT): because `_any_term_matches` is one-directional
+# (`term in candidate`, never the reverse -- see that function's docstring),
+# a bare "marshmallows"/"miniature marshmallows" ingredient row can never
+# match a multi-word needle like "marshmallow cream" (the word "cream"/
+# "creme"/"fluff" is simply not present in that candidate text), so this
+# addition cannot widen onto or reverse the existing bare-marshmallow
+# egg-free ruling -- no _LOOKALIKE_EXCLUSIONS carve-out is needed because
+# the direction-safe one-directional matcher already prevents that
+# collision by construction. Verified 2026-07-26: 0 corpus ingredient rows
+# contain both a bare "marshmallow" (no "cream"/"creme"/"fluff" qualifier)
+# AND any of these three phrases in a way that could confuse the two.
+_EGG = frozenset(
+    {
+        "egg",
+        "egg whites",
+        "eggs",
+        "hollandaise",
+        "hollandaise sauce",
+        "hollandaise sauce mix",
+        "marshmallow cream",
+        "marshmallow creme",
+        "marshmallow fluff",
+        "mayonnaise",
+    }
+)
 
 # Crustaceans (crab, lobster, shrimp, ...) and mollusks (clam, mussel,
 # oyster, scallop) are the two biological groupings that make up
