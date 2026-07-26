@@ -8,15 +8,19 @@ fresh advisor FULL TREATMENT review): `Recipe.owner_user_id`
 were ever persisted or echoed verbatim on this path, the sharer's session
 identity would leak in-band to anyone who opens the resulting share link.
 
-The four `*_to_public` functions below are therefore an explicit,
-FIELD-LEVEL ALLOWLIST -- each one is built by naming every field it copies
-out of the source object, never by `model_dump()`-then-strip and never by
+The `*_to_public` functions below are therefore an explicit, FIELD-LEVEL
+ALLOWLIST -- each one is built by naming every field it copies out of the
+source object, never by `model_dump()`-then-strip and never by
 constructing the target from `**source.model_dump()`. A new field added to
 `Recipe`/`DayPlan`/`BatchPlan`/`WeeklyPlan` in the future is therefore
 excluded from the public payload BY DEFAULT (it simply won't appear on the
 matching `Public*` schema in `app/schemas/share.py` either) unless someone
 deliberately adds it to both the schema and the mapping function here --
-the safe failure mode for a share surface.
+the safe failure mode for a share surface. `shopping_list_to_public` is the
+one exception worth calling out explicitly: `ShoppingItem` already has no
+field that needs stripping, so that mapper is an identity copy -- but it is
+still a named function reviewed the same way, not a bare passthrough of the
+request field, for the same "future field gets scrutiny" reason.
 
 No LLM anywhere on this path -- this module does not import
 `app.services.model_provider` or any chat/vision provider; see
@@ -24,8 +28,9 @@ No LLM anywhere on this path -- this module does not import
 can never silently regress.
 """
 
-import json
 import secrets
+
+from pydantic import TypeAdapter
 
 from app.data.share_repository import ShareRepository
 from app.schemas.batch_plan import BatchPlan
@@ -36,11 +41,13 @@ from app.schemas.share import (
     PublicBatchPlan,
     PublicDayPlan,
     PublicRecipe,
+    PublicShoppingList,
     PublicWeeklyPlan,
     ShareCreateRequest,
     ShareCreateResponse,
     SharedPlanView,
 )
+from app.schemas.shopping import ShoppingItem
 from app.schemas.weekly_plan import WeeklyPlan
 
 # Opaque share id length -- 128 bits (secrets.token_urlsafe(16) produces
@@ -153,6 +160,19 @@ def weekly_plan_to_public(weekly_plan: WeeklyPlan) -> PublicWeeklyPlan:
     return PublicWeeklyPlan(days=[day_plan_to_public(day) for day in weekly_plan.days])
 
 
+def shopping_list_to_public(shopping_list: list[ShoppingItem]) -> PublicShoppingList:
+    """The allowlist for a shared shopping list. Unlike the four mapping
+    functions above, `ShoppingItem` (app/schemas/shopping.py) already has no
+    field that needs stripping -- no owner identity, no server-local path,
+    no self-reported tag macro -- so this is the identity function. It is
+    still named and shaped like the other `*_to_public` mappers (a plain
+    list copy, not `shopping_list` returned/aliased directly) so that a
+    future field added to `ShoppingItem` goes through the same deliberate
+    allowlist review this module's docstring mandates for every other
+    mapper, rather than silently riding along for free."""
+    return list(shopping_list)
+
+
 # ---------------------------------------------------------------------------
 # Orchestration -- used by app.api.routes_share.
 # ---------------------------------------------------------------------------
@@ -162,6 +182,11 @@ _MAPPERS = {
     "day": (lambda request: request.day_plan, day_plan_to_public, PublicDayPlan),
     "batch": (lambda request: request.batch_plan, batch_plan_to_public, PublicBatchPlan),
     "week": (lambda request: request.weekly_plan, weekly_plan_to_public, PublicWeeklyPlan),
+    "shopping_list": (
+        lambda request: request.shopping_list,
+        shopping_list_to_public,
+        PublicShoppingList,
+    ),
 }
 
 
@@ -179,10 +204,14 @@ def create_share(
     client-supplied value (same rule as every other per-user write path in
     this codebase, e.g. `app.data.recipe_library_repository.save_recipe`).
     """
-    source_getter, mapper, _ = _MAPPERS[request.plan_type]
+    source_getter, mapper, public_type = _MAPPERS[request.plan_type]
     source = source_getter(request)
     public_obj = mapper(source)
-    content_json = public_obj.model_dump_json()
+    # `TypeAdapter` (not `public_obj.model_dump_json()`) so this works
+    # uniformly whether `public_type` is a `BaseModel` subclass (the four
+    # `Public*` wrapper models) or a bare `list[...]` (`PublicShoppingList`
+    # -- see app/schemas/share.py's comment on why that one has no wrapper).
+    content_json = TypeAdapter(public_type).dump_json(public_obj).decode("utf-8")
 
     share_id = secrets.token_urlsafe(_SHARE_ID_BYTES)
     repository = repo or ShareRepository()
@@ -206,7 +235,9 @@ def get_share(share_id: str, repo: ShareRepository | None = None) -> SharedPlanV
         return None
 
     plan_type: PlanType = row.plan_type  # type: ignore[assignment]
-    data = json.loads(row.content)
     public_type = _MAPPERS[plan_type][2]
-    content = public_type.model_validate(data)
+    # `TypeAdapter` (not `public_type.model_validate(...)`) for the same
+    # reason as `create_share` above -- `PublicShoppingList` is a bare
+    # `list[...]`, which has no `model_validate` classmethod of its own.
+    content = TypeAdapter(public_type).validate_json(row.content)
     return SharedPlanView(plan_type=plan_type, content=content, disclaimer=SHARE_DISCLAIMER)

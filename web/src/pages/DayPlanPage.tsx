@@ -4,6 +4,7 @@ import { ProfileForm } from "../components/ProfileForm";
 import { PantryInput, type PantryState } from "../components/PantryInput";
 import { SafetyAuditPanel } from "../components/SafetyAuditPanel";
 import { PlanMacroSummary } from "../components/PlanMacroSummary";
+import { RecipeDetailModal } from "../components/RecipeDetailModal";
 import { ShoppingList } from "../components/ShoppingList";
 import { ShareButton } from "../components/ShareButton";
 import { ApiError, RateLimitError } from "../api/client";
@@ -57,13 +58,30 @@ const MAX_PER_RECIPE_OPTIONS = [1, 2, 3, 4];
 // One PlanItem row: recipe title + servings. `DayPlanResponse.plan.items`
 // only carries `{recipe_id, title, servings}` (see
 // `app.schemas.day_plan.PlanItem`) -- no full `Recipe` (ingredients,
-// nutrition, score, explanation), so `RecipeCard` (which requires a full
-// `MealRecommendation`) doesn't fit here; this is a deliberately lighter
-// row rather than a forced reuse.
-function PlanItemRow({ title, servings }: { title: string; servings: number }) {
+// nutrition, score, explanation), so `RecipeCard` can't be rendered inline
+// here. Instead, the title is now a click target that opens the full
+// `Recipe` (fetched via GET /recipes/{recipe_id}) in `RecipeDetailModal`,
+// which itself renders `RecipeCard` with no score/explanation.
+function PlanItemRow({
+  recipeId,
+  title,
+  servings,
+  onSelectRecipe,
+}: {
+  recipeId: string;
+  title: string;
+  servings: number;
+  onSelectRecipe: (recipeId: string) => void;
+}) {
   return (
     <li className="flex items-center justify-between gap-3 border-b border-sage-line/60 py-2 last:border-none">
-      <span className="text-sm text-cast-iron">{title}</span>
+      <button
+        type="button"
+        onClick={() => onSelectRecipe(recipeId)}
+        className="text-left text-sm text-cast-iron underline-offset-2 hover:underline"
+      >
+        {title}
+      </button>
       <span className="font-mono text-sm text-cast-iron/70">
         {servings}x serving{servings === 1 ? "" : "s"}
       </span>
@@ -82,6 +100,7 @@ export default function DayPlanPage() {
   const [mealsInput, setMealsInput] = useState<string>("");
   const [maxPerRecipe, setMaxPerRecipe] = useState(2);
   const [rateLimitToast, setRateLimitToast] = useState<string | null>(null);
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
 
   const planMutation = useMutation({
     mutationFn: (request: DayPlanRequest) => planDay(request),
@@ -235,7 +254,13 @@ export default function DayPlanPage() {
                   <h2 className="font-display text-base font-semibold text-cast-iron">Meals</h2>
                   <ul className="mt-2 flex flex-col">
                     {(result.plan.items ?? []).map((item) => (
-                      <PlanItemRow key={item.recipe_id} title={item.title} servings={item.servings} />
+                      <PlanItemRow
+                        key={item.recipe_id}
+                        recipeId={item.recipe_id}
+                        title={item.title}
+                        servings={item.servings}
+                        onSelectRecipe={setSelectedRecipeId}
+                      />
                     ))}
                   </ul>
                 </section>
@@ -273,6 +298,10 @@ export default function DayPlanPage() {
           </p>
         )}
       </div>
+
+      {selectedRecipeId && (
+        <RecipeDetailModal recipeId={selectedRecipeId} onClose={() => setSelectedRecipeId(null)} />
+      )}
     </div>
   );
 }

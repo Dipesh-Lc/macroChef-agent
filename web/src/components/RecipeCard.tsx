@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, RateLimitError } from "../api/client";
 import { getDetailedInstructions, postFeedback } from "../api/endpoints";
-import type { MealRecommendation } from "../api/types";
+import type { Recipe, RecipeScore } from "../api/types";
 import { batchTotalsLine } from "../lib/batchTotals";
 import { macroDisplay } from "../lib/macroDisplay";
 import { recipeImageUrl } from "../lib/placeholderImage";
@@ -169,8 +169,20 @@ function FeedbackButtons({ recipeId }: { recipeId: string }) {
   );
 }
 
-export function RecipeCard({ recommendation }: { recommendation: MealRecommendation }) {
-  const { recipe, score } = recommendation;
+export function RecipeCard({
+  recipe,
+  score,
+}: {
+  recipe: Recipe;
+  score?: RecipeScore;
+  /** Kept in the prop signature for the score-scoped `MealRecommendation`
+   * call sites, but no longer rendered anywhere -- see the removal of the
+   * LLM-generated explanation paragraph in fcf3307 ("Macro presets, remove
+   * LLM explanation/USDA badge"). Accepting-and-ignoring it here (rather
+   * than dropping it from the prop type) keeps every existing
+   * `{ recipe, score, explanation }` call site compiling unchanged. */
+  explanation?: string;
+}) {
   const [imageFailed, setImageFailed] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [scoreDetailsOpen, setScoreDetailsOpen] = useState(false);
@@ -199,13 +211,21 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
   // redundant inside the (now click-to-reveal) score-details grid below.
   // "Pantry mass" is kept since it's a distinct, non-redundant signal (the
   // mass-weighted coverage fraction, not a duplicate of the chips).
-  const scoreTiles: { label: string; value: number }[] = [
-    { label: "Final", value: score.final_score },
-    { label: "Macros", value: score.macro_fit_score },
-    { label: "Time", value: score.time_score },
-    { label: "Preference", value: score.preference_score },
-    { label: "Pantry mass", value: score.pantry_mass_coverage },
-  ];
+  //
+  // Score-dependent (this card can now render without a `score` at all --
+  // e.g. `RecipeDetailModal`'s plain recipe-detail view opened from a
+  // day/week plan row, which has no recommendation/scoring context): `null`
+  // when `score` is absent, so every score-dependent section below can
+  // gate on it consistently rather than each re-deriving its own check.
+  const scoreTiles: { label: string; value: number }[] | null = score
+    ? [
+        { label: "Final", value: score.final_score },
+        { label: "Macros", value: score.macro_fit_score },
+        { label: "Time", value: score.time_score },
+        { label: "Preference", value: score.preference_score },
+        { label: "Pantry mass", value: score.pantry_mass_coverage },
+      ]
+    : null;
 
   return (
     <article className="overflow-hidden rounded-lg border border-sage-line bg-white shadow-sm">
@@ -244,19 +264,21 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
 
           <p className="font-mono text-sm text-cast-iron">{macros.badgeText}</p>
 
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
-              Matching Info
-            </span>
-            <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
-              Used ingredients
-            </span>
-            <IngredientChips items={score.used_ingredients ?? []} variant="used" />
-            <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
-              Missing ingredients
-            </span>
-            <IngredientChips items={score.missing_ingredients ?? []} variant="missing" />
-          </div>
+          {score && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
+                Matching Info
+              </span>
+              <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
+                Used ingredients
+              </span>
+              <IngredientChips items={score.used_ingredients ?? []} variant="used" />
+              <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/50">
+                Missing ingredients
+              </span>
+              <IngredientChips items={score.missing_ingredients ?? []} variant="missing" />
+            </div>
+          )}
 
           <div className="flex flex-col gap-2 rounded-md border border-sage-line p-3">
             <div className="flex items-center justify-between gap-2">
@@ -304,6 +326,7 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
               click (this toggle, the instructions toggle, "Get detailed
               instructions", or NutritionBreakdown's own internal toggle) --
               nothing here is part of the always-visible summary above. */}
+          {scoreTiles && (
           <div>
             <button
               type="button"
@@ -326,6 +349,7 @@ export function RecipeCard({ recommendation }: { recommendation: MealRecommendat
               </div>
             )}
           </div>
+          )}
 
           <NutritionBreakdown recipe={recipe} />
 

@@ -100,6 +100,125 @@
         }
       }
     },
+    "/recipes/{recipe_id}": {
+      "get": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Get Recipe",
+        "description": "Public call: no session bootstrap, no rate limit -- this is a pure\nlookup by id into the already-loaded corpus (`app.services.\nrecipe_retriever.get_recipe_by_id`), the same lookup POST /plan/day and\nfriends already do server-side to resolve a `PlanItem.recipe_id` back to\nits full `Recipe`. It computes nothing (no nutrition math, no allergy\ndecision) and makes no safety decision of its own -- it only returns\nalready-computed, already-grounded data the frontend can't otherwise\nreach from a `PlanItem` (which only carries `{recipe_id, title,\nservings}`, see `app.schemas.day_plan.PlanItem`). Used by the day/week\nplan views' \"click a recipe name\" detail modal.",
+        "operationId": "get_recipe_recipes__recipe_id__get",
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recipe"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/search": {
+      "post": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Search Recipes",
+        "description": "Deterministic search/filter over the existing static corpus (loaded\nvia `app.rag.loaders.load_corpus`) -- NOT the generative `/library/\ndiscover` endpoint. Rate-limited the same way as POST /recipes/recommend\nand POST /recipes/instructions above (this file's existing pattern for a\nnon-personalized-write, corpus-scale endpoint); see\n`require_recommend_rate_limit`'s own docstring. `session_user_id` is\notherwise unused: this endpoint reads/writes no per-user data, exactly\nlike /recipes/instructions.\n\nSAFETY (mandatory, verifiable): allergen exclusion and diet-type\nexclusion are each decided by calling `app.services.constraint_engine`'s\n`contains_allergen`/`violates_diet_type` DIRECTLY -- the same\ndeterministic, substring-matching primitives `validate_recipe` itself\ncalls -- never an LLM, and never `recipe.allergens`/`recipe.diet_tags`\ntag metadata alone. `validate_recipe` itself is deliberately NOT used\nhere: it also enforces `contains_disliked_ingredient`/\n`violates_cook_time`, which have no meaning for a search/browse request\nand would require synthesizing dummy values on a fake `UserProfile`.\n\nCalorie/macro range filtering reads ONLY\n`app.services.nutrition_view.trusted_per_serving` -- never\n`recipe.calories`/`recipe.protein_g` (self-reported tag fields, never\ntrusted for scoring/filtering per that model's own docstring). When at\nleast one calorie/macro filter is supplied and `trusted_per_serving`\nreturns `None` for a recipe (ungrounded/partial/flagged nutrition), that\nrecipe is excluded and counted in `macro_unavailable_excluded`. When NO\ncalorie/macro filter is supplied, nutrition groundedness is never\nchecked and nothing is excluded on that basis -- a cuisine/allergen/diet\n-only search must not silently drop ungrounded recipes.\n\nCuisine matching mirrors `RecipeRetriever._keyword_score`'s existing\nconvention (app.services.recipe_retriever): case-insensitive exact\nmatch against `recipe.cuisine`, not a substring/fuzzy match.\n\nLinear scan over `load_corpus()`, no index/cache -- the same performance\nposture POST /plan/day, /plan/batch, and /plan/week already use\n(app.api.routes_day_planner) at this corpus size.",
+        "operationId": "search_recipes_recipes_search_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeSearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/recipes/recommend": {
       "post": {
         "tags": [
@@ -822,6 +941,48 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ShoppingListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/plan/shopping-list-for-items": {
+      "post": {
+        "tags": [
+          "day-planner"
+        ],
+        "summary": "Plan Shopping List For Items",
+        "description": "Frontend recipe search/plan-builder follow-up: shopping-list\naggregation across a caller-supplied `list[PlanItem]` that did NOT come\nfrom `assemble_plan`/`assemble_day_plan` (e.g. a manually-curated\nselection assembled client-side from `POST /recipes/search` results --\nsee `app.schemas.day_plan.ShoppingListForItemsRequest`'s docstring).\n\nNOT a safety endpoint, identical posture to `plan_shopping_list` above:\nevery `recipe_id` in `request.items` was already safety-cleared when the\nuser found it via a safety-filtering search/recommend endpoint, so this\nendpoint makes no new safety/allergy/diet decision -- it only does pure\nquantity arithmetic (`app.services.procurement_service.\nbuild_shopping_list_for_items`, the exact same aggregate-then-reconcile-\nonce call `plan_batch`/`plan_week` already use for their own\n`list[PlanItem]`) against the full corpus looked up by id. A\n`recipe_id` absent from the corpus is silently skipped by\n`build_shopping_list_for_items` (never fabricated), same as every other\ncaller of that function.",
+        "operationId": "plan_shopping_list_for_items_plan_shopping_list_for_items_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShoppingListForItemsRequest"
               }
             }
           },
@@ -3417,6 +3578,178 @@
         ],
         "title": "RecipeScore"
       },
+      "RecipeSearchRequest": {
+        "properties": {
+          "cuisines": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisines"
+          },
+          "allergies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allergies"
+          },
+          "diet_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diet Type"
+          },
+          "calorie_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calorie Min"
+          },
+          "calorie_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calorie Max"
+          },
+          "protein_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein Min"
+          },
+          "protein_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein Max"
+          },
+          "carbs_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs Min"
+          },
+          "carbs_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs Max"
+          },
+          "fat_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat Min"
+          },
+          "fat_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat Max"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "title": "RecipeSearchRequest",
+        "description": "The `POST /recipes/search` request body.\n\nDeliberately standalone fields (mirroring `RecipeDiscoveryRequest` in\napp.schemas.library), not a synthesized `UserProfile` -- a search/browse\ncontext has no cook-time or disliked-ingredient semantics, so this\nschema does not invent dummy values for fields `UserProfile` requires\nbut that don't apply here. This endpoint filters the existing static\ncorpus (loaded via app.rag.loaders.load_corpus); it is NOT the\ngenerative `/library/discover` endpoint."
+      },
+      "RecipeSearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/Recipe"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "total_matched": {
+            "type": "integer",
+            "title": "Total Matched",
+            "default": 0
+          },
+          "macro_unavailable_excluded": {
+            "type": "integer",
+            "title": "Macro Unavailable Excluded",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RecipeSearchResponse"
+      },
       "RecommendationRequest": {
         "properties": {
           "input_type": {
@@ -3661,7 +3994,8 @@
               "recipe",
               "day",
               "batch",
-              "week"
+              "week",
+              "shopping_list"
             ],
             "title": "Plan Type"
           },
@@ -3704,6 +4038,20 @@
                 "type": "null"
               }
             ]
+          },
+          "shopping_list": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ShoppingItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shopping List"
           }
         },
         "type": "object",
@@ -3711,7 +4059,7 @@
           "plan_type"
         ],
         "title": "ShareCreateRequest",
-        "description": "Body for POST /share.\n\n`plan_type` selects exactly one of the four optional fields below --\nthe matching object the (authenticated) client already holds in its own\nUI state. This is intentionally NOT the wire-level shape that gets\npersisted: `app.services.share_service.create_share` maps whichever\nfield is populated through the server-side allowlist functions above\nbefore anything is written to `SharedPlan.content` -- the client object\nis read from, never echoed or persisted verbatim (see that module's\ndocstring for why)."
+        "description": "Body for POST /share.\n\n`plan_type` selects exactly one of the five optional fields below --\nthe matching object the (authenticated) client already holds in its own\nUI state. This is intentionally NOT the wire-level shape that gets\npersisted: `app.services.share_service.create_share` maps whichever\nfield is populated through the server-side allowlist functions above\nbefore anything is written to `SharedPlan.content` -- the client object\nis read from, never echoed or persisted verbatim (see that module's\ndocstring for why)."
       },
       "ShareCreateResponse": {
         "properties": {
@@ -3735,7 +4083,8 @@
               "recipe",
               "day",
               "batch",
-              "week"
+              "week",
+              "shopping_list"
             ],
             "title": "Plan Type"
           },
@@ -3752,6 +4101,12 @@
               },
               {
                 "$ref": "#/components/schemas/PublicWeeklyPlan"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ShoppingItem"
+                },
+                "type": "array"
               }
             ],
             "title": "Content"
@@ -3827,6 +4182,27 @@
           "name"
         ],
         "title": "ShoppingItem"
+      },
+      "ShoppingListForItemsRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "title": "Inventory"
+          }
+        },
+        "type": "object",
+        "title": "ShoppingListForItemsRequest",
+        "description": "Wire contract for POST /plan/shopping-list-for-items (frontend recipe\nsearch/plan-builder follow-up).\n\nUnlike `ShoppingListRequest`, `items` is a caller-supplied `list[PlanItem]`\nthat did NOT come from `assemble_plan`/`assemble_day_plan` -- it is a\nmanually-curated, client-side-only selection (e.g. recipes a user found\nvia `POST /recipes/search` and added to a plan one at a time), so there\nis no `DayPlan` wrapper with macro-fit fields to reuse. This endpoint\nstill makes NO new safety decision: every `recipe_id` here was already\nsafety-cleared when the user found it via a safety-filtering search/\nrecommend endpoint, so this is pure quantity arithmetic (same\n`app.services.procurement_service.build_shopping_list_for_items`\naggregate-then-reconcile-once call `plan_batch`/`plan_week` already use\nfor their own `list[PlanItem]`), never a re-filter and never a dummy\nmacro/target value fabricated to satisfy `ShoppingListRequest`'s\n`DayPlan` shape."
       },
       "ShoppingListRequest": {
         "properties": {

@@ -4,6 +4,7 @@ const ROUTES: { to: string; label: string }[] = [
   { to: "/", label: "Planner" },
   { to: "/day", label: "Day" },
   { to: "/week", label: "Week" },
+  { to: "/search", label: "Search" },
   { to: "/my-recipes", label: "My recipes" },
 ];
 

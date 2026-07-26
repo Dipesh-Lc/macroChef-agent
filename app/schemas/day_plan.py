@@ -141,3 +141,26 @@ class ShoppingListRequest(BaseModel):
 
 class ShoppingListResponse(BaseModel):
     shopping_list: list[ShoppingItem] = Field(default_factory=list)
+
+
+class ShoppingListForItemsRequest(BaseModel):
+    """Wire contract for POST /plan/shopping-list-for-items (frontend recipe
+    search/plan-builder follow-up).
+
+    Unlike `ShoppingListRequest`, `items` is a caller-supplied `list[PlanItem]`
+    that did NOT come from `assemble_plan`/`assemble_day_plan` -- it is a
+    manually-curated, client-side-only selection (e.g. recipes a user found
+    via `POST /recipes/search` and added to a plan one at a time), so there
+    is no `DayPlan` wrapper with macro-fit fields to reuse. This endpoint
+    still makes NO new safety decision: every `recipe_id` here was already
+    safety-cleared when the user found it via a safety-filtering search/
+    recommend endpoint, so this is pure quantity arithmetic (same
+    `app.services.procurement_service.build_shopping_list_for_items`
+    aggregate-then-reconcile-once call `plan_batch`/`plan_week` already use
+    for their own `list[PlanItem]`), never a re-filter and never a dummy
+    macro/target value fabricated to satisfy `ShoppingListRequest`'s
+    `DayPlan` shape.
+    """
+
+    items: list[PlanItem] = Field(default_factory=list)
+    inventory: list[ConfirmedIngredient] = Field(default_factory=list)

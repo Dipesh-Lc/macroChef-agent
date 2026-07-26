@@ -2,11 +2,19 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ApiError, NotFoundError } from "../api/client";
 import { getSharedPlan } from "../api/endpoints";
-import type { PublicBatchPlan, PublicDayPlan, PublicRecipe, PublicWeeklyPlan, SharedPlanView } from "../api/types";
+import type {
+  PublicBatchPlan,
+  PublicDayPlan,
+  PublicRecipe,
+  PublicShoppingList,
+  PublicWeeklyPlan,
+  SharedPlanView,
+} from "../api/types";
 import { BatchContainerGrid } from "../components/BatchContainerGrid";
 import { ComingSoonPage } from "../components/ComingSoonPage";
 import { PlanMacroSummary } from "../components/PlanMacroSummary";
 import { RecipeFitTable } from "../components/RecipeFitTable";
+import { ShoppingList } from "../components/ShoppingList";
 import { SubstitutionNoteCard } from "../components/SubstitutionNoteCard";
 import { WeekCalendarGrid } from "../components/WeekCalendarGrid";
 import { macroDisplay } from "../lib/macroDisplay";
@@ -145,6 +153,16 @@ function SharedWeeklyPlanView({ weeklyPlan }: { weeklyPlan: PublicWeeklyPlan }) 
   return <WeekCalendarGrid days={weeklyPlan.days ?? []} />;
 }
 
+// `PublicShoppingList` (task "Shareable Shopping Lists") is a bare
+// `ShoppingItem[]` -- no wrapper object, see `app.schemas.share`'s comment
+// on why. Reuses `ShoppingList` verbatim (checkbox toggling + "Copy" both
+// still work for an anonymous viewer -- both are pure client-side state/
+// clipboard actions, no session or safety decision involved) rather than
+// building a second rendering of the same list, per "no parallel views".
+function SharedShoppingListView({ shoppingList }: { shoppingList: PublicShoppingList }) {
+  return <ShoppingList items={shoppingList} />;
+}
+
 export default function SharedPlanPage() {
   const { shareId } = useParams<{ shareId: string }>();
   // Lazy initializer folds the "no :shareId param at all" case into the
@@ -222,6 +240,10 @@ export default function SharedPlanPage() {
 
       {view.plan_type === "week" && (
         <SharedWeeklyPlanView weeklyPlan={view.content as PublicWeeklyPlan} />
+      )}
+
+      {view.plan_type === "shopping_list" && (
+        <SharedShoppingListView shoppingList={view.content as PublicShoppingList} />
       )}
     </div>
   );

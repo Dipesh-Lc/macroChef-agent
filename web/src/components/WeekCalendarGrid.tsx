@@ -18,9 +18,14 @@ import { allDaysIdentical } from "../lib/weekPlan";
 export function WeekCalendarGrid({
   days,
   trustedPoolSize,
+  onSelectRecipe,
 }: {
   days: DayPlanCardPlan[];
   trustedPoolSize?: number;
+  /** Optional -- forwarded straight through to each `DayPlanCard` (see that
+   * component's own docstring for why this stays optional: the shared-plan
+   * viewer doesn't wire it). */
+  onSelectRecipe?: (recipeId: string) => void;
 }) {
   const identical = allDaysIdentical(days);
 
@@ -36,7 +41,7 @@ export function WeekCalendarGrid({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {days.map((day, index) => (
-          <DayPlanCard key={index} dayIndex={index} plan={day} />
+          <DayPlanCard key={index} dayIndex={index} plan={day} onSelectRecipe={onSelectRecipe} />
         ))}
       </div>
     </section>

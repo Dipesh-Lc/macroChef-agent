@@ -14,8 +14,11 @@ import type {
   DetailedInstructionsResponse,
   FeedbackRequest,
   InventoryObservation,
+  Recipe,
   RecipeDiscoveryRequest,
   RecipeDiscoveryResponse,
+  RecipeSearchRequest,
+  RecipeSearchResponse,
   RecommendationRequest,
   RecommendationResponse,
   ReindexLibraryResponse,
@@ -24,6 +27,7 @@ import type {
   ShareCreateRequest,
   ShareCreateResponse,
   SharedPlanView,
+  ShoppingListForItemsRequest,
   ShoppingListRequest,
   ShoppingListResponse,
   UserRecipeLibraryResponse,
@@ -133,6 +137,20 @@ export async function postFeedback(request: FeedbackRequest): Promise<void> {
 }
 
 /**
+ * Public call: no session bootstrap, no CSRF header -- same convention as
+ * `planDay`/`getShoppingList` (a pure by-id lookup, see
+ * `app.api.routes_recommendations.get_recipe`'s docstring). Used by
+ * `RecipeDetailModal` to resolve a `PlanItem.recipe_id` (day/week plan rows
+ * only carry `{recipe_id, title, servings}`) back to the full `Recipe` for
+ * display -- computes nothing and makes no safety decision.
+ */
+export async function getRecipe(recipeId: string): Promise<Recipe> {
+  return apiRequest<Recipe>(`/recipes/${encodeURIComponent(recipeId)}`, {
+    method: "GET",
+  });
+}
+
+/**
  * Public call: no session bootstrap, no CSRF header. Every candidate recipe
  * is safety-cleared server-side by `app.services.constraint_engine.
  * validate_recipe` before the solver ever sees it (see
@@ -186,6 +204,49 @@ export async function getShoppingList(
   return apiRequest<ShoppingListResponse>("/plan/shopping-list", {
     method: "POST",
     json: request,
+  });
+}
+
+/** Public call: no session bootstrap, no CSRF header -- same posture as
+ * `getShoppingList` above. Pure quantity arithmetic
+ * (`app.services.procurement_service.build_shopping_list_for_items`) over a
+ * caller-supplied `list[PlanItem]` that was never assembled by a solver
+ * (e.g. a manually-curated selection built from `searchRecipes` results) --
+ * see `app.api.routes_day_planner.plan_shopping_list_for_items`'s docstring.
+ * Makes no safety decision: every recipe_id here was already safety-cleared
+ * when the user found it via a safety-filtering search/recommend endpoint. */
+export async function getShoppingListForItems(
+  request: ShoppingListForItemsRequest,
+): Promise<ShoppingListResponse> {
+  return apiRequest<ShoppingListResponse>("/plan/shopping-list-for-items", {
+    method: "POST",
+    json: request,
+  });
+}
+
+// POST /recipes/search is a linear scan over the full corpus (no LLM call,
+// no combinatorial enumeration) -- same performance posture as
+// DAY_PLAN_TIMEOUT_MS's underlying constraint_engine pass, so it gets the
+// same generous-but-bounded budget rather than an untimed request.
+const SEARCH_RECIPES_TIMEOUT_MS = 60_000;
+
+/** Session-required: bootstraps a session and sends the CSRF header. Also
+ * rate-limited server-side (shares RATE_LIMIT_RECOMMEND_MAX per
+ * RATE_LIMIT_RECOMMEND_WINDOW_SECONDS with /recipes/recommend and
+ * /recipes/instructions -- see `app.api.routes_recommendations.
+ * search_recipes`'s docstring and `app/dependencies.py`'s
+ * `require_recommend_rate_limit`), so callers should handle `RateLimitError`
+ * the same way `recommendRecipes` callers do. Deterministic filter/search
+ * only -- no LLM call, no safety decision left to the caller to enforce
+ * (allergen/diet exclusion already happened server-side). */
+export async function searchRecipes(
+  request: RecipeSearchRequest,
+): Promise<RecipeSearchResponse> {
+  return apiRequest<RecipeSearchResponse>("/recipes/search", {
+    method: "POST",
+    json: request,
+    sessionRequired: true,
+    timeoutMs: SEARCH_RECIPES_TIMEOUT_MS,
   });
 }
 
