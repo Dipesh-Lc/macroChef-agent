@@ -32,14 +32,21 @@ Decisions:
       {naive, steelman}, k=3) at an estimated ~$12.21 need your budget
       approval + `OPENAI_API_KEY`/`GEMINI_API_KEY`/`ANTHROPIC_API_KEY`
       in `.env` before any paid calls.
-- [ ] Corpus license posture: the Food.com Kaggle corpus (CC0-self-applied)
-      is fine for hobby scope, but a public deployment is arguably
-      "public/commercial-adjacent" — decide: keep as-is, or swap/trim the
-      imported corpus before going live. (The seed/imported split makes a
-      swap cheap. Note: after the 2026-07-18 integrity quarantines the
-      imported corpus is 2,884 rows; the quality case for an eventual
-      swap got stronger — ~25% of the original import was corrupt — but
-      the licensing question is unchanged and still yours.)
+- [x] Corpus license posture: decided 2026-07-25 — keep the Food.com
+      Kaggle CC0 corpus as the primary source and expand it (top-up
+      toward ~10,000 recipes via the same already-cleared source), rather
+      than swap it out. Human's exact words: "I approve of exploring
+      external sources for new recipes if we can't get to 10K through the
+      previous used source. The only requirement is that the new recipe
+      should also be complete in terms of ingredients, amount,
+      instructions etc, if some partially complete source are available
+      which can be extended with the help of llm's to complete it then
+      that is also fine." A genuinely different external source is only
+      to be used as a fallback if the Food.com top-up can't reach 10k on
+      its own, and any such fallback source still needs its own license
+      surfaced per the standing rule in `CLAUDE.md` — this decision covers
+      continuing to scale the Food.com CC0 source, not a blanket
+      pre-clearance of every possible future source.
 
 Keys / accounts (fill placeholders the agents add to `.env.example`):
 - [ ] `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` — for the

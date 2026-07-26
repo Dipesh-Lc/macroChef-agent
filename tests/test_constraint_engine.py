@@ -1174,6 +1174,34 @@ def test_gruyere_blocks_both_dairy_allergy_and_dairy_free_diet() -> None:
     assert not validate_recipe(recipe, _profile(diet_type="dairy-free")).is_valid
 
 
+@pytest.mark.parametrize("ingredient", ["panir", "grated panir"])
+def test_panir_spelling_blocks_dairy_allergy_and_dairy_free_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["dairy"])
+    assert contains_allergen(recipe, ["milk"])
+    assert violates_diet_type(recipe, "dairy-free") is True
+
+
+@pytest.mark.parametrize("ingredient", ["cool whip, thawed", "light whipped topping", "envelopes dream whip"])
+def test_whipped_topping_vocabulary_blocks_milk_and_dairy_allergy_and_dairy_free_diet(ingredient: str) -> None:
+    recipe = _recipe(ingredients=["rice", ingredient], allergens=[])
+
+    assert contains_allergen(recipe, ["milk"])
+    assert contains_allergen(recipe, ["dairy"])
+    assert violates_diet_type(recipe, "dairy-free") is True
+
+
+def test_miracle_whip_not_blocked_by_milk_allergy() -> None:
+    # "Miracle Whip" is mayonnaise (no dairy). The carrier string below
+    # isolates the "miracle whip" substring specifically -- it deliberately
+    # avoids the word "mayonnaise" (an _EGG term) so this test only exercises
+    # the dairy/"whip" collision question, not an unrelated egg-allergen path.
+    recipe = _recipe(ingredients=["rice", "salad dressing (such as miracle whip)"], allergens=[])
+
+    assert not contains_allergen(recipe, ["milk"])
+
+
 # --- "capon"/"caponata" lookalike carve-out ---------------------------------
 # "capon" (a castrated rooster, poultry) is a literal substring of
 # "caponata" (a vegetarian eggplant dish, unrelated). Same water-chestnut-

@@ -38,6 +38,20 @@ scripts/scrape_recipe_pages.py
 tests/test_recipe_scraping.py
 tests/fixtures/scrape/
 
+# Corpus-expansion candidate-id scraper (2026-07-25, task A2): imports
+# directly from the local-only app/services/recipe_scraping/ package above,
+# so it's the same "raw scraper code" class and stays local-only for the
+# same reason -- never becomes the one piece of this pipeline that leaks
+# into the tracked tree.
+scripts/scrape_candidate_ids.py
+tests/test_scrape_candidate_ids.py
+
+# Same reason: tests the resume/skip logic inside the local-only
+# scrape_recipe_pages.py (2026-07-25, resume-logic fix for the candidate-id
+# scraper's not_found handling) -- same "raw scraper code" class, stays
+# local-only.
+tests/test_scrape_recipe_pages_resume.py
+
 frontend/.streamlit/
 dist/
 build/
