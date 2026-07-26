@@ -21,6 +21,7 @@ describe("RecipeSearchForm", () => {
       carbs_max: undefined,
       fat_min: undefined,
       fat_max: undefined,
+      limit: 20,
     });
   });
 

@@ -194,11 +194,11 @@ export default function RecipeSearchPage() {
             </p>
           )}
 
-          {result.results.length === 0 ? (
+          {(result.results ?? []).length === 0 ? (
             <p className="mt-2 text-sm text-cast-iron/70">No recipes matched these filters.</p>
           ) : (
             <ul className="mt-2 flex flex-col">
-              {result.results.map((recipe) => (
+              {(result.results ?? []).map((recipe) => (
                 <ResultRow
                   key={recipe.recipe_id}
                   recipe={recipe}

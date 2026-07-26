@@ -55,6 +55,13 @@ export function toggleCuisine(current: string[], cuisine: string): string[] {
     : [...current, cuisine];
 }
 
+// Mirrors the backend default (`RecipeSearchRequest.limit`,
+// `app/schemas/recipe_search.py`: `Field(default=20, ge=1, le=50)`). Pydantic
+// fields with a concrete (non-None) default are emitted by openapi-typescript
+// as always-present in the generated request type -- see that field's
+// docstring -- so this helper must supply a value rather than omitting it.
+const DEFAULT_SEARCH_LIMIT = 20;
+
 export function toSearchRequest(value: RecipeSearchFormValue): RecipeSearchRequest {
   return {
     cuisines: value.cuisines.length > 0 ? value.cuisines : undefined,
@@ -68,5 +75,6 @@ export function toSearchRequest(value: RecipeSearchFormValue): RecipeSearchReque
     carbs_max: toOptionalNumber(value.carbsMax),
     fat_min: toOptionalNumber(value.fatMin),
     fat_max: toOptionalNumber(value.fatMax),
+    limit: DEFAULT_SEARCH_LIMIT,
   };
 }
