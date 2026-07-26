@@ -96,9 +96,12 @@ function CandidateCard({
             </p>
           )}
 
-          {candidate.allergens && candidate.allergens.length > 0 && (
+          {candidate.derived_allergens && candidate.derived_allergens.length > 0 && (
             <p className="text-sm text-cast-iron/80">
-              <span className="font-medium">Allergens:</span> {candidate.allergens.join(", ")}
+              {/* Ingredient-derived, display-only (never the safety-relevant
+                  self-reported `allergens` field) -- see
+                  `app.schemas.recipe_candidate.RecipeCandidate.derived_allergens`. */}
+              <span className="font-medium">Allergens:</span> {candidate.derived_allergens.join(", ")}
             </p>
           )}
 

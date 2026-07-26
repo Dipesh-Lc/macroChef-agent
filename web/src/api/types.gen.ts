@@ -759,7 +759,7 @@ export interface components {
         };
         /** CheckAllergenToolRequest */
         CheckAllergenToolRequest: {
-            recipe: components["schemas"]["Recipe"];
+            recipe: components["schemas"]["Recipe-Input"];
             /** Allergies */
             allergies?: string[];
         };
@@ -770,7 +770,7 @@ export interface components {
         };
         /** CheckDietViolationToolRequest */
         CheckDietViolationToolRequest: {
-            recipe: components["schemas"]["Recipe"];
+            recipe: components["schemas"]["Recipe-Input"];
             /** Diet Type */
             diet_type: string;
         };
@@ -1085,7 +1085,7 @@ export interface components {
         };
         /** MealRecommendation */
         MealRecommendation: {
-            recipe: components["schemas"]["Recipe"];
+            recipe: components["schemas"]["Recipe-Output"];
             score: components["schemas"]["RecipeScore"];
             /** Explanation */
             explanation: string;
@@ -1237,7 +1237,7 @@ export interface components {
             days?: components["schemas"]["PublicDayPlan"][];
         };
         /** Recipe */
-        Recipe: {
+        "Recipe-Input": {
             /** Recipe Id */
             recipe_id: string;
             /** Title */
@@ -1311,8 +1311,104 @@ export interface components {
             /** Substitution Note */
             substitution_note?: string | null;
         };
+        /** Recipe */
+        "Recipe-Output": {
+            /** Recipe Id */
+            recipe_id: string;
+            /** Title */
+            title: string;
+            /** Cuisine */
+            cuisine?: string | null;
+            /** Meal Type */
+            meal_type?: string | null;
+            /** Ingredients */
+            ingredients?: components["schemas"]["Ingredient"][];
+            /** Instructions */
+            instructions?: string[];
+            /** Allergens */
+            allergens?: string[];
+            /** Diet Tags */
+            diet_tags?: string[];
+            /** Cook Time Min */
+            cook_time_min?: number | null;
+            /** Calories */
+            calories?: number | null;
+            /** Protein G */
+            protein_g?: number | null;
+            /** Carbs G */
+            carbs_g?: number | null;
+            /** Fat G */
+            fat_g?: number | null;
+            /** Fiber G */
+            fiber_g?: number | null;
+            nutrition?: components["schemas"]["RecipeNutrition"] | null;
+            /** Description */
+            description?: string | null;
+            /** Difficulty */
+            difficulty?: string | null;
+            /**
+             * Servings
+             * @default 1
+             */
+            servings: number | null;
+            /** Equipment */
+            equipment?: string[];
+            /** Image Url */
+            image_url?: string | null;
+            /** Image Path */
+            image_path?: string | null;
+            /**
+             * Source Type
+             * @default base
+             */
+            source_type: string | null;
+            /** Source Name */
+            source_name?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Owner User Id */
+            owner_user_id?: string | null;
+            /**
+             * Is User Saved
+             * @default false
+             */
+            is_user_saved: boolean;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /**
+             * Restored From Quarantine
+             * @default false
+             */
+            restored_from_quarantine: boolean;
+            /** Substitution Note */
+            substitution_note?: string | null;
+            /**
+             * Derived Allergens
+             * @description Allergen labels derived deterministically from this recipe's
+             *     ingredient names, via `constraint_engine.derive_allergen_labels`.
+             *
+             *     DISPLAY-ONLY. This is a separate field from `allergens` (the
+             *     self-reported/union field constraint_engine actually enforces
+             *     against) and exists purely so the frontend can show an
+             *     ingredient-grounded "Contains: ..." label without relying on
+             *     self-reported metadata. Never read by `contains_allergen`,
+             *     `_recipe_safety_terms`, `violates_diet_type`, `_allowed`, or any
+             *     other safety decision path -- do not wire this into one. See
+             *     docs/TO_FIX_AND_UPGRADE.md item 4 and the recipe_id derived-
+             *     allergens task for the design rationale (Option C: additive field,
+             *     `allergens` left untouched).
+             *
+             *     Imported here (not at module level) to avoid a circular import:
+             *     `app.services.constraint_engine` itself imports `Recipe` from this
+             *     module.
+             */
+            readonly derived_allergens: string[];
+        };
         /** RecipeCandidate */
-        RecipeCandidate: {
+        "RecipeCandidate-Input": {
             /** Candidate Id */
             candidate_id: string;
             /** Title */
@@ -1373,6 +1469,90 @@ export interface components {
             /** Validation Warnings */
             validation_warnings?: string[];
         };
+        /** RecipeCandidate */
+        "RecipeCandidate-Output": {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Title */
+            title: string;
+            /** Cuisine */
+            cuisine?: string | null;
+            /** Meal Type */
+            meal_type?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Ingredients */
+            ingredients?: components["schemas"]["Ingredient"][];
+            /** Instructions */
+            instructions?: string[];
+            /** Cook Time Min */
+            cook_time_min?: number | null;
+            /** Difficulty */
+            difficulty?: string | null;
+            /**
+             * Servings
+             * @default 1
+             */
+            servings: number | null;
+            /** Calories */
+            calories?: number | null;
+            /** Protein G */
+            protein_g?: number | null;
+            /** Carbs G */
+            carbs_g?: number | null;
+            /** Fat G */
+            fat_g?: number | null;
+            /** Fiber G */
+            fiber_g?: number | null;
+            /** Allergens */
+            allergens?: string[];
+            /** Diet Tags */
+            diet_tags?: string[];
+            /** Equipment */
+            equipment?: string[];
+            /** Image Url */
+            image_url?: string | null;
+            /** Image Path */
+            image_path?: string | null;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "mock" | "ai_generated" | "external" | "curated" | "user_added";
+            /** Source Name */
+            source_name?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /**
+             * Home Cookable Score
+             * @default 1
+             */
+            home_cookable_score: number;
+            /** Validation Warnings */
+            validation_warnings?: string[];
+            /**
+             * Derived Allergens
+             * @description Allergen labels derived deterministically from this candidate's
+             *     ingredient names, via `constraint_engine.derive_allergen_labels`.
+             *
+             *     DISPLAY-ONLY. This is a separate field from `allergens` (the
+             *     self-reported field that flows into `Recipe.allergens` via
+             *     `to_recipe()` and is unioned into constraint_engine's safety scan)
+             *     and exists purely so the frontend can show an ingredient-grounded
+             *     "Contains: ..." label without relying on self-reported metadata.
+             *     Never read by `contains_allergen`, `_recipe_safety_terms`,
+             *     `violates_diet_type`, `_allowed`, or any other safety decision
+             *     path -- do not wire this into one. See docs/TO_FIX_AND_UPGRADE.md
+             *     item 4 and `Recipe.derived_allergens` for the design rationale
+             *     (Option C: additive field, `allergens`/`to_recipe()` left
+             *     untouched).
+             *
+             *     Imported here (not at module level) as a defensive precaution
+             *     matching `Recipe.derived_allergens` (see that docstring for the
+             *     confirmed circular-import reason on the Recipe side).
+             */
+            readonly derived_allergens: string[];
+        };
         /**
          * RecipeDiscoveryRequest
          * @description The `/library/discover` request body.
@@ -1419,7 +1599,7 @@ export interface components {
         /** RecipeDiscoveryResponse */
         RecipeDiscoveryResponse: {
             /** Candidates */
-            candidates?: components["schemas"]["RecipeCandidate"][];
+            candidates?: components["schemas"]["RecipeCandidate-Output"][];
             /** Debug Trace */
             debug_trace?: string[];
             /** Warnings */
@@ -1556,7 +1736,7 @@ export interface components {
         /** RecipeSearchResponse */
         RecipeSearchResponse: {
             /** Results */
-            results?: components["schemas"]["Recipe"][];
+            results?: components["schemas"]["Recipe-Output"][];
             /**
              * Total Matched
              * @default 0
@@ -1629,7 +1809,7 @@ export interface components {
          */
         SaveRecipeCandidatesRequest: {
             /** Selected Candidates */
-            selected_candidates?: components["schemas"]["RecipeCandidate"][];
+            selected_candidates?: components["schemas"]["RecipeCandidate-Input"][];
         };
         /** SaveRecipeCandidatesResponse */
         SaveRecipeCandidatesResponse: {
@@ -1663,7 +1843,7 @@ export interface components {
              * @enum {string}
              */
             plan_type: "recipe" | "day" | "batch" | "week" | "shopping_list";
-            recipe?: components["schemas"]["Recipe"] | null;
+            recipe?: components["schemas"]["Recipe-Input"] | null;
             day_plan?: components["schemas"]["DayPlan"] | null;
             batch_plan?: components["schemas"]["BatchPlan"] | null;
             weekly_plan?: components["schemas"]["WeeklyPlan"] | null;
@@ -1810,11 +1990,11 @@ export interface components {
         /** UserRecipeLibraryResponse */
         UserRecipeLibraryResponse: {
             /** Recipes */
-            recipes?: components["schemas"]["Recipe"][];
+            recipes?: components["schemas"]["Recipe-Output"][];
         };
         /** ValidateRecipeToolRequest */
         ValidateRecipeToolRequest: {
-            recipe: components["schemas"]["Recipe"];
+            recipe: components["schemas"]["Recipe-Input"];
             user_profile: components["schemas"]["UserProfile"];
         };
         /** ValidationError */
@@ -2052,7 +2232,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Recipe"];
+                    "application/json": components["schemas"]["Recipe-Output"];
                 };
             };
             /** @description Validation Error */

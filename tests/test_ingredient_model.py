@@ -99,6 +99,64 @@ def test_candidate_to_recipe_dedupes_allergens() -> None:
     assert recipe.allergens == ["egg"]
 
 
+def test_recipe_derived_allergens_computed_from_ingredients() -> None:
+    # Self-reported `allergens=["soy"]` is unrelated to the ingredient list
+    # (no soy-containing ingredient), so `derived_allergens` -- which is
+    # computed purely from ingredient names via
+    # `constraint_engine.derive_allergen_labels` -- must diverge from it:
+    # empty, while `allergens` stays exactly what was self-reported.
+    from app.services.constraint_engine import derive_allergen_labels
+
+    ingredients = ["rice", "olive oil", "lemon"]
+    recipe = Recipe(
+        recipe_id="r",
+        title="t",
+        ingredients=ingredients,
+        allergens=["soy"],
+    )
+    names = [item.name for item in recipe.ingredients]
+    assert recipe.derived_allergens == derive_allergen_labels(names)
+    assert recipe.derived_allergens == []
+    assert recipe.allergens == ["soy"]
+
+
+def test_recipe_candidate_derived_allergens_computed_from_ingredients() -> None:
+    from app.schemas.recipe_candidate import RecipeCandidate
+    from app.services.constraint_engine import derive_allergen_labels
+
+    ingredients = ["rice", "olive oil", "lemon"]
+    candidate = RecipeCandidate(
+        candidate_id="c",
+        title="Bowl",
+        ingredients=ingredients,
+        allergens=["soy"],
+        source_type="mock",
+    )
+    names = [item.name for item in candidate.ingredients]
+    assert candidate.derived_allergens == derive_allergen_labels(names)
+    assert candidate.derived_allergens == []
+    assert candidate.allergens == ["soy"]
+
+
+def test_recipe_allergens_field_unaffected_by_derived_allergens() -> None:
+    # Regression guard: `allergens` (the field constraint_engine's
+    # `_recipe_safety_terms` actually unions into its safety scan) must
+    # remain a plain self-reported/passthrough field, never silently merged
+    # with or overwritten by the new `derived_allergens` computed field --
+    # see docs/TO_FIX_AND_UPGRADE.md item 4 for why the two must stay
+    # separate.
+    recipe = Recipe(
+        recipe_id="r",
+        title="t",
+        ingredients=["peanut butter"],
+        allergens=["dairy"],
+    )
+    assert recipe.allergens == ["dairy"]
+    assert "allergens" in Recipe.model_fields
+    assert "derived_allergens" not in Recipe.model_fields  # computed_field, not a stored field
+    assert "derived_allergens" in Recipe.model_computed_fields
+
+
 def test_loader_drops_empty_ingredients(tmp_path) -> None:
     import json
 

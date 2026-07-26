@@ -1,6 +1,6 @@
 import logging
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 from app.schemas.ingredient import Ingredient
 from app.schemas.nutrition import RecipeNutrition
@@ -82,3 +82,28 @@ class Recipe(BaseModel):
                 identifier,
             )
         return kept
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def derived_allergens(self) -> list[str]:
+        """Allergen labels derived deterministically from this recipe's
+        ingredient names, via `constraint_engine.derive_allergen_labels`.
+
+        DISPLAY-ONLY. This is a separate field from `allergens` (the
+        self-reported/union field constraint_engine actually enforces
+        against) and exists purely so the frontend can show an
+        ingredient-grounded "Contains: ..." label without relying on
+        self-reported metadata. Never read by `contains_allergen`,
+        `_recipe_safety_terms`, `violates_diet_type`, `_allowed`, or any
+        other safety decision path -- do not wire this into one. See
+        docs/TO_FIX_AND_UPGRADE.md item 4 and the recipe_id derived-
+        allergens task for the design rationale (Option C: additive field,
+        `allergens` left untouched).
+
+        Imported here (not at module level) to avoid a circular import:
+        `app.services.constraint_engine` itself imports `Recipe` from this
+        module.
+        """
+        from app.services.constraint_engine import derive_allergen_labels
+
+        return derive_allergen_labels([ingredient.name for ingredient in self.ingredients])

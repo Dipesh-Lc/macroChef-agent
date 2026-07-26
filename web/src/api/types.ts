@@ -14,7 +14,16 @@ export type Ingredient = components["schemas"]["Ingredient"];
 export type ConfirmedIngredient = components["schemas"]["ConfirmedIngredient"];
 export type InventoryObservation = components["schemas"]["InventoryObservation"];
 
-export type Recipe = components["schemas"]["Recipe"];
+// `Recipe` has a `derived_allergens` computed field (display-only, see
+// `app.schemas.recipe.Recipe.derived_allergens`), which openapi-typescript
+// splits into a request-shaped "Recipe-Input" (no computed field) and a
+// response-shaped "Recipe-Output" (includes it). Every frontend use of
+// `Recipe` is a value the app *received* from the backend (even when it's
+// later forwarded verbatim into a request body, e.g. `ShareButton`'s
+// `ShareCreateRequest.recipe`), so the response shape is the correct one --
+// TypeScript's structural typing still allows passing it wherever the
+// narrower "Recipe-Input" is expected.
+export type Recipe = components["schemas"]["Recipe-Output"];
 export type RecipeScore = components["schemas"]["RecipeScore"];
 export type MealRecommendation = components["schemas"]["MealRecommendation"];
 export type RejectedRecipe = components["schemas"]["RejectedRecipe"];
@@ -77,7 +86,12 @@ export type PublicShoppingList = ShoppingItem[];
 
 export type UserRecipeLibraryResponse = components["schemas"]["UserRecipeLibraryResponse"];
 
-export type RecipeCandidate = components["schemas"]["RecipeCandidate"];
+// Same "-Input"/"-Output" split as `Recipe` above (`RecipeCandidate` also
+// gained a `derived_allergens` computed field); candidates are always
+// received from `/discover` first, so the response shape is correct even
+// where a candidate is later forwarded into `SaveRecipeCandidatesRequest`
+// (request-shaped "-Input").
+export type RecipeCandidate = components["schemas"]["RecipeCandidate-Output"];
 export type RecipeDiscoveryRequest = components["schemas"]["RecipeDiscoveryRequest"];
 export type RecipeDiscoveryResponse = components["schemas"]["RecipeDiscoveryResponse"];
 export type SaveRecipeCandidatesRequest = components["schemas"]["SaveRecipeCandidatesRequest"];

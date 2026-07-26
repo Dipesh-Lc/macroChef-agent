@@ -125,7 +125,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Recipe"
+                  "$ref": "#/components/schemas/Recipe-Output"
                 }
               }
             }
@@ -1486,7 +1486,7 @@
       "CheckAllergenToolRequest": {
         "properties": {
           "recipe": {
-            "$ref": "#/components/schemas/Recipe"
+            "$ref": "#/components/schemas/Recipe-Input"
           },
           "allergies": {
             "items": {
@@ -1518,7 +1518,7 @@
       "CheckDietViolationToolRequest": {
         "properties": {
           "recipe": {
-            "$ref": "#/components/schemas/Recipe"
+            "$ref": "#/components/schemas/Recipe-Input"
           },
           "diet_type": {
             "type": "string",
@@ -2303,7 +2303,7 @@
       "MealRecommendation": {
         "properties": {
           "recipe": {
-            "$ref": "#/components/schemas/Recipe"
+            "$ref": "#/components/schemas/Recipe-Output"
           },
           "score": {
             "$ref": "#/components/schemas/RecipeScore"
@@ -2716,7 +2716,7 @@
         "title": "PublicWeeklyPlan",
         "description": "Share-safe projection of `app.schemas.weekly_plan.WeeklyPlan`.\n\nExcludes `trusted_pool_size` (same reasoning as `PublicDayPlan`) and\n`pantry_utilization`/`uncompared_ingredient_count` (both are\npantry-derived and would leak \"here's what's in the sharer's kitchen\"\nto an anonymous viewer)."
       },
-      "Recipe": {
+      "Recipe-Input": {
         "properties": {
           "recipe_id": {
             "type": "string",
@@ -3001,7 +3001,302 @@
         ],
         "title": "Recipe"
       },
-      "RecipeCandidate": {
+      "Recipe-Output": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/Ingredient"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergens"
+          },
+          "diet_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diet Tags"
+          },
+          "cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cook Time Min"
+          },
+          "calories": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calories"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "fiber_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber G"
+          },
+          "nutrition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeNutrition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "servings": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Servings",
+            "default": 1
+          },
+          "equipment": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Equipment"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Path"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type",
+            "default": "base"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "is_user_saved": {
+            "type": "boolean",
+            "title": "Is User Saved",
+            "default": false
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "restored_from_quarantine": {
+            "type": "boolean",
+            "title": "Restored From Quarantine",
+            "default": false
+          },
+          "substitution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substitution Note"
+          },
+          "derived_allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Derived Allergens",
+            "description": "Allergen labels derived deterministically from this recipe's\ningredient names, via `constraint_engine.derive_allergen_labels`.\n\nDISPLAY-ONLY. This is a separate field from `allergens` (the\nself-reported/union field constraint_engine actually enforces\nagainst) and exists purely so the frontend can show an\ningredient-grounded \"Contains: ...\" label without relying on\nself-reported metadata. Never read by `contains_allergen`,\n`_recipe_safety_terms`, `violates_diet_type`, `_allowed`, or any\nother safety decision path -- do not wire this into one. See\ndocs/TO_FIX_AND_UPGRADE.md item 4 and the recipe_id derived-\nallergens task for the design rationale (Option C: additive field,\n`allergens` left untouched).\n\nImported here (not at module level) to avoid a circular import:\n`app.services.constraint_engine` itself imports `Recipe` from this\nmodule.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "title",
+          "derived_allergens"
+        ],
+        "title": "Recipe"
+      },
+      "RecipeCandidate-Input": {
         "properties": {
           "candidate_id": {
             "type": "string",
@@ -3253,6 +3548,268 @@
         ],
         "title": "RecipeCandidate"
       },
+      "RecipeCandidate-Output": {
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "title": "Candidate Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuisine"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/Ingredient"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "cook_time_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cook Time Min"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "servings": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Servings",
+            "default": 1
+          },
+          "calories": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calories"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "fiber_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fiber G"
+          },
+          "allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergens"
+          },
+          "diet_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diet Tags"
+          },
+          "equipment": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Equipment"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Path"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "ai_generated",
+              "external",
+              "curated",
+              "user_added"
+            ],
+            "title": "Source Type"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "home_cookable_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Home Cookable Score",
+            "default": 1.0
+          },
+          "validation_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Warnings"
+          },
+          "derived_allergens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Derived Allergens",
+            "description": "Allergen labels derived deterministically from this candidate's\ningredient names, via `constraint_engine.derive_allergen_labels`.\n\nDISPLAY-ONLY. This is a separate field from `allergens` (the\nself-reported field that flows into `Recipe.allergens` via\n`to_recipe()` and is unioned into constraint_engine's safety scan)\nand exists purely so the frontend can show an ingredient-grounded\n\"Contains: ...\" label without relying on self-reported metadata.\nNever read by `contains_allergen`, `_recipe_safety_terms`,\n`violates_diet_type`, `_allowed`, or any other safety decision\npath -- do not wire this into one. See docs/TO_FIX_AND_UPGRADE.md\nitem 4 and `Recipe.derived_allergens` for the design rationale\n(Option C: additive field, `allergens`/`to_recipe()` left\nuntouched).\n\nImported here (not at module level) as a defensive precaution\nmatching `Recipe.derived_allergens` (see that docstring for the\nconfirmed circular-import reason on the Recipe side).",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "title",
+          "source_type",
+          "derived_allergens"
+        ],
+        "title": "RecipeCandidate"
+      },
       "RecipeDiscoveryRequest": {
         "properties": {
           "cuisines": {
@@ -3364,7 +3921,7 @@
         "properties": {
           "candidates": {
             "items": {
-              "$ref": "#/components/schemas/RecipeCandidate"
+              "$ref": "#/components/schemas/RecipeCandidate-Output"
             },
             "type": "array",
             "title": "Candidates"
@@ -3731,7 +4288,7 @@
         "properties": {
           "results": {
             "items": {
-              "$ref": "#/components/schemas/Recipe"
+              "$ref": "#/components/schemas/Recipe-Output"
             },
             "type": "array",
             "title": "Results"
@@ -3941,7 +4498,7 @@
         "properties": {
           "selected_candidates": {
             "items": {
-              "$ref": "#/components/schemas/RecipeCandidate"
+              "$ref": "#/components/schemas/RecipeCandidate-Input"
             },
             "type": "array",
             "title": "Selected Candidates"
@@ -4002,7 +4559,7 @@
           "recipe": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Recipe"
+                "$ref": "#/components/schemas/Recipe-Input"
               },
               {
                 "type": "null"
@@ -4339,7 +4896,7 @@
         "properties": {
           "recipes": {
             "items": {
-              "$ref": "#/components/schemas/Recipe"
+              "$ref": "#/components/schemas/Recipe-Output"
             },
             "type": "array",
             "title": "Recipes"
@@ -4351,7 +4908,7 @@
       "ValidateRecipeToolRequest": {
         "properties": {
           "recipe": {
-            "$ref": "#/components/schemas/Recipe"
+            "$ref": "#/components/schemas/Recipe-Input"
           },
           "user_profile": {
             "$ref": "#/components/schemas/UserProfile"
