@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,11 +18,22 @@ from app.dependencies import validate_session_secret_at_startup
 from app.spa import mount_spa
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Fail closed BEFORE the app can serve traffic if SESSION_SECRET is
+    # missing outside local dev -- see app.dependencies for the signal
+    # used to detect local dev and why raising here (not warning) matters.
+    validate_session_secret_at_startup()
+    init_db()
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="MacroChef Agent",
         description="A multimodal, constraint-aware meal planning system.",
         version="0.1.0",
+        lifespan=lifespan,
     )
     # SPA rebuild W6 cutover: the React SPA is now served BY this same
     # FastAPI process, same-origin, in every environment except local Vite
@@ -73,14 +87,6 @@ def create_app() -> FastAPI:
     app.include_router(safety_tools_router)
     app.include_router(share_router)
     app.include_router(session_router)
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        # Fail closed BEFORE the app can serve traffic if SESSION_SECRET is
-        # missing outside local dev -- see app.dependencies for the signal
-        # used to detect local dev and why raising here (not warning) matters.
-        validate_session_secret_at_startup()
-        init_db()
 
     # LAST: mounts the built SPA (if present) + its catch-all client-routing
     # fallback. Must stay after every app.include_router(...) call above --

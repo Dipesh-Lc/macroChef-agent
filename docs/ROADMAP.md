@@ -13,13 +13,13 @@ Merged plan from both reviews (Opus 4.8 + Fable 5). Organized so each phase has 
 | Phase | Status |
 |---|---|
 | 0 — Credibility | **DONE**, except README screenshots + demo GIF (human gate). |
-| 1 — Trust & grounding | **DONE** (USDA grounding, quantity model, 4,238-recipe corpus, re-derived macros). Residuals tracked in `docs/BACKLOG.md` "Corpus / nutrition". |
+| 1 — Trust & grounding | **DONE** (USDA grounding, quantity model, corpus scaled to 10,011 recipes as of the corpus-expansion-10k merge (commit `652e1e0`), re-derived macros). Residuals tracked in `docs/BACKLOG.md` "Corpus / nutrition". |
 | 2 — Benchmark + deploy | **Live** at ca-macrochef (italynorth) since 2026-07-18. MacroChef arm run, gate met: judge-flagged 17/259, adjudicated-true **0/259** inherent. NOT done: external-model comparison arms (money gate ~$12), analytics verified firing in prod (human), soft launch (human), screenshots (human). |
-| 3 — Differentiation | Not started (B1–B5 not yet begun). Was blocked by the unitless corpus — unblocked 2026-07-18 by the Food.com raw-page scrape; the corpus itself re-imported from that scrape **2026-07-19 (task A1)**: unit coverage 0.35% → **76.14%** (30,780/40,423 ingredient rows), imported corpus now 3,853 active / 379 quarantined (after the diet_023 safety-benchmark cure round, see docs/BACKLOG.md). A2 (widen the conversion surface) already landed at commit `6482c6b`, ahead of A1. A3 (re-ground nutrition corpus-wide) has not run against the new corpus yet — the unlock chain (A1→A2→A3) is otherwise clear for B1–B5 to start. |
-| 4 — Retention/planning | Not started. Same blocker, same unblock as Phase 3. |
-| 5 — Platform | Not started. |
+| 3 — Differentiation | **DONE.** B1–B6 all shipped: substitution engine (`app/services/substitution_service.py`, commit `69798b5`), visible personalization loop (commit `e5c652f`), macro-targeted day-plan solver (`app/api/routes_day_planner.py`'s `/day`, commit `3ee44ef`), shopping-list aggregation (`/shopping-list`, commit `8c0f5bd`). Cost estimation (v1) not confirmed shipped — verify before closing that sub-item fully. |
+| 4 — Retention/planning | **DONE.** Meal-prep batch solver (`/batch`, commit `96e8748`), full weekly meal-plan solver (`/week`, commit `62e25ec`), expiry/waste tracking (`app/services/waste_tracking.py`, commit `f009e3e`), shareable plan URLs (`app/api/routes_share.py`, commit `b052579`). |
+| 5 — Platform | **DONE for the parts pursued.** Constraint engine exposed as a REST "safety tools" API (`app/api/routes_safety_tools.py`, commit `fb24a8a`) — MCP-server scaffolding was deliberately evaluated and skipped as scope creep for wrapping 4 endpoints (see that commit's message / `docs/BACKLOG.md`), not shipped. Mobile-quality frontend superseded by the full SPA rebuild (React + Vite, `web/`, cutover commit `14d23c9` "SPA rebuild: React frontend cutover (W0-W6)", plus two-pane layout + visible safety filtering commit `9054c1f`). Vision-provider work and v2 launch not done. |
 
-The forward plan below ("Unlock chain") supersedes the Phase 3–4 internal ordering where they differ; the phase texts remain as reference. Known stale docs: `frontend/streamlit_app.py` disclaimer still says the benchmark "has not yet been run" (fix in C0 below); `docs/BACKLOG.md:195` says the benchmark runner doesn't exist (it does).
+The forward plan below ("Unlock chain") is now historical — Phases 3–5 above shipped since it was written; the phase texts remain as reference for what was actually built. The SPA rebuild (W6 cutover) replaced Streamlit entirely — `frontend/streamlit_app.py` no longer exists in this repo; the safety disclaimer it used to carry now lives in `web/src/components/DisclaimerBanner.tsx`.
 
 ---
 
@@ -115,22 +115,24 @@ ingredients convert to grams.
   quarantined recipes recovered in A1; later, the multi-source variations
   pass (backlogged) gives side-by-side versions.
 
-### Stage C — Frontend redesign
+### Stage C — Frontend redesign — DONE (superseded by the SPA rebuild)
 
-- **C0 (immediate, independent of A):** fix the stale benchmark disclaimer
-  in `frontend/streamlit_app.py` — it must state both numbers
-  (judge-flagged 17/259; adjudicated-true 0/259) per Honest scope. Do
-  before screenshots.
-- **C1. Two-pane layout:** conversational agent left, live **plan canvas**
-  right (day/week grid, macro totals updating as recipes land). Recipe
-  detail views with the scaler; macro donut per recipe; stacked daily
-  totals against target bands.
-- **C2. Make safety visible:** the allergy-filter status always on screen
-  ("filtered deterministically: N recipes excluded for tree nuts") —
-  turns the safety architecture into a visible feature.
-- **C3. React frontend against the existing FastAPI** — only if Streamlit
-  fights the two-pane design; bigger scope, itself a portfolio upgrade.
-  **Human decision point before starting C3.**
+`frontend/streamlit_app.py` no longer exists in this repo (deleted in the
+React SPA cutover, commit `14d23c9` "SPA rebuild: React frontend cutover
+(W0-W6)"); the disclaimer it used to carry now lives, updated with current
+numbers, in `web/src/components/DisclaimerBanner.tsx`.
+
+- **C0 (fix the stale benchmark disclaimer to state both numbers per Honest
+  scope) — DONE**, ported into `DisclaimerBanner.tsx` above.
+- **C1. Two-pane layout — DONE** (conversational agent left, live plan
+  canvas right; commit `9054c1f` "C1+C2: two-pane frontend layout +
+  visible safety filtering").
+- **C2. Make safety visible — DONE**, same commit as C1 above.
+- **C3. React frontend against the existing FastAPI — DONE.** The human
+  decision point was resolved in favor of the full rebuild; see the SPA
+  rebuild commits (`14d23c9` and the subsequent W-series work) and
+  `docs/DEPLOY.md`'s "Topology" section for the shipped single-process
+  same-origin architecture.
 
 ### What makes it impressive to a reviewer (standing principles)
 
@@ -159,11 +161,14 @@ ingredients convert to grams.
 | 13 | Phase 4: batch solver → weekly solver → expiry → share URLs | mixed (solvers FULL) | B3, B4 |
 | 14 | Phase 5: API/MCP server, mobile polish, real vision, v2 launch | per-item | user signal |
 
-Human gates unchanged and still open: screenshots/GIF, analytics
-verification, soft-launch posting, external benchmark arms (~$12),
-corpus-license posture for public deployment (A1 re-imports Food.com-
-derived data into the served corpus — same posture question as today,
-flag at A1 review), React-frontend scope call (C3).
+Human gates still open (updated — the items below are all still done,
+Phases 3–5 in the table above have since shipped): screenshots/GIF,
+analytics verification, soft-launch posting, external benchmark arms
+(~$12), corpus-license posture for public deployment (re-affirmed at hobby
+scope 2026-07-19, see `docs/DEPLOY.md`'s "Scraped-archive licensing"
+section — revisit if scope moves toward commercial/public-commercial
+deployment). React-frontend scope call (C3) is **resolved** — the React
+SPA rebuild shipped (commit `14d23c9` onward) — no longer an open gate.
 
 ---
 

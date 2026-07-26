@@ -112,11 +112,16 @@ runs ONE container with ONE process:
 - The corpus (`data/processed/imported_recipes.jsonl`,
   `quarantined_recipes.jsonl`, `sample_recipes.jsonl`) is generated from the
   scraped Food.com archive (`data/scraped/foodcom/*.md`, local-only — see
-  "Scraped-archive licensing" below), commit `d93e07a` ("A1: rebuild the
-  corpus from the scraped Food.com archive"): 3,853 active imported recipes
-  + 25 curated seeds = 3,878 indexed; 379 quarantined. These processed
-  outputs ARE tracked in git (unlike the raw archive/scraper), so they are
-  present in any checkout, including a CI runner's.
+  "Scraped-archive licensing" below). As originally rebuilt at commit
+  `d93e07a` ("A1: rebuild the corpus from the scraped Food.com archive"):
+  3,853 active imported recipes + 25 curated seeds = 3,878 indexed; 379
+  quarantined (historical figure for that specific rebuild). **Current
+  corpus size: 10,011 recipes**, after the corpus-expansion-10k merge
+  (commit `652e1e0`, "grow recipe corpus from 3,884 to 10,011" — see
+  `data/processed/grounding_report.md`'s "total recipes processed" for the
+  authoritative live count). These processed outputs ARE tracked in git
+  (unlike the raw archive/scraper), so they are present in any checkout,
+  including a CI runner's.
 - **Staleness bug found and fixed 2026-07-19 (this item).** Before this
   fix, nothing in the Dockerfile, `docker-entrypoint.sh`, or
   `.github/workflows/ci.yml` ever populated `data/chroma/` inside the
