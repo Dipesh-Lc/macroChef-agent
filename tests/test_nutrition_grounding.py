@@ -169,6 +169,61 @@ def test_volume_ingredient_grounds_via_density() -> None:
     assert result.contributions[0].grams == pytest.approx(236.588 * 1.03, rel=1e-3)
 
 
+def test_null_amount_ingredient_mixed_with_grounded_does_not_zero_fill() -> None:
+    """Locks in the null-amount handling described in `compute_recipe_macros`'s
+    docstring: a `None` amount must never be silently coerced to a real zero
+    quantity that still goes through USDA lookup and scaling.
+
+    A bare total-value check can't tell "correctly excluded" apart from
+    "wrongly coerced to grams=0.0" -- scaling any matched food by 0 grams
+    also yields 0 macros, so the total would look identical either way. The
+    signal that actually distinguishes the two is whether a lookup was even
+    attempted for the null-amount ingredient, and whether it counts toward
+    `grounded_count` / coverage / status -- so this test asserts on those,
+    not just on the total.
+    """
+    rice = _match("rice", calories=130, protein_g=2.69, carbs_g=28.17, fat_g=0.28, fiber_g=0.4)
+    milk = _match("milk", calories=61, protein_g=3.2, carbs_g=4.8, fat_g=3.3, fiber_g=0)
+    ingredients = [
+        NutritionIngredient(name="chicken breast", amount=200, unit="g"),
+        NutritionIngredient(name="rice", amount=150, unit="g"),
+        NutritionIngredient(name="milk", amount=1, unit="cup"),
+        NutritionIngredient(name="salt", amount=None, unit="g"),
+    ]
+    client = FakeUsdaClient(
+        {"chicken breast": CHICKEN_BREAST, "rice": rice, "milk": milk, "salt": None}
+    )
+
+    result = compute_recipe_macros(ingredients, servings=1, client=client)
+
+    # 1. The null-amount ingredient's contribution is excluded outright, not
+    #    zero-filled: no lookup was attempted for it (a wrongly-coerced
+    #    grams=0.0 would still trigger a `search_food` call), and its
+    #    `grams` field stays `None` rather than becoming a real 0.0.
+    assert "salt" not in client.calls
+    salt_contribution = next(c for c in result.contributions if c.name == "salt")
+    assert salt_contribution.grams is None
+    assert salt_contribution.grounded is False
+    assert salt_contribution.macros is None
+
+    # 2. It shows up in the exact "ungrounded" tracking structure the module
+    #    reports (`ungrounded_ingredients`), not merged away.
+    assert result.ungrounded_ingredients == ["salt"]
+
+    # 3. Coverage/status reflect 3 of 4 ingredients grounded, not full
+    #    coverage -- if `None` were ever coerced to a lookup-triggering 0,
+    #    this would wrongly read back as GROUNDED / coverage 1.0.
+    assert result.status == GroundingStatus.PARTIAL
+    assert result.coverage == pytest.approx(0.75)
+
+    # Totals reflect only the three grounded ingredients (computed by hand),
+    # confirming the null-amount row contributed nothing -- neither a real
+    # value nor a silent zero-filled entry that would still count as grounded.
+    milk_grams = 236.588 * 1.03
+    expected_total_calories = 330 + (130 * 1.5) + (61 * milk_grams / 100)
+    assert result.total.calories == pytest.approx(expected_total_calories, rel=1e-3)
+
+
 def test_incomparable_unit_ungrounded() -> None:
     # A volume unit with no known density can't be converted -> ungrounded, no lookup.
     ingredient = NutritionIngredient(name="mystery sauce", amount=1, unit="cup")
