@@ -1751,26 +1751,48 @@ Context: a two-advisor-brainstorm + third-advisor-synthesis pass decided a
 session's task history for the full decision trail). Two residual items
 surfaced during implementation, deliberately left unfixed:
 
-- **`_PACK_SIZE_RE`'s parenthetical-size group doesn't accept fractions**
-  (`app/utils/quantity_parser.py`). Discovered while fixing the
-  container-word name-pollution bug (`can`/`package`/`jar`/... leaking into
-  `ingredient.name`): the original 1,905-row scoping estimate for that bug
-  decomposed into 1,104 real matches (now fixed, 1 residual -- an
-  unparseable source line with no leading numeral at all, verified
-  unfixable), 121 false positives from the scoping regex (e.g. "...if you
-  **can** find it" -- the verb, not a unit), and **680 rows** of a distinct,
-  unscoped bug: `(?P<m>\d+(?:\.\d+)?)` only accepts a plain decimal inside
-  the parenthetical, so a line like `"(10 3/4 ounce) can condensed cream of
-  asparagus soup"` fails the whole pack-size match and the container word
-  ("can") leaks into `name` anyway -- same downstream USDA nutrition-match
-  degradation as the bug that was fixed. Fix direction: same pattern as the
-  fraction-range fix that just landed for `_LEADING_AMOUNT` -- swap the
-  decimal-only group for `_AMOUNT_TOKEN` (or equivalent) so it accepts
-  fractions/mixed numbers too. EVERYTHING ELSE tier, but changes
-  `ingredient.name` on ~680 rows, so it needs the same mandatory
-  allergen-label regression diff gate (before/after `derive_allergen_labels`
-  across the full corpus, zero previously-flagged allergens may become
-  unflagged) that the fraction-range fix used.
+- ~~**`_PACK_SIZE_RE`'s parenthetical-size group doesn't accept fractions**~~
+  **FIXED 2026-07-27.** `app/utils/quantity_parser.py`'s `_PACK_SIZE_RE` now
+  reuses `_AMOUNT_TOKEN` for the parenthetical-size ("M") group instead of a
+  decimal-only pattern, so `"(10 3/4 ounce) can condensed cream of asparagus
+  soup"` now parses correctly (amount=10.75, unit=oz, name="condensed cream
+  of asparagus soup"). Re-derived scoping count at fix time: 631 corpus rows
+  matched this signature (not the original 680 estimate -- re-measured per
+  this task's instructions, close enough to confirm the same bug class).
+  Same pass also added `pinch`/`dash`/`stalk`/`head`/`bunch` as recognized
+  count-only units (`COUNT_UNITS`/`_UNIT_ALIASES`), fixing ~2,250
+  additional no-unit rows corpus-wide; no lookalike collision found for any
+  of the 5 words (checked "head cheese"/"garlic head" specifically -- zero
+  occurrences in the corpus). Mandatory allergen-label regression gate run
+  across the full 9,986-recipe corpus before/after: 0 recipes lost an
+  allergen label, 0 gained one (label sets were byte-identical for every
+  recipe -- expected, since only unit words were stripped from `name`,
+  never a food word). See `tests/test_quantity_parser.py` for the new
+  pack-size-fraction and count-unit test cases, and
+  `scripts/fix_quantity_parser_corruption.py`'s generalized bug-3/vocab
+  reconstruct-and-reparse pass for how the corpus was re-derived.
+
+  **Newly surfaced, still-unfixed residual (out of scope for this fix, 6
+  corpus rows remaining with `unit is None` and a parenthetical containing
+  a "/"):** three distinct root causes, none of which is the fraction-gap
+  bug this task closed:
+  1. A range *inside* the parenthetical size itself, e.g. `"(10 1/2-14
+     ounce) cans clams, minced"` -- `_AMOUNT_TOKEN` is a single-value
+     pattern, so a range inside the parenthetical still doesn't match
+     (would need a nested range-aware M group, a different, larger change).
+  2. A parenthetical with an amount but no unit word at all, e.g. `"(2 1/2
+     ) jar dried beef"` / `"(10 3/4 ) can cream of chicken soup..."` -- the
+     source data itself is missing the unit inside the parens; not
+     recoverable by regex tightening.
+  3. `"gallon"` is not yet a recognized unit token at all (`(1/2 gallon)
+     container mint chocolate chip ice cream"`, `"(1/2 gallon) box vanilla
+     ice cream"`) -- a missing-unit-vocabulary gap, same class as the
+     pinch/dash/stalk/head/bunch additions above but for a volume unit
+     with a real gram/mL conversion factor, so it belongs with a
+     `unit_converter.py`-aware pass, not a bare vocabulary registration.
+  All three are low-volume (6 rows total) and fail safe (ingredient stays
+  `ungrounded`/unit=None, no safety impact) -- worth a follow-up EVERYTHING
+  ELSE pass if corpus completeness work resumes, not urgent.
 
 - **Substitution-engine word-boundary false match: `"butter"` as a
   substring of `"butterflied"`** (`app/services/substitution_service.py`,
@@ -1812,3 +1834,70 @@ surfaced during implementation, deliberately left unfixed:
   qualified rows, following this file's existing pattern for similar
   qualified-context exclusions. Low priority -- over-blocking is the safe
   failure direction this project already accepts elsewhere.
+
+## Corpus 100%-completeness push (2026-07-27, second round) -- residual items
+
+Context: a second two-advisor-brainstorm + synthesis pass decided a 7-task
+plan to push cuisine/meal_type/amount/unit completeness further after the
+first round's fixes (see `data/evaluation/adjudication_20260727*` and this
+session's task history). Final numbers: cuisine 13.12% -> 51.70%, meal_type
+39.92% -> 85.89%, unit-populated 74.99% -> 77.44%, grams-computable (the
+newly-established real KPI, see `scripts/measure_grams_computable.py`)
+36.71% -> 53.24%. Three residual items surfaced along the way:
+
+- **3 minor cuisine-tag errors self-identified by the LLM-tagging pass's own
+  held-out self-check** (`data/processed/llm_tag_inferences.jsonl`,
+  `cuisine_source="llm_inferred"`): `imp_045f83b795df50a8` ("California
+  Rarebit" tagged British, should likely be American -- a false-friend
+  place-name miss); `imp_20f28b93e59f584c` ("Cappuccino Mix" tagged Italian
+  -- inconsistent with the pass's own abstain on an analogous generic
+  instant-coffee-mix product elsewhere); `imp_4f20426a05a05f93` ("Black
+  Forest Cheesecake Delight" tagged German -- a flavor/branding name on an
+  American cheesecake, not an actual German dish). Non-safety-relevant
+  (cuisine is never read by any allergy/diet-decision path), low priority --
+  hand-correct these three specifically, or fold into a future spot-check
+  pass rather than a dedicated task.
+- **Two pre-existing, out-of-scope cuisine mistags surfaced during that same
+  review** (not part of this pass's diff, predate it): `imp_dd3ff78d70b254b1`
+  "Chicken Teriyaki" has `cuisine_source=recovered_tag, cuisine=Chinese`
+  (teriyaki is Japanese); `imp_fb26e9d667c15d88` "Mole con chica pollo" has
+  `cuisine=Tex-Mex` via `recovered_tag` (mole/Cornish hens reads more
+  Mexican). Worth folding into the same future spot-check pass as the three
+  above.
+- **`app/utils/ingredient_normalizer.py`'s `normalize_ingredient` doesn't
+  strip a trailing `", <descriptor>"` clause** (e.g. `"apples, sliced"`,
+  `"apples, peeled and cored"`) before its plural-stripping step, so such
+  ingredients fail to normalize down to their bare canonical form (`"apple"`)
+  even though the same descriptor-stripping already works for other
+  phrasings. Found via `scripts/gen_retrieval_eval_queries.py`'s own
+  empty-ground-truth-set check firing on query `ing_10` ("apple, cinnamon,
+  and oats") -- confirmed via direct corpus scan that zero recipes pass the
+  strict apple+cinnamon+oats predicate today, even though several (e.g.
+  "Apple Cheese Crisp") are unambiguously matching recipes whose apple
+  ingredient is phrased as `"apples, sliced"`. This is the same class of
+  gap as the already-documented `"potatoes"` -> `"potatoe"` off-by-one
+  plural-stripping bug (`docs/phase-1.5-closeout.md`), and was worked around
+  the same way in `gen_retrieval_eval_queries.py` (drop the affected term
+  from the ground-truth match predicate, keep it in the structured
+  `ingredients` field) rather than fixed at the source, consistent with
+  this project's established precedent of not fixing `ingredient_normalizer`
+  inline from an eval-only pass. Not safety-relevant (`derive_allergen_labels`
+  matches on substrings, not this normalizer), but affects production
+  `keyword_search`'s ingredient-membership scoring quality for any
+  comma-qualified plural ingredient name. Fix direction: extend whatever
+  descriptor-stripping step already exists in `normalize_ingredient` to also
+  handle a trailing `", <word list>"` clause, with the same "cite or don't
+  guess" caution the rest of this module's synonym/normalization tables use
+  -- needs its own scoped pass, not a quick inline patch, since descriptor
+  vocabulary (sliced/chopped/minced/diced/peeled/cored/...) needs enumerating
+  carefully to avoid stripping meaningful qualifiers.
+- **Density/piece-weight table citations added in this round
+  (`app/utils/unit_converter.py`, ~190 new entries) were sourced from the
+  executor's high-confidence recalled standard reference figures (USDA FDC
+  household-measure weights, King Arthur Baking's ingredient-weight chart),
+  not fresh live database lookups** -- the sandboxed session had no web/API
+  access this round. Directionally sound and non-safety-critical (confirmed
+  never read by `constraint_engine.py`), but worth a future spot-check pass
+  with live source verification before treating every citation as
+  independently re-confirmed, consistent with the "cite or omit" discipline
+  the module holds itself to.
