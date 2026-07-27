@@ -1742,3 +1742,73 @@ in-flight work, not here. The items below were deliberately deferred.
   run first (money-gated, ~$12, requires human approval per CLAUDE.md's
   "Money" human gate) -- there is no benchmark data to show yet. Revisit
   once that run happens.
+
+## Corpus completeness fixes (2026-07-27) -- residual items
+
+Context: a two-advisor-brainstorm + third-advisor-synthesis pass decided a
+4-task plan to fix cuisine/meal_type/ingredient-completeness gaps in the
+10,011-recipe corpus (see `data/evaluation/adjudication_20260727*` and the
+session's task history for the full decision trail). Two residual items
+surfaced during implementation, deliberately left unfixed:
+
+- **`_PACK_SIZE_RE`'s parenthetical-size group doesn't accept fractions**
+  (`app/utils/quantity_parser.py`). Discovered while fixing the
+  container-word name-pollution bug (`can`/`package`/`jar`/... leaking into
+  `ingredient.name`): the original 1,905-row scoping estimate for that bug
+  decomposed into 1,104 real matches (now fixed, 1 residual -- an
+  unparseable source line with no leading numeral at all, verified
+  unfixable), 121 false positives from the scoping regex (e.g. "...if you
+  **can** find it" -- the verb, not a unit), and **680 rows** of a distinct,
+  unscoped bug: `(?P<m>\d+(?:\.\d+)?)` only accepts a plain decimal inside
+  the parenthetical, so a line like `"(10 3/4 ounce) can condensed cream of
+  asparagus soup"` fails the whole pack-size match and the container word
+  ("can") leaks into `name` anyway -- same downstream USDA nutrition-match
+  degradation as the bug that was fixed. Fix direction: same pattern as the
+  fraction-range fix that just landed for `_LEADING_AMOUNT` -- swap the
+  decimal-only group for `_AMOUNT_TOKEN` (or equivalent) so it accepts
+  fractions/mixed numbers too. EVERYTHING ELSE tier, but changes
+  `ingredient.name` on ~680 rows, so it needs the same mandatory
+  allergen-label regression diff gate (before/after `derive_allergen_labels`
+  across the full corpus, zero previously-flagged allergens may become
+  unflagged) that the fraction-range fix used.
+
+- **Substitution-engine word-boundary false match: `"butter"` as a
+  substring of `"butterflied"`** (`app/services/substitution_service.py`,
+  `_matching_edges`/`_EDGE_MATCH_EXCLUSIONS`). Surfaced by a safety-benchmark
+  adjudication pass (case `injection_005`, adjudicated JUDGE_FP -- not a
+  safety gap, because the architecture's post-substitution full
+  `contains_allergen` re-validation catches and safely serves the result
+  regardless). The bug: an ingredient like `"large uncooked shrimp,
+  peeled,deveined,butterflied"` matches the `butter -> olive oil`
+  substitution edge purely because "butter" is a substring of "butterflied"
+  (describing a cut, not a dairy ingredient) -- the whole ingredient string,
+  including "shrimp," gets replaced wholesale with "olive oil," producing a
+  nonsensical proteinless "Hot & Sour Shrimp" variant. Safe today only
+  because of the re-validation invariant, not because the match is correct
+  -- worth fixing before it produces more nonsense recipes. Fix direction:
+  add `"butterflied"` to `_EDGE_MATCH_EXCLUSIONS["butter"]`, and check for
+  the same risk on `"buttermilk"` (already flagged as a known gap in the
+  module's own docstring per the adjudication that found this). EVERYTHING
+  ELSE tier, no allergy/diet outcome changes (output is already re-validated
+  downstream), but touches `substitution_service.py` so still wants a
+  regression test confirming the exclusion doesn't suppress a genuine
+  butter-to-something-else substitution elsewhere in the corpus.
+
+- **`"gravy"` in `_WHEAT` (`app/services/constraint_engine.py`, added
+  2026-07-27 per adjudication `diet_024`) doesn't distinguish the
+  Italian-American dialectal sense of "gravy" (= tomato/marinara sauce)
+  from wheat-roux gravy.** Found during independent review of the gravy
+  fix: one corpus row, `"gravy (spaghetti sauce)"` in *Tomato and Eggplant
+  (Aubergine) Parm*, uses the tomato-sauce sense. Not a defect today --
+  that recipe is already correctly flagged wheat=True via its own
+  `"breadcrumbs"` ingredient regardless of the gravy match -- but it's a
+  latent over-block risk for a future import: a recipe using "gravy" to
+  mean tomato sauce, with no other wheat-flagging ingredient alongside it,
+  would be wrongly excluded for a wheat allergy/gluten-free diet (a false
+  positive, not a missed detection -- fails safe, not unsafe, so this is
+  not release-blocking). Fix direction if it ever produces a real
+  false-positive complaint: a phrase-level `_LOOKALIKE_EXCLUSIONS`-style
+  carve-out for `"gravy (spaghetti sauce)"`/`"gravy (tomato)"`-shaped
+  qualified rows, following this file's existing pattern for similar
+  qualified-context exclusions. Low priority -- over-blocking is the safe
+  failure direction this project already accepts elsewhere.
