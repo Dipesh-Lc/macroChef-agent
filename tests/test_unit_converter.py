@@ -326,3 +326,165 @@ def test_cinnamon_ground_composes_fix1_and_fix3() -> None:
     assert to_grams(1.0, "tsp", name="cinnamon, ground") == pytest.approx(
         to_grams(1.0, "tsp", name="cinnamon")
     )
+
+
+# --- New density entries (grams-computable coverage pass, 2026-07-27) -------
+# Spot-checked sample of the new base density entries and their aliases.
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("onion", 0.68),
+        ("celery", 0.43),
+        ("garlic", 0.61),
+        ("green pepper", 0.63),
+        ("green bell pepper", 0.63),
+        ("mushroom", 0.30),
+        ("vanilla extract", 0.85),
+        ("vanilla", 0.85),
+        ("lemon juice", 1.03),
+        ("lime juice", 1.04),
+        ("orange juice", 1.05),
+        ("margarine", 0.96),
+        ("mayonnaise", 0.95),
+        ("ketchup", 1.15),
+        ("catsup", 1.15),
+        ("molasses", 1.39),
+        ("half-and-half", 1.02),
+        ("evaporated milk", 1.06),
+        ("cottage cheese", 0.96),
+        ("buttermilk", 1.04),
+        ("pecans", 0.42),
+        ("walnuts", 0.51),
+        ("almonds", 0.60),
+        ("slivered almonds", 0.46),
+        ("coconut", 0.39),
+        ("raisins", 0.70),
+        ("sesame seeds", 0.61),
+        ("cornmeal", 0.58),
+        ("corn syrup", 1.39),
+        ("applesauce", 1.03),
+        ("chocolate chips", 0.71),
+        ("cream of tartar", 0.61),
+        ("onion powder", 0.49),
+        ("shortening", 0.87),
+        ("ground ginger", 0.37),
+        ("ground cumin", 0.43),
+        ("turmeric", 0.45),
+        ("ground cloves", 0.43),
+        ("ground coriander", 0.41),
+        ("cayenne pepper", 0.37),
+        ("white pepper", 0.49),
+        ("mustard", 1.01),
+        ("shredded cheddar cheese", 0.48),
+        ("vinegar", 1.01),
+        ("chicken broth", 1.01),
+    ],
+)
+def test_new_grams_coverage_density_entries_resolve(name: str, expected: float) -> None:
+    assert _density(name) == pytest.approx(expected)
+
+
+def test_new_density_aliases_reuse_existing_citation() -> None:
+    # All-purpose/unbleached/plain flour are genuinely the same product as
+    # the base "flour" entry -- same density, no new citation needed.
+    assert _density("all-purpose flour") == pytest.approx(_density("flour"))
+    assert _density("unbleached flour") == pytest.approx(_density("flour"))
+    assert _density("plain flour") == pytest.approx(_density("flour"))
+    # Granulated/white sugar are the base "sugar" entry under another name.
+    assert _density("granulated sugar") == pytest.approx(_density("sugar"))
+    assert _density("white sugar") == pytest.approx(_density("sugar"))
+    # Confectioners'/icing sugar are "powdered sugar" under regional names.
+    assert _density("confectioners' sugar") == pytest.approx(_density("powdered sugar"))
+    assert _density("icing sugar") == pytest.approx(_density("powdered sugar"))
+    # "cornflour" is the British name for cornstarch.
+    assert _density("cornflour") == pytest.approx(_density("cornstarch"))
+    # Temperature/handling literal-comma variants of plain water.
+    assert _density("boiling water") == pytest.approx(_density("water"))
+    assert _density("cold water") == pytest.approx(_density("water"))
+    assert _density("water, cold") == pytest.approx(_density("water"))
+
+
+def test_butter_or_margarine_artifact_strings_resolve() -> None:
+    # Corpus parsing artifacts ("N butter or margarine" recipe lines) are
+    # safe to resolve regardless of which ingredient was meant, since butter
+    # and margarine share the same citation value in this table.
+    assert _density("butter or 1/2 cup margarine") == pytest.approx(0.96)
+    assert _density("butter or 2 tablespoons margarine") == pytest.approx(0.96)
+
+
+# --- New piece-weight entries (grams-computable coverage pass, 2026-07-27) --
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("egg white", 33.0),
+        ("egg whites", 33.0),
+        ("egg yolk", 17.0),
+        ("egg yolks", 17.0),
+        ("orange", 131.0),
+        ("mushroom", 18.0),
+        ("chicken breast", 172.0),
+        ("boneless skinless chicken breasts", 172.0),
+        ("onions", 110.0),
+        ("tomatoes", 123.0),
+        ("potatoes", 213.0),
+        ("carrots", 61.0),
+        ("green onions", 15.0),
+        ("scallions", 15.0),
+        ("celery", 40.0),
+        ("garlic cloves", 5.0),
+        ("garlic clove", 5.0),
+    ],
+)
+def test_new_grams_coverage_piece_weight_entries_resolve(name: str, expected: float) -> None:
+    assert _piece_weight(name) == pytest.approx(expected)
+
+
+def test_egg_white_and_yolk_distinct_from_whole_egg() -> None:
+    # Egg white/yolk are genuinely different weights from a whole egg --
+    # must NOT collapse to the "egg" 50 g entry.
+    assert _piece_weight("egg white") != pytest.approx(_piece_weight("egg"))
+    assert _piece_weight("egg yolk") != pytest.approx(_piece_weight("egg"))
+
+
+def test_finely_is_a_handling_word_for_piece_and_density_lookup() -> None:
+    # "finely" is a degree adverb on an already-handled verb ("finely
+    # chopped"/"finely minced"), not a composition word -- adding it to
+    # _HANDLING_WORDS lets these resolve via their existing base entries.
+    assert _piece_weight("garlic, finely chopped") == pytest.approx(5.0)
+    assert _piece_weight("onion, finely chopped") == pytest.approx(110.0)
+    assert _piece_weight("celery, finely chopped") == pytest.approx(40.0)
+
+
+def test_size_descriptor_comma_handling_word_onion_literal_keys_resolve() -> None:
+    # "medium"/"large"/"small" + comma + handling word defeats both the
+    # stripped tier (doesn't strip size descriptors) and the legacy fallback
+    # (its cleanup doesn't strip commas before descriptor-removal runs) --
+    # covered by explicit literal keys instead.
+    assert to_grams(1.0, None, name="medium onion, chopped") == pytest.approx(110.0)
+    assert to_grams(1.0, None, name="large onion, sliced") == pytest.approx(110.0)
+    assert to_grams(1.0, None, name="small onion, diced") == pytest.approx(110.0)
+
+
+def test_garlic_crushed_pressed_smashed_literal_keys_resolve() -> None:
+    # "crushed"/"pressed"/"smashed" are deliberately NOT generic
+    # _HANDLING_WORDS entries (they can denote a distinct product for other
+    # ingredients, e.g. "crushed tomatoes") -- covered via literal keys
+    # scoped to garlic specifically instead.
+    assert _piece_weight("garlic, crushed") == pytest.approx(5.0)
+    assert _piece_weight("crushed garlic") == pytest.approx(5.0)
+    assert _piece_weight("garlic, pressed") == pytest.approx(5.0)
+    assert _piece_weight("garlic cloves, smashed") == pytest.approx(5.0)
+
+
+def test_onion_has_both_density_and_piece_weight_entries_no_conflict() -> None:
+    # "onion" is a legitimate key in BOTH tables -- density for volume-
+    # measured chopped onion ("1 cup chopped onion"), piece weight for a
+    # whole-onion count ("1 onion"/"1 medium onion"). to_grams picks the
+    # right table based on the row's actual unit dimension, so there's no
+    # collision between the two citations.
+    assert to_grams(1.0, "cup", name="onion") == pytest.approx(236.588 * 0.68, rel=1e-3)
+    assert to_grams(1.0, None, name="onion") == pytest.approx(110.0)
