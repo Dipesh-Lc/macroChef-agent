@@ -24,6 +24,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.constraint_engine import derive_allergen_labels
+from app.services.corpus_import.cuisine_tagger import resolve_cuisine, split_tag_field
 from app.utils.quantity_parser import parse_quantity_string
 
 
@@ -179,6 +180,52 @@ def _map_category_to_meal_type(category: str | None) -> str | None:
         return None
     normalized = category.strip().lower()
     return normalized if normalized in _MEAL_TYPES else None
+
+
+# Plural alias applied only inside `resolve_meal_type`'s fallback tiers
+# (compound-split / keywords) below -- never applied to
+# `_map_category_to_meal_type`'s own literal top-level check above, which
+# stays exactly as it always was for backward compatibility. Exists because
+# Food.com's own compound category value is "Lunch/Snacks" (verified in the
+# scraped archive), whose second half is the plural "Snacks", not the
+# singular "snack" `_MEAL_TYPES` uses.
+_MEAL_TYPE_ALIASES = {"snacks": "snack"}
+
+
+def _meal_type_token_match(token: str) -> str | None:
+    normalized = token.strip().lower()
+    if normalized in _MEAL_TYPES:
+        return normalized
+    return _MEAL_TYPE_ALIASES.get(normalized)
+
+
+def resolve_meal_type(category: str | None, keywords: str | None) -> tuple[str | None, str]:
+    """Returns `(meal_type, meal_type_source)`. Layered fallback, each tier
+    only consulted if the previous one found nothing:
+
+      1. `recipeCategory` literal exact match (pre-existing behavior, via
+         `_map_category_to_meal_type`) -> "declared".
+      2. `recipeCategory` split into "/"-or-","-joined tokens (e.g.
+         "Lunch/Snacks" -> "Lunch") -> "recovered_tag".
+      3. `keywords` field tokens -> "recovered_tag".
+
+    No match at any tier -> `(None, "unknown")`. Verified against the full
+    scraped archive (2026-07-27): Food.com's own taxonomy never carries a
+    bare "Dinner"/"Lunch"/"Snack(s)" tag standalone -- only the compound
+    "Lunch/Snacks" recipeCategory value and the 5-literal-word set
+    `_MEAL_TYPES` already covers (breakfast/lunch/dinner/snack/dessert)."""
+    declared = _map_category_to_meal_type(category)
+    if declared:
+        return declared, "declared"
+    for token in split_tag_field(category):
+        mapped = _meal_type_token_match(token)
+        if mapped:
+            return mapped, "recovered_tag"
+    for token in split_tag_field(keywords):
+        mapped = _meal_type_token_match(token)
+        if mapped:
+            return mapped, "recovered_tag"
+    return None, "unknown"
 
 
 class FoodComAdapter(DatasetAdapter):
@@ -369,8 +416,9 @@ def _extract_jsonld_block(text: str, path: Path) -> dict:
 
 def _expected_scraped_recipe_id(dataset_name: str, foodcom_id: str) -> str:
     """Reproduces `pipeline._deterministic_import_id`'s seed for this
-    dataset (`f"{dataset_name}:{source_url}:{cuisine or ''}"` with
-    `source_url=str(foodcom_id)`, `cuisine=None`) -- this is the id every
+    dataset (`f"{dataset_name}:{source_url}:"` with `source_url=str(
+    foodcom_id)`; `cuisine` is deliberately excluded from the seed, see
+    `pipeline._deterministic_import_id`'s docstring) -- this is the id every
     archive file's own `recipe_id` frontmatter field must already equal,
     since these ids were originally minted by the CSV-adapter import that
     first produced the current corpus. Kept in lockstep with the pipeline's
@@ -466,12 +514,17 @@ class FoodComScrapedArchiveAdapter(DatasetAdapter):
     ("foodcom_recipes_and_reviews") ON PURPOSE, even though the actual
     source is now the raw-page scrape rather than the original Kaggle CSV: a
     comment, not a bug. `pipeline._deterministic_import_id` seeds its uuid5
-    on `f"{dataset_name}:{candidate.source_url}:{candidate.cuisine or ''}"`,
-    and this adapter sets `source_url=str(foodcom_id)` and `cuisine=None`
-    (matching what the CSV adapter effectively produced for these same
-    ids) -- so reusing this exact string reproduces the EXISTING `imp_...`
-    ids already in the corpus/quarantine sidecar/Chroma index, rather than
-    minting a fresh id namespace that would orphan every existing reference.
+    on `f"{dataset_name}:{candidate.source_url or candidate.title}:"` (this
+    adapter sets `source_url=str(foodcom_id)`) -- so reusing this exact
+    string reproduces the EXISTING `imp_...` ids already in the
+    corpus/quarantine sidecar/Chroma index, rather than minting a fresh id
+    namespace that would orphan every existing reference. `candidate.cuisine`
+    is deliberately EXCLUDED from that seed (2026-07-27, when cuisine
+    recovery via `cuisine_tagger.resolve_cuisine` started letting this
+    adapter emit a non-None cuisine): if cuisine were still part of the
+    seed, a recipe's id would silently change every time its recovered
+    cuisine value changed between reimport runs -- see
+    `pipeline._deterministic_import_id`'s docstring for the full rationale.
     `read_raw` hard-verifies this per file (see
     `_expected_scraped_recipe_id`): if a file's own `recipe_id` frontmatter
     doesn't match what this formula recomputes, the import aborts rather
@@ -541,31 +594,46 @@ class FoodComScrapedArchiveAdapter(DatasetAdapter):
 
         nutrition = jsonld.get("nutrition") if isinstance(jsonld.get("nutrition"), dict) else {}
 
-        # NEVER read description, review, author, or keywords fields --
-        # none of those are safety- or nutrition-relevant, and pulling from
-        # them risks leaking review/author free text into the corpus.
+        # NEVER read description, review, or author fields -- none of those
+        # are safety- or nutrition-relevant, and pulling from them risks
+        # leaking review/author free text into the corpus. `keywords` IS
+        # read (below): unlike description/review/author, it's Food.com's
+        # own structured site-taxonomy tag field (comma-delimited category
+        # tokens), not free text -- see cuisine_tagger.py's module
+        # docstring for the cuisine/meal-type recovery this enables.
         ingredient_names = [parse_quantity_string(text)["name"] for text in ingredient_texts]
         allergens = derive_allergen_labels(ingredient_names)
 
-        # meal_type via the SAME _map_category_to_meal_type used by the CSV
-        # adapter (advisor revise, 2026-07-19): meal_type is a Chroma `where`
-        # exact-match filter (recipe_retriever.build_metadata_filter), so
-        # leaving it None for the whole corpus would silently exclude every
-        # imported recipe from any meal_type-filtered retrieval -- a
-        # functional regression, not a cosmetic one. `recipeCategory` is a
-        # bare string in the archive (verified empirically); defensively
-        # also accept the schema.org-legal list form, same idiom as
-        # `_parse_servings` for `recipeYield`.
+        # meal_type/cuisine recovery from Food.com's own structured tag
+        # fields (advisor revise, 2026-07-19, extended 2026-07-27):
+        # meal_type is a Chroma `where` exact-match filter
+        # (recipe_retriever.build_metadata_filter), so leaving it None for
+        # the whole corpus would silently exclude every imported recipe
+        # from any meal_type-filtered retrieval -- a functional regression,
+        # not a cosmetic one. `recipeCategory` and `keywords` are bare
+        # strings in the archive (verified empirically); defensively also
+        # accept the schema.org-legal list form for `recipeCategory`, same
+        # idiom as `_parse_servings` for `recipeYield`.
         raw_category = jsonld.get("recipeCategory")
         if isinstance(raw_category, list) and raw_category:
             raw_category = raw_category[0]
-        meal_type = _map_category_to_meal_type(raw_category if isinstance(raw_category, str) else None)
+        raw_category = raw_category if isinstance(raw_category, str) else None
+
+        raw_keywords = jsonld.get("keywords")
+        if isinstance(raw_keywords, list) and raw_keywords:
+            raw_keywords = ",".join(str(item) for item in raw_keywords)
+        raw_keywords = raw_keywords if isinstance(raw_keywords, str) else None
+
+        meal_type, meal_type_source = resolve_meal_type(raw_category, raw_keywords)
+        cuisine, cuisine_source = resolve_cuisine(raw_category, raw_keywords)
 
         return RecipeCandidate(
             candidate_id=f"foodcom_scraped_{foodcom_id}",
             title=title,
-            cuisine=None,
+            cuisine=cuisine,
+            cuisine_source=cuisine_source,
             meal_type=meal_type,
+            meal_type_source=meal_type_source,
             ingredients=ingredient_texts,  # bare strings; Ingredient coerces via parse_quantity_string
             instructions=instructions,
             cook_time_min=_parse_iso8601_duration_minutes(jsonld.get("cookTime")),

@@ -335,8 +335,28 @@ class CorpusImportPipeline:
 def _deterministic_import_id(dataset_name: str, candidate: RecipeCandidate) -> str:
     """Stable id independent of read order, so re-running the same source
     (even with a different --limit) never produces duplicate rows and always
-    lets a shrink-and-rerun cleanly drop the ids that disappeared."""
-    seed = f"{dataset_name}:{candidate.source_url or candidate.title}:{candidate.cuisine or ''}"
+    lets a shrink-and-rerun cleanly drop the ids that disappeared.
+
+    Deliberately does NOT include `candidate.cuisine` in the seed (fixed
+    2026-07-27, corpus-cuisine-recovery task). An earlier revision of this
+    formula did include it (`f"...:{candidate.cuisine or ''}"`) on the
+    assumption that cuisine was permanently `None` for every corpus-import
+    candidate -- true at the time, since `FoodComScrapedArchiveAdapter`
+    always passed `cuisine=None` (see its class docstring). Once cuisine
+    recovery (`app.services.corpus_import.cuisine_tagger.resolve_cuisine`)
+    started letting that adapter emit a real cuisine value, keeping cuisine
+    in the seed would silently mint a NEW id for a recipe every time its
+    recovered cuisine value changed between reimport runs (e.g. the tag
+    vocabulary table gets extended later, or Food.com edits the source
+    page's category) -- orphaning every existing Chroma index doc,
+    quarantine-sidecar entry, and saved-recipe/plan reference keyed on the
+    old id. `recipe_id` must stay a pure function of (dataset_name,
+    source_url or title) only. This is backward-compatible with every id
+    already in the corpus: since cuisine was always `None` for every
+    scraped-archive candidate before 2026-07-27, `candidate.cuisine or ''`
+    was always `''` under the old formula too, so dropping it from the seed
+    reproduces byte-identical ids for the entire existing corpus."""
+    seed = f"{dataset_name}:{candidate.source_url or candidate.title}:"
     return f"imp_{uuid5(NAMESPACE_URL, seed).hex[:16]}"
 
 

@@ -14,7 +14,18 @@ class RecipeCandidate(BaseModel):
     candidate_id: str
     title: str
     cuisine: str | None = None
+    # Provenance for `cuisine`/`meal_type`, mirroring the
+    # `nutrition_view.macro_display_state` grounded/partial/unknown pattern:
+    # "declared" (author/curator/source explicitly set it), "recovered_tag"
+    # (deterministically recovered from a source dataset's own structured
+    # taxonomy field -- see app.services.corpus_import.cuisine_tagger /
+    # adapters.resolve_meal_type -- never inferred by an LLM), or "unknown"
+    # (no signal found). `None` means not tracked by whatever produced this
+    # candidate (e.g. the legacy CSV adapter, or any pre-2026-07-27 caller) --
+    # display code must treat `None` the same as "unknown".
+    cuisine_source: Literal["declared", "recovered_tag", "unknown"] | None = None
     meal_type: str | None = None
+    meal_type_source: Literal["declared", "recovered_tag", "unknown"] | None = None
     description: str | None = None
     ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
@@ -92,7 +103,9 @@ class RecipeCandidate(BaseModel):
             recipe_id=recipe_id,
             title=self.title,
             cuisine=self.cuisine,
+            cuisine_source=self.cuisine_source,
             meal_type=self.meal_type,
+            meal_type_source=self.meal_type_source,
             # Empties funnel through Recipe's ingredient validator, which drops
             # and logs them (single observable chokepoint) rather than silently
             # filtering here.

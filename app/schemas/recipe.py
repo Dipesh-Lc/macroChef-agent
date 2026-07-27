@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
@@ -12,7 +13,19 @@ class Recipe(BaseModel):
     recipe_id: str
     title: str
     cuisine: str | None = None
+    # Provenance for `cuisine`/`meal_type` -- mirrors the
+    # `nutrition_view.macro_display_state` grounded/partial/unknown pattern
+    # (see `RecipeCandidate.cuisine_source`'s docstring for the full
+    # rationale). "declared" = author/curator/source explicitly set it;
+    # "recovered_tag" = deterministically recovered from a source dataset's
+    # own structured taxonomy field (never LLM-inferred); "unknown" = no
+    # signal found. `None` = not tracked by whatever produced this recipe
+    # (any pre-2026-07-27 recipe, or a path that doesn't set it) -- display
+    # code must treat `None` the same as "unknown". Purely a provenance/
+    # display flag: never read by constraint_engine, scoring, or nutrition.
+    cuisine_source: Literal["declared", "recovered_tag", "unknown"] | None = None
     meal_type: str | None = None
+    meal_type_source: Literal["declared", "recovered_tag", "unknown"] | None = None
     ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     allergens: list[str] = Field(default_factory=list)
