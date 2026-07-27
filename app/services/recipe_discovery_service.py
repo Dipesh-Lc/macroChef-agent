@@ -8,7 +8,6 @@ from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.schemas.user import NO_RESTRICTION_DIET_TYPES, SUPPORTED_DIET_TYPES
 from app.services.recipe_generation_service import RecipeGenerationService
-from app.services.recipe_image_service import placeholder_image_url
 from app.services.recipe_import_service import RecipeImportService
 from app.utils.ingredient_normalizer import ingredient_matches
 
@@ -574,7 +573,12 @@ class RecipeDiscoveryService:
             allergens=template.allergens,
             diet_tags=diet_tags,
             equipment=template.equipment,
-            image_url=placeholder_image_url(title, cuisine, meal_type),
+            # `image_url`/`image_path` deliberately left unset here (ROADMAP
+            # 4.4 quick fix): the frontend renders zero-network deterministic
+            # local art (`web/src/components/RecipeArt.tsx`) whenever both
+            # are absent, so there is no need to synthesize a URL -- and
+            # doing so here used to mean a remote `placehold.co` call baked
+            # into every card, the exact "looks broken" problem 4.4 fixes.
             source_type="mock",
             source_name="MacroChef mock library",
             home_cookable_score=0.94,

@@ -13,12 +13,14 @@ import "@fontsource/ibm-plex-mono/600.css";
 import "./index.css";
 
 import App from "./App";
+import LandingPage from "./pages/LandingPage";
 import HomePage from "./pages/HomePage";
 import DayPlanPage from "./pages/DayPlanPage";
 import WeekPlanPage from "./pages/WeekPlanPage";
 import MyRecipesPage from "./pages/MyRecipesPage";
 import RecipeSearchPage from "./pages/RecipeSearchPage";
 import SharedPlanPage from "./pages/SharedPlanPage";
+import { ComingSoonPage } from "./components/ComingSoonPage";
 
 const queryClient = new QueryClient();
 
@@ -33,12 +35,22 @@ createRoot(rootElement).render(
       <BrowserRouter>
         <Routes>
           <Route element={<App />}>
-            <Route index element={<HomePage />} />
+            <Route index element={<LandingPage />} />
+            <Route path="plan" element={<HomePage />} />
             <Route path="day" element={<DayPlanPage />} />
             <Route path="week" element={<WeekPlanPage />} />
             <Route path="my-recipes" element={<MyRecipesPage />} />
             <Route path="search" element={<RecipeSearchPage />} />
             <Route path="shared/:shareId" element={<SharedPlanPage />} />
+            <Route
+              path="chat"
+              element={
+                <ComingSoonPage
+                  title="Chat with Chef — coming soon"
+                  message="The tool-calling Chef agent (ROADMAP Phase 3.3) isn't built yet. In the meantime, try the planner for allergy-safe, macro-targeted recommendations."
+                />
+              }
+            />
           </Route>
         </Routes>
       </BrowserRouter>

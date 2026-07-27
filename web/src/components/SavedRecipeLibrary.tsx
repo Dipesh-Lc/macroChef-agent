@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Recipe } from "../api/types";
-import { recipeImageUrl } from "../lib/placeholderImage";
+import { RecipeArt } from "./RecipeArt";
 
 /**
  * Port of `frontend/components/saved_recipe_library.py`'s
@@ -21,7 +21,10 @@ function SavedRecipeRow({
   isDeleting: boolean;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
-  const imageUrl = recipe.image_url ?? recipe.image_path ?? recipeImageUrl(recipe);
+  // Real image takes priority; falls back to zero-network local art if
+  // absent or if the real one fails to load (see `RecipeCandidateCards`'s
+  // matching comment).
+  const realImageUrl = recipe.image_url ?? recipe.image_path;
   const metaParts = [
     recipe.cuisine ?? "Any cuisine",
     recipe.meal_type ?? "meal",
@@ -31,17 +34,15 @@ function SavedRecipeRow({
   return (
     <article className="overflow-hidden rounded-lg border border-sage-line bg-white shadow-sm">
       <div className="grid grid-cols-[96px_1fr_auto] items-center gap-3 p-3">
-        {imageFailed ? (
-          <div className="flex h-16 w-full items-center justify-center rounded-md bg-basil/10 text-center text-[0.65rem] text-basil">
-            {recipe.cuisine ?? "MacroChef"}
-          </div>
-        ) : (
+        {realImageUrl && !imageFailed ? (
           <img
-            src={imageUrl}
+            src={realImageUrl}
             alt={recipe.title}
             onError={() => setImageFailed(true)}
             className="h-16 w-full rounded-md object-cover"
           />
+        ) : (
+          <RecipeArt recipe={recipe} className="h-16 w-full" />
         )}
 
         <div className="flex flex-col gap-0.5">

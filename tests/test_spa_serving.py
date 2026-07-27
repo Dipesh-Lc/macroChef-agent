@@ -82,7 +82,7 @@ def test_root_serves_index_html(client: TestClient) -> None:
     assert resp.headers["cache-control"] == "no-cache"
 
 
-@pytest.mark.parametrize("path", ["/week", "/shared/abc123"])
+@pytest.mark.parametrize("path", ["/plan", "/chat", "/week", "/shared/abc123"])
 def test_spa_client_routes_fall_back_to_index_html(client: TestClient, path: str) -> None:
     resp = client.get(path)
     assert resp.status_code == 200
