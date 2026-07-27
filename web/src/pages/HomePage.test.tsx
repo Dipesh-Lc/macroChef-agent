@@ -30,6 +30,7 @@ function buildRecipe(index: number): Recipe {
     is_user_saved: false,
     is_active: true,
     restored_from_quarantine: false,
+    derived_allergens: [],
   };
 }
 

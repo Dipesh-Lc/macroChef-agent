@@ -18,6 +18,7 @@ function buildObservation(overrides: Partial<InventoryObservation> = {}): Invent
     amount: 2,
     unit: "lb",
     confidence: 0.9,
+    source: "manual",
     needs_confirmation: false,
     ...overrides,
   };

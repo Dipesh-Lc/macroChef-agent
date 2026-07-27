@@ -11,6 +11,7 @@ function buildCandidate(id: string): RecipeCandidate {
     servings: 1,
     source_type: "mock",
     home_cookable_score: 1,
+    derived_allergens: [],
   };
 }
 
