@@ -50,9 +50,29 @@ VOLUME_TO_ML: dict[str, float] = {
 # with no piece-weight match); only the `name` pollution is fixed here. A
 # separately-scoped, advisor-approved cited-reference-weight methodology
 # (docs/ROADMAP.md Stage A2) may add real conversions for these later.
+#
+# "pinch", "dash", "stalk", "head", "bunch" (added 2026-07-27, same
+# pollution-fix pattern as the container words above, found by measuring the
+# un-recognized leading word of no-unit ingredient names): recognized as
+# their own count-only unit tokens for the same reason -- "pinch salt",
+# "stalk celery, chopped", "head cabbage, shredded", "bunch fresh basil" etc.
+# previously leaked the leading unit word into `name`
+# (name="pinch salt"/unit=None) instead of parsing as
+# name="salt"/unit="pinch". Corpus-verified before this fix (leading-word
+# count on no-unit rows): pinch 508, pinches 17, dash 420, dashes 45, stalk
+# 103, stalks 160, head 111, heads 25, bunch 142, bunches 39 (~1,570 rows
+# total). Checked for lookalike collisions per this file's existing pattern
+# (e.g. "head cheese", "garlic head" reversed) -- none found in the corpus;
+# every "head"-leading row is a genuine "head of lettuce/cabbage/garlic/
+# broccoli/cauliflower/celery" count use, so no `_LOOKALIKE_EXCLUSIONS`-style
+# carve-out was needed. Same no-gram-conversion rule as the container words:
+# these are dimensionless count units with no fixed weight, so nutrition math
+# for an ingredient quantified only this way stays honestly `ungrounded`,
+# unchanged from before this fix.
 COUNT_UNITS: set[str] = {
     "piece", "clove", "slice",
     "can", "package", "jar", "box", "bag", "bottle", "container",
+    "pinch", "dash", "stalk", "head", "bunch",
 }
 
 # Every accepted spelling -> canonical token. This defines KNOWN_UNITS.
@@ -87,6 +107,15 @@ _UNIT_ALIASES: dict[str, str] = {
     "bag": "bag", "bags": "bag",
     "bottle": "bottle", "bottles": "bottle",
     "container": "container", "containers": "container",
+    # pinch/dash/stalk/head/bunch (count-only, never gram-convertible -- see
+    # COUNT_UNITS' inline comment above for the full rationale and the
+    # 2026-07-27 fix this is part of). Canonical form is always the singular
+    # spelling.
+    "pinch": "pinch", "pinches": "pinch",
+    "dash": "dash", "dashes": "dash",
+    "stalk": "stalk", "stalks": "stalk",
+    "head": "head", "heads": "head",
+    "bunch": "bunch", "bunches": "bunch",
 }
 
 KNOWN_UNITS: frozenset[str] = frozenset(_UNIT_ALIASES)
@@ -271,9 +300,21 @@ _CONTAINER_WORDS = (
 )
 _CONTAINER_ALT = "|".join(re.escape(word) for word in _CONTAINER_WORDS)
 
+# The parenthetical size group (M) reuses _AMOUNT_TOKEN (the same
+# fraction/mixed-number-accepting single-value pattern already used by
+# _LEADING_AMOUNT) rather than a decimal-only group. Fixed 2026-07-27
+# (pack-size fraction-gap bug, tracked in docs/BACKLOG.md's "Corpus
+# completeness fixes -- residual items"): the previous decimal-only group
+# `\d+(?:\.\d+)?` rejected a parenthetical size with a fraction, e.g.
+# "(10 3/4 ounce) can condensed cream of asparagus soup" -- the whole
+# pack-size match failed and the container word ("can") leaked into `name`,
+# same downstream USDA-name-matching degradation as the already-fixed
+# no-parenthetical container-word bug. Confirmed 631 corpus rows matched
+# this signature before this fix (name starts with "(", contains a "/"
+# before the container word, unit is None).
 _PACK_SIZE_RE = re.compile(
     r"^\s*(?P<n>\d+(?:\.\d+)?)\s*"
-    r"\(\s*(?P<m>\d+(?:\.\d+)?)\s*(?P<unit>[A-Za-z.]+(?:\s+[A-Za-z.]+)?)\s*\)\s*"
+    rf"\(\s*(?P<m>{_AMOUNT_TOKEN})\s*(?P<unit>[A-Za-z.]+(?:\s+[A-Za-z.]+)?)\s*\)\s*"
     rf"(?:{_CONTAINER_ALT})\b\s*"
     r"(?P<rest>.*)$",
     flags=re.I,
@@ -298,7 +339,9 @@ def _parse_pack_size(text: str) -> dict[str, object] | None:
     if not name:
         return None
     n = float(match.group("n"))
-    m = float(match.group("m"))
+    m = _amount_to_float(match.group("m"))
+    if m is None:
+        return None
     return {"name": name, "amount": n * m, "unit": unit}
 
 
@@ -317,7 +360,9 @@ def parse_quantity_string(raw: str) -> dict[str, object]:
         "2/3-3/4 cup brown sugar, packed" -> {"name": "brown sugar, packed", "amount": 0.7083333333333333, "unit": "cup"}
         "1/2 to 3/4 cup milk"  -> {"name": "milk", "amount": 0.625, "unit": "cup"}
         "1 (8 ounce) package cream cheese" -> {"name": "cream cheese", "amount": 8.0, "unit": "oz"}
+        "1 (10 3/4 ounce) can condensed cream of asparagus soup" -> {"name": "condensed cream of asparagus soup", "amount": 10.75, "unit": "oz"}
         "1 can black beans, drained and rinsed" -> {"name": "black beans, drained and rinsed", "amount": 1.0, "unit": "can"}
+        "1 stalk celery, chopped" -> {"name": "celery, chopped", "amount": 1.0, "unit": "stalk"}
 
     `name` is never empty: unparseable input falls back to the original text.
 
@@ -346,6 +391,19 @@ def parse_quantity_string(raw: str) -> dict[str, object]:
     honestly `ungrounded` for nutrition math exactly as it did before this
     change, per `app.utils.unit_converter.to_grams`'s null-on-unknown-weight
     handling; only the `name` pollution is fixed here.
+
+    The pack-size parenthetical size (the "M" in "N (M UNIT) container_word
+    rest") accepts any _AMOUNT_TOKEN form, not just a plain decimal -- fixed
+    2026-07-27 alongside the container-word fix above: "1 (10 3/4 ounce) can
+    condensed cream of asparagus soup" previously failed the whole pack-size
+    match (the fraction broke the decimal-only parenthetical group) and the
+    container word leaked into `name` instead, same pollution bug as above.
+
+    "pinch", "dash", "stalk", "head", "bunch" (singular and plural
+    spellings) are recognized as count-only units for the same reason as the
+    container words -- "pinch salt", "stalk celery, chopped", "head cabbage,
+    shredded", "bunch fresh basil" no longer leak the unit word into `name`.
+    Same no-gram-conversion rule applies.
 
     Word ranges spelled with "to" instead of a dash ("1/2 to 3/4 cup milk",
     "1 to 2 eggs" -- the word is matched case-insensitively) follow the exact

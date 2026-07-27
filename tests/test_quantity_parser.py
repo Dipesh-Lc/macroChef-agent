@@ -161,6 +161,11 @@ _INVARIANT_CASES = [
     "a pinch of salt",
     "2/3-3/4 cup brown sugar, packed",
     "1 can black beans, drained and rinsed",
+    "1 pinch salt",
+    "2 dashes Tabasco sauce",
+    "1 stalk celery, chopped",
+    "1 head cabbage, shredded",
+    "1 bunch fresh basil",
 ]
 
 
@@ -525,3 +530,144 @@ def test_pack_size_falls_through_unchanged_when_pattern_does_not_fully_match(
 
     assert _parse_pack_size(raw) is None
     assert parse_quantity_string(raw) == expected
+
+
+# --- Pack-size fraction-gap fix (2026-07-27, docs/BACKLOG.md residual item) --
+# `_PACK_SIZE_RE`'s parenthetical-size group ("M") previously only accepted a
+# plain decimal, so any fraction inside the parenthetical broke the whole
+# pack-size match and the container word leaked into `name` instead.
+
+
+def test_pack_size_parenthetical_accepts_mixed_number_fraction() -> None:
+    # The exact real-corpus case from the backlog entry.
+    assert parse_quantity_string(
+        "1 (10 3/4 ounce) can condensed cream of asparagus soup"
+    ) == {
+        "name": "condensed cream of asparagus soup",
+        "amount": 10.75,
+        "unit": "oz",
+    }
+
+
+def test_pack_size_parenthetical_accepts_bare_fraction() -> None:
+    assert parse_quantity_string("1 (5/8 ounce) package Swiss Miss diet cocoa mix") == {
+        "name": "Swiss Miss diet cocoa mix",
+        "amount": 0.625,
+        "unit": "oz",
+    }
+
+
+def test_pack_size_parenthetical_accepts_mixed_number_with_multiplier() -> None:
+    assert parse_quantity_string("2 (1 1/2 ounce) packages spaghetti sauce mix") == {
+        "name": "spaghetti sauce mix",
+        "amount": 3.0,
+        "unit": "oz",
+    }
+
+
+def test_pack_size_parenthetical_plain_decimal_case_still_parses_unchanged() -> None:
+    # Regression guard: the pre-existing plain-decimal parenthetical case
+    # (no fraction involved) must parse exactly as before the fraction fix.
+    assert parse_quantity_string("1 (8 ounce) package cream cheese") == {
+        "name": "cream cheese",
+        "amount": 8.0,
+        "unit": "oz",
+    }
+    assert parse_quantity_string("2 (14.5 ounce) cans diced tomatoes") == {
+        "name": "diced tomatoes",
+        "amount": 29.0,
+        "unit": "oz",
+    }
+
+
+# --- New count units (task 2, 2026-07-27): pinch, dash, stalk, head, bunch ---
+
+
+def test_pinch_recognized_as_count_unit() -> None:
+    assert parse_quantity_string("1 pinch salt") == {
+        "name": "salt",
+        "amount": 1.0,
+        "unit": "pinch",
+    }
+    assert parse_quantity_string("2 pinches salt") == {
+        "name": "salt",
+        "amount": 2.0,
+        "unit": "pinch",
+    }
+
+
+def test_dash_recognized_as_count_unit() -> None:
+    assert parse_quantity_string("1 dash white pepper") == {
+        "name": "white pepper",
+        "amount": 1.0,
+        "unit": "dash",
+    }
+    assert parse_quantity_string("2 dashes Tabasco sauce") == {
+        "name": "Tabasco sauce",
+        "amount": 2.0,
+        "unit": "dash",
+    }
+
+
+def test_stalk_recognized_as_count_unit() -> None:
+    assert parse_quantity_string("1 stalk celery, chopped") == {
+        "name": "celery, chopped",
+        "amount": 1.0,
+        "unit": "stalk",
+    }
+    assert parse_quantity_string("2 stalks celery, sliced") == {
+        "name": "celery, sliced",
+        "amount": 2.0,
+        "unit": "stalk",
+    }
+
+
+def test_head_recognized_as_count_unit() -> None:
+    assert parse_quantity_string("1 head cabbage, shredded") == {
+        "name": "cabbage, shredded",
+        "amount": 1.0,
+        "unit": "head",
+    }
+    assert parse_quantity_string("2 heads garlic") == {
+        "name": "garlic",
+        "amount": 2.0,
+        "unit": "head",
+    }
+
+
+def test_bunch_recognized_as_count_unit() -> None:
+    assert parse_quantity_string("1 bunch fresh basil") == {
+        "name": "fresh basil",
+        "amount": 1.0,
+        "unit": "bunch",
+    }
+    assert parse_quantity_string("2 bunches collard greens") == {
+        "name": "collard greens",
+        "amount": 2.0,
+        "unit": "bunch",
+    }
+
+
+def test_head_does_not_falsely_collide_with_head_cheese() -> None:
+    # Lookalike check per this file's existing collision-exclusion pattern:
+    # corpus-verified no "head cheese"/"garlic head"-shaped collision exists
+    # in the current corpus, but the parser's own behavior on such an input
+    # is still worth pinning down. "head cheese" here has no leading
+    # digit/amount at all, so it is NOT touched by the new "head" unit
+    # recognition (that only fires after a leading amount token) -- it falls
+    # straight through to the bare-name path, unit=None, exactly like any
+    # other no-quantity ingredient line.
+    assert parse_quantity_string("head cheese, sliced") == {
+        "name": "head cheese, sliced",
+        "amount": None,
+        "unit": None,
+    }
+    # With a leading amount, "head" IS consumed as the unit -- this is the
+    # correct, intended behavior (a genuine count of heads-of-something), not
+    # a collision: "1 head garlic" must parse as unit="head", not leak
+    # "head" into the name.
+    assert parse_quantity_string("1 head garlic") == {
+        "name": "garlic",
+        "amount": 1.0,
+        "unit": "head",
+    }

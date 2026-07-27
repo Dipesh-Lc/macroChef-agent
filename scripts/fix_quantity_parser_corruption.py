@@ -16,15 +16,36 @@
   beans...", unit=None). Corruption signature: `name` starts with one of
   those words AND `unit` is None.
 
+  Bug 3 -- pack-size parenthetical fraction gap + unit-vocabulary expansion
+  (added in this script's second pass, same day): `_PACK_SIZE_RE`'s
+  parenthetical-size group only accepted a plain decimal, so a line like
+  "1 (10 3/4 ounce) can condensed cream of asparagus soup" failed the whole
+  pack-size match and the container word leaked into `name` anyway (same
+  degradation as bug 2, just gated behind a fraction in the parenthetical).
+  Separately, "pinch"/"dash"/"stalk"/"head"/"bunch" (singular and plural)
+  were not yet recognized count units, so they leaked into `name` the same
+  way container words used to. Both sub-cases share bug 2's exact repair
+  mechanism (see below) and are handled by ONE generic pass in this script:
+  any ingredient with `unit is None` and a non-null `amount` is reparsed via
+  "{amount} {name}" through the now-further-fixed `parse_quantity_string`;
+  if that newly resolves a unit, the row is fixed. This generic pass
+  subsumes what a bug-3-specific signature regex would have caught, without
+  needing to enumerate every new vocabulary word's own signature.
+
 This is deliberately a TARGETED fix, not a full corpus reparse from raw
 source text:
 
-  - Bug-2 rows can be safely and fully repaired WITHOUT touching the
-    scraped archive at all: bug 2 never corrupted `amount` (only the
+  - Bug-2 and bug-3 rows can be safely and fully repaired WITHOUT touching
+    the scraped archive at all: neither bug corrupted `amount` (only the
     unit/name split), so reconstructing "{amount} {name}" from the CURRENT
     (corrupted) fields byte-for-byte reproduces the original raw ingredient
     line, and re-running it through the fixed `parse_quantity_string`
-    correctly recognizes the container word as a unit this time.
+    correctly recognizes the unit this time. The bug-3/vocab-expansion pass
+    added in this script's second run preserves the original `amount` value
+    verbatim (rather than taking the reparsed amount) to avoid any
+    float-formatting precision drift on fractional amounts; this differs
+    slightly from the earlier bug-2 pass's amount handling, but is
+    immaterial in practice since neither bug ever touched `amount`.
   - Bug-1 rows genuinely lost information in the original (buggy) parse --
     `amount` itself was wrong -- so these DO require the original raw
     ingredient text, fetched from each recipe's own scraped-archive source
@@ -39,8 +60,9 @@ raw-text reparse might occasionally differ by a trivial whitespace nuance:
 minimizing blast radius to exactly the rows proven corrupted is the point of
 this script. All other Recipe fields (recipe_id, cuisine, meal_type,
 cuisine_source, meal_type_source, allergens, instructions, ...) are also
-left completely untouched -- this script only ever rewrites the 3 fields
-name/amount/unit on specific ingredient dicts.
+left completely untouched -- this script only ever rewrites the 2 fields
+name/unit (bug-2/bug-3 rows) or all 3 of name/amount/unit (bug-1 rows,
+which need a real amount fix) on specific ingredient dicts.
 
 Usage:
     python scripts/fix_quantity_parser_corruption.py [--dry-run]
@@ -173,6 +195,35 @@ def _reparse_bug2_row(ingredient: dict) -> dict:
     return {
         "name": reparsed["name"],
         "amount": reparsed["amount"],
+        "unit": reparsed["unit"],
+        "preparation": ingredient.get("preparation"),
+    }
+
+
+def _reparse_bug3_or_vocab_row(ingredient: dict) -> dict | None:
+    """Generic reconstruct-and-reparse pass covering BOTH the pack-size
+    fraction gap and the new pinch/dash/stalk/head/bunch unit vocabulary
+    (both fixed together in `app/utils/quantity_parser.py`, same day as
+    bug 2). Returns None if reparsing the reconstructed text doesn't
+    resolve any new unit (i.e. this row isn't actually corrupted by either
+    of these two bugs -- leave it untouched rather than guess). The
+    original `amount` is always kept verbatim; only `name`/`unit` are
+    ever replaced, so this can never introduce a numeric drift.
+    """
+    amount = ingredient.get("amount")
+    name = ingredient["name"]
+    if amount is None:
+        # No leading amount at all -- neither bug can apply (both require a
+        # unit word immediately following a recognized leading amount).
+        return None
+    raw_text = f"{amount:g} {name}"
+    reparsed = parse_quantity_string(raw_text)
+    if reparsed["unit"] is None:
+        # Reparsing didn't newly resolve a unit -- not a bug-3/vocab row.
+        return None
+    return {
+        "name": reparsed["name"],
+        "amount": amount,
         "unit": reparsed["unit"],
         "preparation": ingredient.get("preparation"),
     }
@@ -313,6 +364,30 @@ def main() -> int:
         print(f"  unresolved breakdown: {dict(unresolved_reasons)}")
     if count_mismatches:
         print(f"  recipes with ingredient-count mismatch (left fully untouched): {count_mismatches}")
+
+    # --- Bug 3 / vocab expansion: reconstruct-and-reparse, no archive lookup
+    # needed (same mechanism as bug 2 -- see _reparse_bug3_or_vocab_row). Runs
+    # AFTER bug 1/2 so it only ever considers rows still `unit is None` at
+    # this point (i.e. never re-touches an already-fixed bug-1/bug-2 row). ---
+    bug3_rows_seen = 0
+    bug3_rows_fixed = 0
+    for record in records:
+        for ingredient in record["ingredients"]:
+            if ingredient.get("unit") is not None:
+                continue
+            bug3_rows_seen += 1
+            fixed = _reparse_bug3_or_vocab_row(ingredient)
+            if fixed is None:
+                continue
+            ingredient["name"] = fixed["name"]
+            ingredient["amount"] = fixed["amount"]
+            ingredient["unit"] = fixed["unit"]
+            bug3_rows_fixed += 1
+
+    print(
+        f"\nBug-3/vocab-expansion candidate rows examined (unit is None after "
+        f"bugs 1/2): {bug3_rows_seen}, newly resolved a unit: {bug3_rows_fixed}"
+    )
 
     # --- Final corpus-wide signature counts (verification). -----------------
     final_bug1 = sum(1 for r in records for ing in r["ingredients"] if _is_bug1_row(ing))
