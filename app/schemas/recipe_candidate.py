@@ -28,15 +28,29 @@ class RecipeCandidate(BaseModel):
     # LLM's judgment from title + ingredient names only, when deterministic
     # mining found no signal -- a fuzzy, non-safety-critical display tag
     # only; the LLM never decides an allergy or nutrition outcome -- see
-    # `data/processed/llm_tag_inferences.jsonl`), or "unknown" (no signal
-    # found). `None` means not tracked by whatever produced this candidate
-    # (e.g. the legacy CSV adapter, or any pre-2026-07-27 caller) -- display
-    # code must treat `None` the same as "unknown".
+    # `data/processed/llm_tag_inferences.jsonl`), "human_corrected" (a
+    # human/orchestrator manually overrode a prior automated value found
+    # wrong during spot-check review -- see docs/BACKLOG.md's "100%-
+    # completeness push" section -- kept distinct so a manual fix never
+    # masquerades as an automated tier), or "unknown" (no signal found).
+    # `None` means not tracked by whatever produced this candidate (e.g.
+    # the legacy CSV adapter, or any pre-2026-07-27 caller) -- display code
+    # must treat `None` the same as "unknown".
     cuisine_source: (
-        Literal["declared", "recovered_tag", "gazetteer_matched", "llm_inferred", "unknown"] | None
+        Literal[
+            "declared",
+            "recovered_tag",
+            "gazetteer_matched",
+            "llm_inferred",
+            "human_corrected",
+            "unknown",
+        ]
+        | None
     ) = None
     meal_type: str | None = None
-    meal_type_source: Literal["declared", "recovered_tag", "llm_inferred", "unknown"] | None = None
+    meal_type_source: (
+        Literal["declared", "recovered_tag", "llm_inferred", "human_corrected", "unknown"] | None
+    ) = None
     description: str | None = None
     ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)

@@ -1845,25 +1845,28 @@ session's task history). Final numbers: cuisine 13.12% -> 51.70%, meal_type
 newly-established real KPI, see `scripts/measure_grams_computable.py`)
 36.71% -> 53.24%. Three residual items surfaced along the way:
 
-- **3 minor cuisine-tag errors self-identified by the LLM-tagging pass's own
-  held-out self-check** (`data/processed/llm_tag_inferences.jsonl`,
-  `cuisine_source="llm_inferred"`): `imp_045f83b795df50a8` ("California
-  Rarebit" tagged British, should likely be American -- a false-friend
-  place-name miss); `imp_20f28b93e59f584c` ("Cappuccino Mix" tagged Italian
-  -- inconsistent with the pass's own abstain on an analogous generic
-  instant-coffee-mix product elsewhere); `imp_4f20426a05a05f93` ("Black
-  Forest Cheesecake Delight" tagged German -- a flavor/branding name on an
-  American cheesecake, not an actual German dish). Non-safety-relevant
-  (cuisine is never read by any allergy/diet-decision path), low priority --
-  hand-correct these three specifically, or fold into a future spot-check
-  pass rather than a dedicated task.
-- **Two pre-existing, out-of-scope cuisine mistags surfaced during that same
-  review** (not part of this pass's diff, predate it): `imp_dd3ff78d70b254b1`
-  "Chicken Teriyaki" has `cuisine_source=recovered_tag, cuisine=Chinese`
-  (teriyaki is Japanese); `imp_fb26e9d667c15d88` "Mole con chica pollo" has
-  `cuisine=Tex-Mex` via `recovered_tag` (mole/Cornish hens reads more
-  Mexican). Worth folding into the same future spot-check pass as the three
-  above.
+- ~~**3 minor cuisine-tag errors self-identified by the LLM-tagging pass's
+  own held-out self-check**~~ **FIXED 2026-07-27.** `imp_045f83b795df50a8`
+  ("California Rarebit"): `British`->`American` (an American twist on the
+  rarebit concept -- Monterey Jack, dry white wine, mushrooms -- not a
+  British dish; a false-friend place-name miss). `imp_20f28b93e59f584c`
+  ("Cappuccino Mix"): `Italian`->`null` (a generic instant coffee-drink-mix
+  product, no genuine Italian dish identity). `imp_4f20426a05a05f93`
+  ("Black Forest Cheesecake Delight"): `German`->`null` (an American
+  cheesecake carrying a German-flavor branding name, not an actual German
+  dish). All three set to `cuisine_source="human_corrected"` (a new,
+  distinct provenance value added to `Recipe`/`RecipeCandidate` alongside
+  this fix, so a manual correction is never mistaken for an automated
+  tier). Non-safety-relevant throughout (cuisine is never read by any
+  allergy/diet-decision path) -- confirmed via full pytest + `allergy_
+  violation_rate: 0.000` after the fix.
+- ~~**Two pre-existing, out-of-scope cuisine mistags surfaced during that
+  same review**~~ **FIXED 2026-07-27** (folded into the same correction
+  pass above): `imp_dd3ff78d70b254b1` "Chicken Teriyaki":
+  `recovered_tag`/`Chinese` -> `human_corrected`/`Japanese` (teriyaki is
+  unambiguously Japanese). `imp_fb26e9d667c15d88` "Mole con chica pollo":
+  `recovered_tag`/`Tex-Mex` -> `human_corrected`/`Mexican` (mole is a core
+  Mexican dish; Cornish hens don't change that).
 - **`app/utils/ingredient_normalizer.py`'s `normalize_ingredient` doesn't
   strip a trailing `", <descriptor>"` clause** (e.g. `"apples, sliced"`,
   `"apples, peeled and cored"`) before its plural-stripping step, so such

@@ -31,16 +31,31 @@ class Recipe(BaseModel):
     # outcome, only this display-only cuisine/meal_type tag, and only when
     # it judged the signal genuinely clear (see
     # `data/processed/llm_tag_inferences.jsonl` for the batch-classified
-    # source and its self-reported abstain rate); "unknown" = no signal
-    # found. `None` = not tracked by whatever produced this recipe (any
+    # source and its self-reported abstain rate); "human_corrected" = a
+    # human/orchestrator manually overrode a prior automated value found to
+    # be wrong during spot-check review (see docs/BACKLOG.md's "100%-
+    # completeness push" section for the specific corrections and reasoning
+    # -- kept distinct from the automated tiers above so a manual fix never
+    # masquerades as e.g. llm_inferred); "unknown" = no signal found.
+    # `None` = not tracked by whatever produced this recipe (any
     # pre-2026-07-27 recipe, or a path that doesn't set it) -- display code
     # must treat `None` the same as "unknown". Purely a provenance/display
     # flag: never read by constraint_engine, scoring, or nutrition.
     cuisine_source: (
-        Literal["declared", "recovered_tag", "gazetteer_matched", "llm_inferred", "unknown"] | None
+        Literal[
+            "declared",
+            "recovered_tag",
+            "gazetteer_matched",
+            "llm_inferred",
+            "human_corrected",
+            "unknown",
+        ]
+        | None
     ) = None
     meal_type: str | None = None
-    meal_type_source: Literal["declared", "recovered_tag", "llm_inferred", "unknown"] | None = None
+    meal_type_source: (
+        Literal["declared", "recovered_tag", "llm_inferred", "human_corrected", "unknown"] | None
+    ) = None
     ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     allergens: list[str] = Field(default_factory=list)
