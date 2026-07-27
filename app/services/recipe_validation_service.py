@@ -7,7 +7,6 @@ from app.schemas.recipe import Recipe
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.schemas.user import NO_RESTRICTION_DIET_TYPES
 from app.services.constraint_engine import contains_allergen, violates_diet_type
-from app.services.recipe_image_service import placeholder_image_url
 from app.utils.ingredient_normalizer import ingredient_matches
 
 
@@ -41,14 +40,13 @@ class RecipeValidationService:
                     }
                 )
                 continue
-            if not candidate.image_url and not candidate.image_path:
-                candidate = candidate.model_copy(
-                    update={
-                        "image_url": placeholder_image_url(
-                            candidate.title, candidate.cuisine, candidate.meal_type
-                        )
-                    }
-                )
+            # `image_url`/`image_path` are deliberately left unset when the
+            # candidate didn't already have one (ROADMAP 4.4 quick fix): this
+            # used to synthesize a `placehold.co` URL server-side -- a remote
+            # network call baked into every card. The frontend now renders
+            # zero-network deterministic local art
+            # (`web/src/components/RecipeArt.tsx`) whenever both are absent,
+            # so there is nothing for this service to fill in.
             merged_warnings = [*candidate.validation_warnings, *warnings]
             candidate = candidate.model_copy(
                 update={"validation_warnings": list(dict.fromkeys(merged_warnings))}

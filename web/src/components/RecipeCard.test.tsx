@@ -185,6 +185,28 @@ describe("RecipeCard 'Get detailed instructions'", () => {
   });
 });
 
+describe("RecipeCard: recipe art never clips the title (ROADMAP 4.4)", () => {
+  it("renders the full title as normal DOM text, never truncated/clipped by CSS", () => {
+    const longTitle =
+      "Slow-Braised Grandma's Sunday Pot Roast with Root Vegetables, Fresh Herbs, and a Red Wine Pan Sauce";
+    renderWithQueryClient(<RecipeCard recipe={buildRecipe({ title: longTitle })} score={buildScore()} />);
+
+    const heading = screen.getByText(longTitle);
+    expect(heading).toBeInTheDocument();
+    expect(heading.tagName).toBe("H3");
+    // No truncation utility classes -- the title must wrap, never clip.
+    expect(heading.className).not.toMatch(/truncate|line-clamp|overflow-hidden|whitespace-nowrap/);
+  });
+
+  it("renders generated art (no <img>, no remote network URL) for the card thumbnail", () => {
+    const { container } = renderWithQueryClient(
+      <RecipeCard recipe={buildRecipe({ title: "Any Recipe", cuisine: "Any" })} score={buildScore()} />,
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("[aria-hidden='true']")).not.toBeNull();
+  });
+});
+
 describe("RecipeCard: without a score (plain recipe-detail view)", () => {
   it("renders base sections but omits every score-dependent section", () => {
     renderWithQueryClient(<RecipeCard recipe={buildRecipe()} />);

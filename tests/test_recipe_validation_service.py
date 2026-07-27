@@ -54,10 +54,17 @@ def test_allergy_conflict_fails() -> None:
     assert result.failed_candidates
 
 
-def test_missing_image_gets_placeholder() -> None:
+def test_missing_image_stays_unset_for_frontend_local_art() -> None:
+    # ROADMAP 4.4 quick fix: this service no longer synthesizes a
+    # `placehold.co` URL when a candidate has no real image -- that was a
+    # server-side remote network call baked into every card. The frontend
+    # now renders zero-network deterministic local art
+    # (`web/src/components/RecipeArt.tsx`) whenever `image_url`/`image_path`
+    # are both unset, so validation leaves them alone.
     result = RecipeValidationService().validate_candidates([_candidate(image_url=None)])
 
-    assert result.valid_candidates[0].image_url
+    assert result.valid_candidates[0].image_url is None
+    assert result.valid_candidates[0].image_path is None
 
 
 def test_missing_macros_warn_but_do_not_fail() -> None:

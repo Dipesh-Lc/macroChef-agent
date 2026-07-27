@@ -1,21 +1,15 @@
-from urllib.parse import quote_plus
+"""Recipe imagery.
 
-CUISINE_COLORS = {
-    "italian": "8f3d2f",
-    "indian": "8a5a1f",
-    "japanese": "243f5c",
-    "chinese": "7a332e",
-    "mexican": "2f6b4f",
-    "mediterranean": "246052",
-    "american": "4d4f45",
-}
+ROADMAP 4.4 quick fix removed this module's old `placeholder_image_url`
+helper, which built a `placehold.co` URL (a remote network call per card,
+with the recipe title baked into the served image as text that clipped on
+long titles). Cards with no real `image_url`/`image_path` now render
+zero-network deterministic local art client-side instead -- see
+`web/src/components/RecipeArt.tsx` and `web/src/lib/placeholderImage.ts`.
 
-
-def placeholder_image_url(
-    title: str,
-    cuisine: str | None = None,
-    meal_type: str | None = None,
-) -> str:
-    label = quote_plus(f"{cuisine or meal_type or 'MacroChef'} recipe\n{title}")
-    color = CUISINE_COLORS.get((cuisine or "").lower(), "243f36")
-    return f"https://placehold.co/640x420/{color}/f2f0eb/png?text={label}"
+This module is the reserved home for ROADMAP 4.4's **[STRETCH]** item: an
+offline image-generation service that renders one real image per
+base-corpus recipe via a paid image API (human cost-approval gate
+required first), stores it under `data/library/images/`, and serves it as
+a static file -- never generated at request time. Not implemented yet.
+"""

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { RecipeCandidate } from "../api/types";
 import { ingredientDisplay } from "../lib/scaling";
 import { preselectedCandidateIds } from "../lib/libraryCandidates";
-import { recipeImageUrl } from "../lib/placeholderImage";
+import { RecipeArt } from "./RecipeArt";
 
 /**
  * Port of `frontend/components/recipe_candidate_cards.py`'s
@@ -45,7 +45,11 @@ function CandidateCard({
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
-  const imageUrl = candidate.image_url ?? candidate.image_path ?? recipeImageUrl(candidate);
+  // Real image (LLM/source-provided or, once ROADMAP 4.4's [STRETCH] item
+  // lands, a generated one) takes priority; if neither is present, or the
+  // real one fails to load, fall back to zero-network local art rather
+  // than the old `placehold.co` remote call.
+  const realImageUrl = candidate.image_url ?? candidate.image_path;
 
   return (
     <article className="overflow-hidden rounded-lg border border-sage-line bg-white shadow-sm">
@@ -59,17 +63,15 @@ function CandidateCard({
           />
         </div>
 
-        {imageFailed ? (
-          <div className="flex h-[120px] w-full items-center justify-center rounded-md bg-basil/10 text-center text-xs text-basil sm:h-full">
-            {candidate.cuisine ?? "MacroChef"} recipe
-          </div>
-        ) : (
+        {realImageUrl && !imageFailed ? (
           <img
-            src={imageUrl}
+            src={realImageUrl}
             alt={candidate.title}
             onError={() => setImageFailed(true)}
             className="h-[120px] w-full rounded-md object-cover sm:h-full"
           />
+        ) : (
+          <RecipeArt recipe={candidate} className="h-[120px] w-full sm:h-full" />
         )}
 
         <div className="flex flex-col gap-2">

@@ -5,9 +5,9 @@ import { getDetailedInstructions, postFeedback } from "../api/endpoints";
 import type { Recipe, RecipeScore } from "../api/types";
 import { batchTotalsLine } from "../lib/batchTotals";
 import { macroDisplay } from "../lib/macroDisplay";
-import { recipeImageUrl } from "../lib/placeholderImage";
 import { ingredientDisplay, scaleIngredients } from "../lib/scaling";
 import { NutritionBreakdown } from "./NutritionBreakdown";
+import { RecipeArt } from "./RecipeArt";
 import { SubstitutionNoteCard } from "./SubstitutionNoteCard";
 
 function friendlyErrorMessage(error: unknown, fallback: string): string {
@@ -183,11 +183,9 @@ export function RecipeCard({
    * `{ recipe, score, explanation }` call site compiling unchanged. */
   explanation?: string;
 }) {
-  const [imageFailed, setImageFailed] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [scoreDetailsOpen, setScoreDetailsOpen] = useState(false);
   const macros = macroDisplay(recipe);
-  const imageUrl = recipeImageUrl(recipe);
   const metaParts = [
     recipe.cuisine ?? "Any cuisine",
     recipe.meal_type ?? "meal",
@@ -230,18 +228,7 @@ export function RecipeCard({
   return (
     <article className="overflow-hidden rounded-lg border border-sage-line bg-white shadow-sm">
       <div className="grid gap-4 p-4 sm:grid-cols-[160px_1fr]">
-        {imageFailed ? (
-          <div className="flex h-[120px] w-full items-center justify-center rounded-md bg-basil/10 text-center text-xs text-basil sm:h-full">
-            {recipe.cuisine ?? "MacroChef"} recipe
-          </div>
-        ) : (
-          <img
-            src={imageUrl}
-            alt={recipe.title}
-            onError={() => setImageFailed(true)}
-            className="h-[120px] w-full rounded-md object-cover sm:h-full"
-          />
-        )}
+        <RecipeArt recipe={recipe} className="h-[120px] w-full sm:h-full" />
 
         <div className="flex flex-col gap-2">
           <div>
