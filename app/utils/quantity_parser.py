@@ -31,7 +31,29 @@ VOLUME_TO_ML: dict[str, float] = {
 }
 # Count units are dimensionless measure words (not ingredient names). "egg",
 # "onion" etc. are deliberately NOT here so "2 eggs" parses as amount=2, name=egg.
-COUNT_UNITS: set[str] = {"piece", "clove", "slice"}
+#
+# "can", "package", "jar", "box", "bag", "bottle", "container" (added
+# 2026-07-27, container-word name-pollution fix): recognized as their own
+# count-only unit tokens so a line like "1 can black beans, drained and
+# rinsed" (no preceding parenthetical size -- contrast the pack-size form
+# "1 (15 ounce) can black beans...", handled separately by _parse_pack_size
+# below and unaffected by this addition) parses as name="black beans,
+# drained and rinsed", unit="can" instead of leaking the container word into
+# `name` and degrading downstream USDA food-name matching
+# (app.services.nutrition_grounding). Confirmed corpus-wide: 1,905 rows
+# matched this pollution signature before this fix. Deliberately NOT given a
+# gram/piece-weight conversion (no _PIECE_WEIGHT_G entries added for these
+# tokens in unit_converter.py) -- a can/package/jar has no fixed weight
+# across ingredients, so an ingredient quantified only this way stays
+# honestly `ungrounded` for nutrition math exactly as it did before this
+# change (app.utils.unit_converter.to_grams returns None for any count unit
+# with no piece-weight match); only the `name` pollution is fixed here. A
+# separately-scoped, advisor-approved cited-reference-weight methodology
+# (docs/ROADMAP.md Stage A2) may add real conversions for these later.
+COUNT_UNITS: set[str] = {
+    "piece", "clove", "slice",
+    "can", "package", "jar", "box", "bag", "bottle", "container",
+}
 
 # Every accepted spelling -> canonical token. This defines KNOWN_UNITS.
 _UNIT_ALIASES: dict[str, str] = {
@@ -54,6 +76,17 @@ _UNIT_ALIASES: dict[str, str] = {
     "piece": "piece", "pieces": "piece", "pc": "piece", "pcs": "piece",
     "clove": "clove", "cloves": "clove",
     "slice": "slice", "slices": "slice",
+    # container words (count-only, never gram-convertible -- see COUNT_UNITS'
+    # inline comment above for the full rationale and the 2026-07-27 fix
+    # this is part of). Canonical form is always the singular spelling;
+    # "pkg" is the one non-plural alternate spelling ("package" abbreviated).
+    "can": "can", "cans": "can",
+    "package": "package", "packages": "package", "pkg": "package",
+    "jar": "jar", "jars": "jar",
+    "box": "box", "boxes": "box",
+    "bag": "bag", "bags": "bag",
+    "bottle": "bottle", "bottles": "bottle",
+    "container": "container", "containers": "container",
 }
 
 KNOWN_UNITS: frozenset[str] = frozenset(_UNIT_ALIASES)
@@ -114,13 +147,24 @@ _AMOUNT_TOKEN = (
 #      any single-amount form). Tried FIRST because its operands are prefixes
 #      of the plain single-amount alternatives below -- if this weren't tried
 #      first, "1 1/2 to 3" would stop after matching just "1 1/2".
-#   2. numeric range: "2-4" / "2–4" / "2—4" (ASCII hyphen, en dash, em dash)
+#   2. numeric/fraction range: "2-4" / "2–4" / "2—4" (ASCII hyphen, en dash,
+#      em dash) with EITHER operand any single-amount form (reuses
+#      _AMOUNT_TOKEN, same precedent as the word-range branch above) -- not
+#      just plain decimals. Fixed 2026-07-27 (quantity-parser fraction-range
+#      bug): "2/3-3/4 cup brown sugar, packed" previously only matched the
+#      decimal-only version of this branch, which required a dash
+#      immediately after a bare decimal/integer; "2/3" has no such dash
+#      right after "2", so the whole branch failed to match and parsing fell
+#      through to a bare single-fraction match ("2/3"), leaving "-3/4 cup
+#      brown sugar, packed" as an unparseable, corrupted `name`. Confirmed
+#      375 corpus rows matched this corruption signature (`name` starting
+#      with a dash immediately followed by a digit) before this fix.
 #   3. any single amount (mixed unicode fraction, mixed digit fraction,
 #      simple fraction, decimal/integer, bare decimal, bare unicode fraction)
 _LEADING_AMOUNT = re.compile(
     r"^\s*(?P<num>"
     rf"(?:{_AMOUNT_TOKEN})\s+(?i:to)\s+(?:{_AMOUNT_TOKEN})"
-    rf"|\d+(?:\.\d+)?\s*[{_RANGE_DASH_CHARS}]\s*\d+(?:\.\d+)?"
+    rf"|(?:{_AMOUNT_TOKEN})\s*[{_RANGE_DASH_CHARS}]\s*(?:{_AMOUNT_TOKEN})"
     rf"|{_AMOUNT_TOKEN}"
     r")"
 )
@@ -204,12 +248,18 @@ def _amount_to_float(token: str) -> float | None:
 
 
 # Pack-size lines: "1 (8 ounce) package cream cheese" -> amount=8.0 (=N*M),
-# unit="oz" (the parenthetical unit), name="cream cheese". The container word
-# itself ("package", "can", ...) is NEVER a unit -- no can/package pseudo-
-# units, consistent with the standing density/piece-table ruling. This is a
-# strict, fully-anchored leading pattern; if any part fails to match or the
-# parenthetical text isn't a known unit, parse_quantity_string falls through
-# to the ordinary parsing path below, unchanged.
+# unit="oz" (the parenthetical unit), name="cream cheese". When a
+# parenthetical size IS present, the container word is always just a
+# delimiter between the size and the food name -- it is NEVER itself the
+# reported `unit` here (the parenthetical unit always wins; see
+# `_parse_pack_size`), regardless of these words also being registered as
+# their own standalone count units in COUNT_UNITS/_UNIT_ALIASES above (added
+# 2026-07-27, for the no-parenthetical case only -- see that addition's
+# inline comment). This is a strict, fully-anchored leading pattern; if any
+# part fails to match or the parenthetical text isn't a known unit,
+# parse_quantity_string falls through to the ordinary parsing path below,
+# unchanged (which is where the standalone container-word unit recognition
+# applies instead).
 _CONTAINER_WORDS = (
     "package", "packages", "pkg",
     "can", "cans",
@@ -264,8 +314,10 @@ def parse_quantity_string(raw: str) -> dict[str, object]:
         "1½ cup heavy whipping cream" -> {"name": "heavy whipping cream", "amount": 1.5, "unit": "cup"}
         "1 ½ cups sugar"       -> {"name": "sugar", "amount": 1.5, "unit": "cup"}
         "2–4 tbsp milk"        -> {"name": "milk", "amount": 3.0, "unit": "tbsp"}
+        "2/3-3/4 cup brown sugar, packed" -> {"name": "brown sugar, packed", "amount": 0.7083333333333333, "unit": "cup"}
         "1/2 to 3/4 cup milk"  -> {"name": "milk", "amount": 0.625, "unit": "cup"}
         "1 (8 ounce) package cream cheese" -> {"name": "cream cheese", "amount": 8.0, "unit": "oz"}
+        "1 can black beans, drained and rinsed" -> {"name": "black beans, drained and rinsed", "amount": 1.0, "unit": "can"}
 
     `name` is never empty: unparseable input falls back to the original text.
 
@@ -276,7 +328,24 @@ def parse_quantity_string(raw: str) -> dict[str, object]:
     measured quantity -- callers consuming `amount` for shopping-list
     quantities should treat it as an estimate, not an exact figure. It carries
     no safety weight: allergen matching (app.services.constraint_engine) is
-    keyed on `name` only and is quantity-independent by design.
+    keyed on `name` only and is quantity-independent by design. Each side of
+    the dash may be ANY single-amount form _AMOUNT_TOKEN accepts -- plain
+    decimal/integer, simple fraction, or mixed number -- not just plain
+    decimals, so "2/3-3/4 cup brown sugar" midpoints to 0.708(3) exactly like
+    "2-4 tbsp" midpoints to 3.0 (see _LEADING_AMOUNT's inline comment for the
+    2026-07-27 fix that extended this branch to fraction operands).
+
+    Container words with no preceding parenthetical size ("1 can black
+    beans...", as opposed to the pack-size form "1 (15 ounce) can black
+    beans..." above) are recognized as their own count-only unit ("can",
+    "package", "jar", "box", "bag", "bottle", "container", singular and
+    plural spellings) so the word doesn't leak into `name` and degrade
+    downstream USDA name matching (app.services.nutrition_grounding). These
+    are deliberately NOT gram-convertible (no piece-weight table is added for
+    them) -- an ingredient quantified only in cans/packages/etc. stays
+    honestly `ungrounded` for nutrition math exactly as it did before this
+    change, per `app.utils.unit_converter.to_grams`'s null-on-unknown-weight
+    handling; only the `name` pollution is fixed here.
 
     Word ranges spelled with "to" instead of a dash ("1/2 to 3/4 cup milk",
     "1 to 2 eggs" -- the word is matched case-insensitively) follow the exact

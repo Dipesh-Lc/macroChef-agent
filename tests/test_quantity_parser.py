@@ -99,6 +99,27 @@ def test_parses_ascii_hyphen_range_as_midpoint() -> None:
     }
 
 
+def test_decimal_range_still_parses_unchanged_after_fraction_range_fix() -> None:
+    # Regression guard on the range branch extended to accept fraction
+    # operands (2026-07-27): a genuinely correct existing plain-decimal range
+    # must still parse exactly as before.
+    assert parse_quantity_string("2-3 cups broth") == {
+        "name": "broth",
+        "amount": 2.5,
+        "unit": "cup",
+    }
+
+
+def test_parses_fraction_range_as_midpoint() -> None:
+    # 2026-07-27 fraction-range fix: "2/3-3/4 cup..." previously matched only
+    # the bare "2/3" as amount, leaving "-3/4 cup brown sugar, packed" as an
+    # unparseable, name-polluting fragment (confirmed 375 corpus rows).
+    parsed = parse_quantity_string("2/3-3/4 cup brown sugar, packed")
+    assert parsed["unit"] == "cup"
+    assert parsed["name"] == "brown sugar, packed"
+    assert parsed["amount"] == pytest.approx((2 / 3 + 3 / 4) / 2)
+
+
 def test_parses_em_dash_range_as_midpoint() -> None:
     assert parse_quantity_string("2—4 tbsp milk") == {
         "name": "milk",
@@ -138,6 +159,8 @@ _INVARIANT_CASES = [
     "1½ cup peanut butter",
     "sun-dried tomatoes",
     "a pinch of salt",
+    "2/3-3/4 cup brown sugar, packed",
+    "1 can black beans, drained and rinsed",
 ]
 
 
@@ -442,16 +465,36 @@ def test_pack_size_container_word_matching_is_case_insensitive() -> None:
     }
 
 
-def test_pack_size_container_word_is_never_treated_as_a_unit() -> None:
-    # No can/package pseudo-units: the container word must never surface as
-    # `unit`, and it must never be added to the general unit vocabulary.
-    from app.utils.quantity_parser import KNOWN_UNITS
-
+def test_pack_size_container_word_is_never_the_unit_when_a_parenthetical_size_is_present() -> None:
+    # When a parenthetical size IS present ("1 (8 ounce) package..."), the
+    # pack-size path always wins and the parenthetical unit ("oz") is what
+    # surfaces as `unit` -- the container word itself is consumed as a
+    # delimiter, never as the reported unit, regardless of it now also being
+    # a recognized standalone count unit (see the next test).
     parsed = parse_quantity_string("1 (8 ounce) package cream cheese")
     assert parsed["unit"] == "oz"
-    assert "package" not in KNOWN_UNITS
-    assert "can" not in KNOWN_UNITS
-    assert "jar" not in KNOWN_UNITS
+
+
+def test_container_words_are_recognized_count_units_without_a_parenthetical_size() -> None:
+    # 2026-07-27 (container-word name-pollution fix): reversed from the prior
+    # "no can/package pseudo-units" rule. Historically a container word with
+    # NO preceding parenthetical size (contrast the case above) wasn't
+    # recognized as a unit at all, so it leaked into `name` and degraded
+    # downstream USDA food-name matching (1,905 corpus rows measured). These
+    # are now recognized count-only units -- deliberately never given a
+    # gram/piece-weight conversion, so nutrition math for such an ingredient
+    # stays honestly ungrounded exactly as before this change (see
+    # COUNT_UNITS' inline comment in quantity_parser.py).
+    from app.utils.quantity_parser import KNOWN_UNITS
+
+    assert "package" in KNOWN_UNITS
+    assert "can" in KNOWN_UNITS
+    assert "jar" in KNOWN_UNITS
+    assert parse_quantity_string("1 can black beans, drained and rinsed") == {
+        "name": "black beans, drained and rinsed",
+        "amount": 1.0,
+        "unit": "can",
+    }
 
 
 @pytest.mark.parametrize(
