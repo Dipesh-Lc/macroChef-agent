@@ -66,17 +66,29 @@ class RecipeRetriever:
         recipes = self._available_recipes(user_id, include_user_recipes, include_base_recipes)
         recipes_by_id = {recipe.recipe_id: recipe for recipe in recipes}
         query = self._build_query(ingredients, cuisine_preference, meal_type)
-        metadata_filter = self._build_metadata_filter(cuisine_preference, meal_type)
 
         try:
             if collection_count() > 0:
-                recipe_ids = query_collection(query, n_results=limit * 3, where=metadata_filter)
+                # No `where` filter here: a hard Chroma equality filter on
+                # cuisine/meal_type would exclude every recipe missing that
+                # metadata key entirely (recipe_indexing_service drops None
+                # values before writing to Chroma, so ~most of the corpus has
+                # no "cuisine" key at all -- not cuisine=null, the key is
+                # absent). A hard filter can never match an absent key, which
+                # was silently collapsing cuisine-filtered search down to the
+                # handful of hand-curated seed recipes that happen to carry a
+                # cuisine tag. Instead, run the semantic query unfiltered and
+                # apply the same soft cuisine/meal_type boost keyword_search
+                # already uses (_metadata_boost) to re-rank afterward -- an
+                # untagged recipe just doesn't get the boost, it isn't
+                # excluded.
+                recipe_ids = query_collection(query, n_results=limit * 3)
                 semantic = [
                     recipes_by_id[recipe_id]
                     for recipe_id in recipe_ids
                     if recipe_id in recipes_by_id
                 ]
-                semantic = self._boost_user_recipes(semantic)
+                semantic = self._rank_semantic_results(semantic, cuisine_preference, meal_type)
                 if len(semantic) >= limit:
                     return semantic[:limit]
                 seen = {recipe.recipe_id for recipe in semantic}
@@ -145,8 +157,44 @@ class RecipeRetriever:
             recipes.extend(self.library_repository.list_user_recipes(user_id))
         return recipes
 
-    def _boost_user_recipes(self, recipes: list[Recipe]) -> list[Recipe]:
-        return sorted(recipes, key=lambda recipe: recipe.is_user_saved, reverse=True)
+    def _rank_semantic_results(
+        self,
+        recipes: list[Recipe],
+        cuisine_preference: str | None,
+        meal_type: str | None,
+    ) -> list[Recipe]:
+        """Re-rank Chroma's semantic-similarity order by the same soft
+        cuisine/meal_type boost `_metadata_boost` applies in keyword_search,
+        plus the existing user-saved boost. `sorted` is stable, so within an
+        equal (is_user_saved, metadata_boost) tier, Chroma's own relevance
+        order is preserved -- an untagged recipe (no boost either way) simply
+        keeps its semantic rank rather than being excluded or penalized.
+        """
+        return sorted(
+            recipes,
+            key=lambda recipe: (
+                recipe.is_user_saved,
+                self._metadata_boost(recipe, cuisine_preference, meal_type),
+            ),
+            reverse=True,
+        )
+
+    def _metadata_boost(
+        self,
+        recipe: Recipe,
+        cuisine_preference: str | None,
+        meal_type: str | None,
+    ) -> float:
+        boost = 0.0
+        if (
+            cuisine_preference
+            and recipe.cuisine
+            and recipe.cuisine.lower() == cuisine_preference.lower()
+        ):
+            boost += 0.75
+        if meal_type and recipe.meal_type and recipe.meal_type.lower() == meal_type.lower():
+            boost += 0.5
+        return boost
 
     def _keyword_score(
         self,
@@ -164,14 +212,7 @@ class RecipeRetriever:
             ):
                 score += 1.0
 
-        if (
-            cuisine_preference
-            and recipe.cuisine
-            and recipe.cuisine.lower() == cuisine_preference.lower()
-        ):
-            score += 0.75
-        if meal_type and recipe.meal_type and recipe.meal_type.lower() == meal_type.lower():
-            score += 0.5
+        score += self._metadata_boost(recipe, cuisine_preference, meal_type)
 
         return score
 
