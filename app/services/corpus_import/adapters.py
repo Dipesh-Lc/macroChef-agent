@@ -625,7 +625,7 @@ class FoodComScrapedArchiveAdapter(DatasetAdapter):
         raw_keywords = raw_keywords if isinstance(raw_keywords, str) else None
 
         meal_type, meal_type_source = resolve_meal_type(raw_category, raw_keywords)
-        cuisine, cuisine_source = resolve_cuisine(raw_category, raw_keywords)
+        cuisine, cuisine_source = resolve_cuisine(raw_category, raw_keywords, title)
 
         return RecipeCandidate(
             candidate_id=f"foodcom_scraped_{foodcom_id}",

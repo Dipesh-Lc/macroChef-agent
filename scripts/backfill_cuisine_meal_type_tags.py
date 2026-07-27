@@ -205,7 +205,7 @@ def main() -> int:
             raw_keywords = raw_keywords if isinstance(raw_keywords, str) else None
 
         meal_type, meal_type_source = resolve_meal_type(raw_category, raw_keywords)
-        cuisine, cuisine_source = resolve_cuisine(raw_category, raw_keywords)
+        cuisine, cuisine_source = resolve_cuisine(raw_category, raw_keywords, record.get("title"))
 
         meal_type_source_counts[meal_type_source] += 1
         cuisine_source_counts[cuisine_source] += 1
