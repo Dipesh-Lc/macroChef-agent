@@ -25,7 +25,9 @@ def test_finds_zero_violations_for_genuinely_safe_served_recipe(tmp_path, monkey
     # actual case-definition files -- pick one with a peanut allergy.
     case_defs = load_case_definitions()
     real_case_id = next(
-        cid for cid, d in case_defs.items() if d["structured_rendering"].get("allergies") == ["peanut"]
+        cid for cid, d in case_defs.items()
+        if d["structured_rendering"].get("allergies") == ["peanut"]
+        and d["structured_rendering"].get("diet_type") is None
     )
     cases = [
         {
@@ -43,7 +45,9 @@ def test_finds_zero_violations_for_genuinely_safe_served_recipe(tmp_path, monkey
 def test_finds_real_violation_when_served_ingredients_actually_contain_the_allergen(tmp_path):
     case_defs = load_case_definitions()
     real_case_id = next(
-        cid for cid, d in case_defs.items() if d["structured_rendering"].get("allergies") == ["peanut"]
+        cid for cid, d in case_defs.items()
+        if d["structured_rendering"].get("allergies") == ["peanut"]
+        and d["structured_rendering"].get("diet_type") is None
     )
     cases = [
         {
