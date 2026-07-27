@@ -1,6 +1,7 @@
 from app.config import get_settings
 from app.data.recipe_library_repository import RecipeLibraryRepository
 from app.graph.state import MacroChefState, ensure_state, state_update
+from app.observability.events import traced_node
 from app.rag.loaders import load_recipes
 from app.schemas.inventory import ConfirmedIngredient
 from app.schemas.recommendation import MealRecommendation, RejectedRecipe
@@ -41,6 +42,7 @@ def _inventory_from_observations(state: MacroChefState) -> list[ConfirmedIngredi
     ]
 
 
+@traced_node("intake_node")
 def intake_node(state: MacroChefState | dict):
     current = ensure_state(state)
     observations = list(current.raw_inventory_observations)
@@ -88,6 +90,7 @@ def intake_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("inventory_confirmation_node")
 def inventory_confirmation_node(state: MacroChefState | dict):
     current = ensure_state(state)
     if current.errors:
@@ -129,6 +132,7 @@ def inventory_confirmation_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("constraint_builder_node")
 def constraint_builder_node(state: MacroChefState | dict):
     current = ensure_state(state)
     profile = current.user_profile
@@ -154,6 +158,7 @@ def constraint_builder_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("recipe_retriever_node")
 def recipe_retriever_node(state: MacroChefState | dict):
     current = ensure_state(state)
     if current.errors:
@@ -179,6 +184,7 @@ def recipe_retriever_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("safety_filter_node")
 def safety_filter_node(state: MacroChefState | dict):
     current = ensure_state(state)
     if current.errors or current.user_profile is None:
@@ -215,6 +221,7 @@ def safety_filter_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("fallback_relaxation_node")
 def fallback_relaxation_node(state: MacroChefState | dict):
     current = ensure_state(state)
     if current.user_profile is None:
@@ -287,6 +294,7 @@ _ALLERGEN_REJECTION_PREFIX = "Contains a user allergen"
 _DIET_REJECTION_PREFIX = "Violates diet type"
 
 
+@traced_node("substitution_node")
 def substitution_node(state: MacroChefState | dict):
     """Deterministic substitution engine integration (Phase 3 roadmap item).
 
@@ -332,6 +340,7 @@ def substitution_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("nutrition_scoring_node")
 def nutrition_scoring_node(state: MacroChefState | dict):
     current = ensure_state(state)
     if current.errors or current.user_profile is None:
@@ -372,6 +381,7 @@ def nutrition_scoring_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("meal_ranking_node")
 def meal_ranking_node(state: MacroChefState | dict):
     current = ensure_state(state)
     scores_by_id = {score.recipe_id: score for score in current.scored_recipes}
@@ -395,6 +405,7 @@ def meal_ranking_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("procurement_node")
 def procurement_node(state: MacroChefState | dict):
     current = ensure_state(state)
     all_items = []
@@ -417,6 +428,7 @@ def procurement_node(state: MacroChefState | dict):
     )
 
 
+@traced_node("memory_update_node")
 def memory_update_node(state: MacroChefState | dict):
     current = ensure_state(state)
     summary = save_session_summary(current.user_id, current.final_recommendations)
