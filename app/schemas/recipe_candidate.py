@@ -19,13 +19,24 @@ class RecipeCandidate(BaseModel):
     # "declared" (author/curator/source explicitly set it), "recovered_tag"
     # (deterministically recovered from a source dataset's own structured
     # taxonomy field -- see app.services.corpus_import.cuisine_tagger /
-    # adapters.resolve_meal_type -- never inferred by an LLM), or "unknown"
-    # (no signal found). `None` means not tracked by whatever produced this
-    # candidate (e.g. the legacy CSV adapter, or any pre-2026-07-27 caller) --
-    # display code must treat `None` the same as "unknown".
-    cuisine_source: Literal["declared", "recovered_tag", "unknown"] | None = None
+    # adapters.resolve_meal_type -- never inferred by an LLM),
+    # "gazetteer_matched" (deterministically recovered from a whole-phrase,
+    # word-boundary dish-name match against `title` only -- see
+    # cuisine_tagger.DISH_NAME_CUISINE_TERMS -- also never LLM-inferred, but
+    # kept as its own distinct value from "recovered_tag" since it's a
+    # different-strength evidence tier), "llm_inferred" (assigned by an
+    # LLM's judgment from title + ingredient names only, when deterministic
+    # mining found no signal -- a fuzzy, non-safety-critical display tag
+    # only; the LLM never decides an allergy or nutrition outcome -- see
+    # `data/processed/llm_tag_inferences.jsonl`), or "unknown" (no signal
+    # found). `None` means not tracked by whatever produced this candidate
+    # (e.g. the legacy CSV adapter, or any pre-2026-07-27 caller) -- display
+    # code must treat `None` the same as "unknown".
+    cuisine_source: (
+        Literal["declared", "recovered_tag", "gazetteer_matched", "llm_inferred", "unknown"] | None
+    ) = None
     meal_type: str | None = None
-    meal_type_source: Literal["declared", "recovered_tag", "unknown"] | None = None
+    meal_type_source: Literal["declared", "recovered_tag", "llm_inferred", "unknown"] | None = None
     description: str | None = None
     ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)

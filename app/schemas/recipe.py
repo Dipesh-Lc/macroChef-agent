@@ -18,14 +18,29 @@ class Recipe(BaseModel):
     # (see `RecipeCandidate.cuisine_source`'s docstring for the full
     # rationale). "declared" = author/curator/source explicitly set it;
     # "recovered_tag" = deterministically recovered from a source dataset's
-    # own structured taxonomy field (never LLM-inferred); "unknown" = no
-    # signal found. `None` = not tracked by whatever produced this recipe
-    # (any pre-2026-07-27 recipe, or a path that doesn't set it) -- display
-    # code must treat `None` the same as "unknown". Purely a provenance/
-    # display flag: never read by constraint_engine, scoring, or nutrition.
-    cuisine_source: Literal["declared", "recovered_tag", "unknown"] | None = None
+    # own structured taxonomy field (never LLM-inferred); "gazetteer_matched"
+    # = deterministically recovered from a whole-phrase, word-boundary
+    # dish-name match against `title` only (see
+    # `app.services.corpus_import.cuisine_tagger.DISH_NAME_CUISINE_TERMS` --
+    # also never LLM-inferred, but a distinct, title-based evidence tier
+    # from "recovered_tag", so kept separately labeled for future audit);
+    # "llm_inferred" = assigned by an LLM's judgment (title + ingredient
+    # names only, never allergy/nutrition-relevant) when deterministic
+    # mining could not reach a value -- purely a fuzzy, non-safety-critical
+    # classification pass; the LLM never decides an allergy or nutrition
+    # outcome, only this display-only cuisine/meal_type tag, and only when
+    # it judged the signal genuinely clear (see
+    # `data/processed/llm_tag_inferences.jsonl` for the batch-classified
+    # source and its self-reported abstain rate); "unknown" = no signal
+    # found. `None` = not tracked by whatever produced this recipe (any
+    # pre-2026-07-27 recipe, or a path that doesn't set it) -- display code
+    # must treat `None` the same as "unknown". Purely a provenance/display
+    # flag: never read by constraint_engine, scoring, or nutrition.
+    cuisine_source: (
+        Literal["declared", "recovered_tag", "gazetteer_matched", "llm_inferred", "unknown"] | None
+    ) = None
     meal_type: str | None = None
-    meal_type_source: Literal["declared", "recovered_tag", "unknown"] | None = None
+    meal_type_source: Literal["declared", "recovered_tag", "llm_inferred", "unknown"] | None = None
     ingredients: list[Ingredient] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     allergens: list[str] = Field(default_factory=list)
