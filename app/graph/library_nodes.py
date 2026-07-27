@@ -4,6 +4,7 @@ from app.graph.library_state import (
     ensure_library_state,
     library_state_update,
 )
+from app.observability.events import traced_node
 from app.rag.loaders import load_recipes
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
@@ -35,6 +36,7 @@ def _request_from_state(state: RecipeLibraryBuilderState) -> RecipeDiscoveryRequ
     )
 
 
+@traced_node("discovery_node")
 def discovery_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     request = _request_from_state(current)
@@ -59,6 +61,7 @@ def discovery_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("normalization_node")
 def normalization_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     normalized: list[RecipeCandidate] = []
@@ -90,6 +93,7 @@ def normalization_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("recipe_validation_node")
 def recipe_validation_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     result = RecipeValidationService().validate_candidates(
@@ -108,6 +112,7 @@ def recipe_validation_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("deduplication_node")
 def deduplication_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     existing = [
@@ -139,6 +144,7 @@ def deduplication_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("candidate_presentation_node")
 def candidate_presentation_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     return library_state_update(
@@ -153,6 +159,7 @@ def candidate_presentation_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("selected_candidate_validation_node")
 def selected_candidate_validation_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     result = RecipeValidationService().validate_candidates(current.selected_candidates)
@@ -184,6 +191,7 @@ def selected_candidate_validation_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("save_recipe_node")
 def save_recipe_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     repository = RecipeLibraryRepository()
@@ -211,6 +219,7 @@ def save_recipe_node(state: RecipeLibraryBuilderState | dict):
     )
 
 
+@traced_node("index_recipe_node")
 def index_recipe_node(state: RecipeLibraryBuilderState | dict):
     current = ensure_library_state(state)
     indexed_count = RecipeIndexingService().index_recipes(current.saved_recipes)

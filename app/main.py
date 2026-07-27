@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,7 +15,61 @@ from app.api.routes_session import router as session_router
 from app.api.routes_share import router as share_router
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
+from app.observability.events import new_run_id, reset_run_id, set_run_id
 from app.spa import mount_spa
+
+# Header a request can supply to propagate its own correlation id (e.g. an
+# upstream gateway/load balancer already minted one); otherwise a fresh id
+# is minted per request. Read by the request-id middleware below and echoed
+# back on the response so a caller can correlate its request with server
+# logs/RunEvents (app.observability.events) without needing to grep by
+# timestamp -- ROADMAP.md Phase 1, Step 1.1.
+REQUEST_ID_HEADER = "X-Request-Id"
+
+
+class RequestIdMiddleware:
+    """Plain ASGI middleware (deliberately NOT `BaseHTTPMiddleware`): it
+    calls the wrapped app directly in the current asyncio Task rather than
+    spawning a new one, so the `run_id` contextvar set here is guaranteed
+    to still be visible to everything downstream -- including sync route
+    handlers, which FastAPI dispatches via `anyio.to_thread.run_sync`
+    (which itself copies the calling task's `contextvars.Context` into the
+    worker thread). `BaseHTTPMiddleware` has historically had exactly this
+    kind of contextvar-propagation footgun because of how it wraps
+    `call_next`; a bare ASGI middleware sidesteps the question entirely.
+
+    One run/request id per HTTP request, bound into
+    `app.observability.events`'s contextvar for the lifetime of that
+    request: every `app.utils.logging.get_logger(...)` log line and every
+    `RunEvent` a traced graph node emits during this request carries it.
+    """
+
+    def __init__(self, app: Callable) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers") or [])
+        incoming = headers.get(REQUEST_ID_HEADER.lower().encode("latin-1"))
+        run_id = incoming.decode("latin-1") if incoming else new_run_id()
+        token = set_run_id(run_id)
+
+        async def send_with_request_id(message):  # type: ignore[no-untyped-def]
+            if message["type"] == "http.response.start":
+                response_headers = list(message.get("headers") or [])
+                response_headers.append(
+                    (REQUEST_ID_HEADER.encode("latin-1"), run_id.encode("latin-1"))
+                )
+                message = {**message, "headers": response_headers}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_request_id)
+        finally:
+            reset_run_id(token)
 
 
 @asynccontextmanager
@@ -35,6 +89,14 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # Request-id tracing (ROADMAP.md Phase 1, Step 1.1) -- added first so it
+    # ends up the innermost layer wrapping the router (Starlette wraps
+    # middleware in reverse add-order, so the LAST-added middleware sits
+    # outermost); relative order vs CORSMiddleware doesn't functionally
+    # matter here since every route that needs `run_id` is inside both, but
+    # keeping it added before CORS keeps this list in "most fundamental
+    # first" order.
+    app.add_middleware(RequestIdMiddleware)
     # SPA rebuild W6 cutover: the React SPA is now served BY this same
     # FastAPI process, same-origin, in every environment except local Vite
     # dev (app/spa.py's mount_spa; the built `web/dist` is baked into the
