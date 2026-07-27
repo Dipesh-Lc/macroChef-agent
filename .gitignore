@@ -61,8 +61,11 @@ dist/
 build/
 *.egg-info/
 .DS_Store
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
+
+# Claude Code project memory / orchestration config -- internal build
+# tooling, not part of the shipped product or its documentation.
+CLAUDE.md
+.claude/
 
 # React SPA (SPA rebuild, roadmap item W1b) -- web/openapi.json and
 # web/src/api/types.gen.ts ARE committed (generated API contract, checked
