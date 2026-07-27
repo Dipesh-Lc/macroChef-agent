@@ -397,6 +397,28 @@ _WHEAT = frozenset(
         # same logic as "pretzel" above (no bare-row way to prove a
         # gluten-free variant). Added 2026-07-19.
         "orzo",
+        # "gravy": traditional American pan/roux gravy is thickened with
+        # wheat flour -- same bare-row logic as the existing soy-sauce/
+        # hoisin-sauce/pretzel/orzo entries above: a labeled gluten-free
+        # gravy (e.g. cornstarch-thickened) is the specialty exception, not
+        # the rule, and a bare corpus row (just "gravy", no qualifier, no
+        # ingredient breakdown) cannot prove which kind it is, so ambiguity
+        # resolves toward blocking for this celiac-serious allergen.
+        # Confirmed live gap 2026-07-27 (advisor adjudication,
+        # diet_024 TRUE_VIOLATION): imp_62978071cfba5838 ("Herb Roasted
+        # Turkey With Citrus Glaze") carries a bare "gravy" ingredient row
+        # that both contains_allergen(["wheat"/"gluten"]) and
+        # violates_diet_type(..., "gluten-free") missed before this
+        # addition -- confirmed by direct execution, not inference. Corpus
+        # check (2026-07-27, `data/processed/imported_recipes.jsonl`): 22
+        # ingredient rows contain the substring "gravy"; all 22 are
+        # genuinely gravy-related (e.g. "brown gravy mix", "chicken gravy",
+        # "gravy (leftover)", "water (to make gravy)") -- none is an
+        # unrelated word or product name that merely contains "gravy" as a
+        # substring (e.g. no "gravylax"/"engraving"-class collision), so no
+        # _LOOKALIKE_EXCLUSIONS carve-out is needed, unlike "pita"/
+        # "chestnut"/"romano"/"capon"/"tripe"/"brie" above.
+        "gravy",
     }
 )
 

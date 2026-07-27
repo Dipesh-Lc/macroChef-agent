@@ -1796,3 +1796,26 @@ def test_snicker_surprise_cookies_survive_peanut_butter_substitution_on_full_ing
     )
 
     assert not validate_recipe(recipe, _profile(allergies=["peanut"])).is_valid
+
+
+# --- 2026-07-27 cure: diet_024 TRUE_VIOLATION (advisor adjudication) --------
+# imp_62978071cfba5838 ("Herb Roasted Turkey With Citrus Glaze", served as-is)
+# carries a bare "gravy" ingredient row with no qualifier. Traditional
+# American pan/roux gravy is wheat-flour-thickened, and a bare corpus row
+# cannot prove it's the labeled-gluten-free exception -- same fail-closed,
+# bare-prepared-food logic already applied to "soy sauce"/"hoisin sauce"/
+# "pretzel"/"orzo" in _WHEAT.
+
+
+def test_bare_gravy_blocks_wheat_and_gluten_allergy() -> None:
+    recipe = _recipe(ingredients=["turkey", "gravy"], allergens=[])
+
+    assert contains_allergen(recipe, ["wheat"])
+    assert contains_allergen(recipe, ["gluten"])
+
+
+def test_bare_gravy_blocks_gluten_free_diet() -> None:
+    recipe = _recipe(ingredients=["turkey", "gravy"], allergens=[], diet_tags=[])
+
+    assert violates_diet_type(recipe, "gluten-free") is True
+    assert not validate_recipe(recipe, _profile(diet_type="gluten-free")).is_valid
