@@ -369,6 +369,80 @@
         }
       }
     },
+    "/recipes/recommend/stream": {
+      "post": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Recommend Recipes Stream",
+        "description": "SSE variant of POST /recipes/recommend. Same request body, same\nsession gate, same rate-limit bucket as the synchronous endpoint (this\nreuses `require_recommend_rate_limit` directly rather than a parallel\nbucket -- a client hammering either endpoint hits the same limit).\n\nEmits one `node` SSE event per `RunEvent` (started/finished/failed) as\neach graph node executes, an `: heartbeat` comment line roughly every\n10s of silence (see docs/DEPLOY.md), and ends with exactly one terminal\nevent: `result` (a full `RecommendationResponse`, identical shape to\nwhat POST /recipes/recommend returns) or `error`.",
+        "operationId": "recommend_recipes_stream_recipes_recommend_stream_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/library/discover": {
       "post": {
         "tags": [
@@ -2519,6 +2593,14 @@
           "fallback_count": {
             "type": "integer",
             "title": "Fallback Count"
+          },
+          "parse_fallback_count": {
+            "type": "integer",
+            "title": "Parse Fallback Count"
+          },
+          "cache_hit_count": {
+            "type": "integer",
+            "title": "Cache Hit Count"
           }
         },
         "type": "object",
@@ -2534,7 +2616,9 @@
           "cost_usd",
           "success_count",
           "failure_count",
-          "fallback_count"
+          "fallback_count",
+          "parse_fallback_count",
+          "cache_hit_count"
         ],
         "title": "LLMUsageAggregate",
         "description": "One (day, provider, model, purpose) bucket of `llm_calls` rows."

@@ -174,6 +174,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recipes/recommend/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recommend Recipes Stream
+         * @description SSE variant of POST /recipes/recommend. Same request body, same
+         *     session gate, same rate-limit bucket as the synchronous endpoint (this
+         *     reuses `require_recommend_rate_limit` directly rather than a parallel
+         *     bucket -- a client hammering either endpoint hits the same limit).
+         *
+         *     Emits one `node` SSE event per `RunEvent` (started/finished/failed) as
+         *     each graph node executes, an `: heartbeat` comment line roughly every
+         *     10s of silence (see docs/DEPLOY.md), and ends with exactly one terminal
+         *     event: `result` (a full `RecommendationResponse`, identical shape to
+         *     what POST /recipes/recommend returns) or `error`.
+         */
+        post: operations["recommend_recipes_stream_recipes_recommend_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library/discover": {
         parameters: {
             query?: never;
@@ -1215,6 +1244,10 @@ export interface components {
             failure_count: number;
             /** Fallback Count */
             fallback_count: number;
+            /** Parse Fallback Count */
+            parse_fallback_count: number;
+            /** Cache Hit Count */
+            cache_hit_count: number;
         };
         /** LLMUsageResponse */
         LLMUsageResponse: {
@@ -2647,6 +2680,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DetailedInstructionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recommend_recipes_stream_recipes_recommend_stream_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
