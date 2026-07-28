@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ProfileForm } from "../components/ProfileForm";
 import { PantryInput, type PantryState } from "../components/PantryInput";
@@ -8,6 +8,7 @@ import { ShoppingList } from "../components/ShoppingList";
 import { ShareButton } from "../components/ShareButton";
 import { WeekCalendarGrid } from "../components/WeekCalendarGrid";
 import { PantryUtilizationGauge } from "../components/PantryUtilizationGauge";
+import { MacroTrendBars } from "../components/MacroTrendBars";
 import { ApiError, RateLimitError } from "../api/client";
 import { planWeek } from "../api/endpoints";
 import type { WeeklyPlanRequest, WeeklyPlanResponse } from "../api/types";
@@ -89,6 +90,11 @@ export default function WeekPlanPage() {
   // exists for the whole week grid at a time -- see `WeekCalendarGrid`'s
   // and `DayPlanCard`'s own docstrings.
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+  // Mobile-only accordion state for the planner form + focus target for
+  // "focus order after results render" -- same convention as
+  // `DayPlanPage.tsx`; see that file's comments for the full rationale.
+  const [formOpen, setFormOpen] = useState(false);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const planMutation = useMutation({
     mutationFn: (request: WeeklyPlanRequest) => planWeek(request),
@@ -108,6 +114,12 @@ export default function WeekPlanPage() {
     const timeout = setTimeout(() => setRateLimitToast(null), 6000);
     return () => clearTimeout(timeout);
   }, [rateLimitToast]);
+
+  useEffect(() => {
+    if (planMutation.isSuccess) {
+      resultsHeadingRef.current?.focus();
+    }
+  }, [planMutation.isSuccess, planMutation.data]);
 
   const missingTargets =
     profile.macro_targets?.calories == null || profile.macro_targets?.protein_g == null;
@@ -131,62 +143,85 @@ export default function WeekPlanPage() {
   return (
     <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
       <div className="flex flex-col gap-4 lg:sticky lg:top-4 lg:self-start">
-        <ProfileForm onProfileChange={setProfile} />
-        {/* Independent PantryInput instance -- pantry state is not lifted or
-            shared across pages yet, same precedent as DayPlanPage/BatchPlanPage. */}
-        <PantryInput onChange={setPantryState} />
-
-        <div className="flex flex-col gap-3 rounded-lg border border-sage-line bg-white p-4">
-          <h2 className="font-display text-base font-semibold text-cast-iron">Week plan options</h2>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/60">
-              Days ({MIN_DAYS}-{MAX_DAYS})
-            </span>
-            <input
-              type="number"
-              min={MIN_DAYS}
-              max={MAX_DAYS}
-              value={days}
-              onChange={(event) =>
-                setDays(Math.min(MAX_DAYS, Math.max(MIN_DAYS, Number(event.target.value) || MIN_DAYS)))
-              }
-              className="rounded-md border border-sage-line bg-white px-2 py-1.5 font-mono text-sm text-cast-iron focus:border-basil"
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/60">
-              Max per recipe
-            </span>
-            <select
-              value={maxPerRecipe}
-              onChange={(event) => setMaxPerRecipe(Number(event.target.value))}
-              className="rounded-md border border-sage-line bg-white px-2 py-1.5 text-sm text-cast-iron focus:border-basil"
-            >
-              {MAX_PER_RECIPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {missingTargets && (
-          <p className="rounded-md border border-honey-dark bg-honey/10 px-3 py-2 text-sm text-honey-dark">
-            {MISSING_TARGETS_MESSAGE}
-          </p>
-        )}
-
+        {/* Mobile accordion trigger (ROADMAP Step 4.5) -- hidden at `lg:`
+            and above, where the panel below is always open. */}
         <button
           type="button"
-          onClick={handleBuildPlan}
-          disabled={planMutation.isPending || missingTargets}
-          className="rounded-md bg-cast-iron px-4 py-2.5 text-sm font-semibold text-porcelain disabled:opacity-50"
+          onClick={() => setFormOpen((value) => !value)}
+          aria-expanded={formOpen}
+          aria-controls="week-plan-form-panel"
+          className="flex items-center justify-between rounded-lg border border-sage-line bg-white px-4 py-3 text-left transition-colors duration-200 ease-out hover:bg-sage-line/20 lg:hidden"
         >
-          {planMutation.isPending ? "Building week plan…" : "Build week plan"}
+          <span className="font-display text-base font-semibold text-cast-iron">Plan details</span>
+          <span
+            aria-hidden="true"
+            className={`text-cast-iron/60 transition-transform duration-200 ease-out ${formOpen ? "rotate-180" : ""}`}
+          >
+            ⌄
+          </span>
         </button>
+
+        <div
+          id="week-plan-form-panel"
+          className={formOpen ? "flex flex-col gap-4" : "hidden lg:flex lg:flex-col lg:gap-4"}
+        >
+          <ProfileForm onProfileChange={setProfile} />
+          {/* Independent PantryInput instance -- pantry state is not lifted or
+              shared across pages yet, same precedent as DayPlanPage/BatchPlanPage. */}
+          <PantryInput onChange={setPantryState} />
+
+          <div className="flex flex-col gap-3 rounded-lg border border-sage-line bg-white p-4">
+            <h2 className="font-display text-base font-semibold text-cast-iron">Week plan options</h2>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/60">
+                Days ({MIN_DAYS}-{MAX_DAYS})
+              </span>
+              <input
+                type="number"
+                min={MIN_DAYS}
+                max={MAX_DAYS}
+                value={days}
+                onChange={(event) =>
+                  setDays(Math.min(MAX_DAYS, Math.max(MIN_DAYS, Number(event.target.value) || MIN_DAYS)))
+                }
+                className="rounded-md border border-sage-line bg-white px-2 py-1.5 font-mono text-sm text-cast-iron focus:border-basil"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-cast-iron/60">
+                Max per recipe
+              </span>
+              <select
+                value={maxPerRecipe}
+                onChange={(event) => setMaxPerRecipe(Number(event.target.value))}
+                className="rounded-md border border-sage-line bg-white px-2 py-1.5 text-sm text-cast-iron focus:border-basil"
+              >
+                {MAX_PER_RECIPE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {missingTargets && (
+            <p className="rounded-md border border-honey-dark bg-honey/10 px-3 py-2 text-sm text-honey-dark">
+              {MISSING_TARGETS_MESSAGE}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleBuildPlan}
+            disabled={planMutation.isPending || missingTargets}
+            className="rounded-md bg-cast-iron px-4 py-2.5 text-sm font-semibold text-porcelain disabled:opacity-50"
+          >
+            {planMutation.isPending ? "Building week plan…" : "Build week plan"}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -208,6 +243,14 @@ export default function WeekPlanPage() {
 
         {!planMutation.isPending && result && (
           <>
+            <h2
+              ref={resultsHeadingRef}
+              tabIndex={-1}
+              className="font-display text-lg font-semibold text-cast-iron outline-none"
+            >
+              Your week plan
+            </h2>
+
             <SafetyAuditPanel rejectedRecipes={result.rejected_recipes ?? []} />
 
             {(result.plan.days ?? []).length === 0 ? (
@@ -216,6 +259,35 @@ export default function WeekPlanPage() {
               </p>
             ) : (
               <>
+                <section className="rounded-lg border border-sage-line bg-white p-4">
+                  <h2 className="font-display text-base font-semibold text-cast-iron">Macro trend</h2>
+                  <p className="mb-3 text-xs text-cast-iron/60">
+                    Protein/carbs/fat vs. target, one bar group per day. Day totals aggregate every recipe's
+                    contribution, so this view is always solid (verified) -- open a recipe's own "Where these
+                    numbers come from" panel for its per-recipe grounded/estimated distinction.
+                  </p>
+                  <MacroTrendBars
+                    days={(result.plan.days ?? []).map((day, index) => ({
+                      label: `Day ${index + 1}`,
+                      segments: [
+                        { macro: "protein", grams: day.total_protein_g, targetGrams: day.target_protein_g, verified: true },
+                        {
+                          macro: "carbs",
+                          grams: day.total_carbs_g,
+                          targetGrams: profile.macro_targets?.carbs_g ?? null,
+                          verified: true,
+                        },
+                        {
+                          macro: "fat",
+                          grams: day.total_fat_g,
+                          targetGrams: profile.macro_targets?.fat_g ?? null,
+                          verified: true,
+                        },
+                      ],
+                    }))}
+                  />
+                </section>
+
                 <WeekCalendarGrid
                   days={result.plan.days ?? []}
                   trustedPoolSize={result.plan.trusted_pool_size}

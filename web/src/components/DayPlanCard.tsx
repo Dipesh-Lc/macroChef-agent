@@ -39,7 +39,9 @@ export function DayPlanCard({
 }) {
   const items = plan.items ?? [];
   return (
-    <article className="flex flex-col gap-2 rounded-lg border border-sage-line bg-white p-3">
+    // Hover lift, same convention as `RecipeCard.tsx` (ROADMAP Step 4.5) --
+    // see that component's comment for why `transform`/`box-shadow` only.
+    <article className="flex flex-col gap-2 rounded-lg border border-sage-line bg-white p-3 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <h3 className="font-display text-sm font-semibold text-cast-iron">Day {dayIndex + 1}</h3>
         {plan.within_tolerance ? (
