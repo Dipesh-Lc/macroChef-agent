@@ -32,15 +32,22 @@ When an item is resolved, delete it (git history is the archive).
 - **What to do:**
   1. Create a free Honeycomb account at honeycomb.io, create an
      environment, grab its API key.
-  2. Set two secrets — exact env var names are whatever Step 1.3's
-     implementation lands on; check `.env.example` for the placeholders
-     it adds (this line will be updated by that step with the real
-     names if not already).
-  3. For local/dev: add them to your `.env`. For prod: add them as
-     GitHub repo secrets so the deploy workflow can pass them through
-     (check `.github/workflows/ci.yml`'s deploy job — Step 1.3 wires the
-     `--set-env-vars`/`az containerapp secret set` plumbing but can't
-     create the secrets themselves).
+  2. Set two secrets — the code (`app/observability/tracing.py`,
+     `app/config.py`) lands on the standard OTel env var names, no
+     Honeycomb-specific ones:
+     - `OTEL_EXPORTER_OTLP_ENDPOINT` = `https://api.honeycomb.io` (the app
+       appends `/v1/traces` itself; see `.env.example`)
+     - `OTEL_EXPORTER_OTLP_HEADERS` = `x-honeycomb-team=<API_KEY>`
+       (comma-separated `key=value` pairs, OTel spec format; optionally
+       add `,x-honeycomb-dataset=<name>`)
+  3. For local/dev: add them to your `.env`. For prod: add them as GitHub
+     repo secrets named exactly `OTEL_EXPORTER_OTLP_ENDPOINT` and
+     `OTEL_EXPORTER_OTLP_HEADERS` — the deploy workflow
+     (`.github/workflows/ci.yml`'s `deploy` job) already wires
+     `az containerapp secret set` + `--set-env-vars` for them (same
+     optional-secret pattern as `POSTHOG_API_KEY`: an unset GitHub secret
+     just deploys with tracing off, not a broken deploy). Nothing left
+     to change in the workflow once the two secrets exist.
   4. Run one real `/recipes/recommend` request against a deployment with
      the env vars set, screenshot the resulting waterfall trace in the
      Honeycomb UI, save it to `docs/img/trace-waterfall.png` for the

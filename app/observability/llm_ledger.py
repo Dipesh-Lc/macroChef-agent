@@ -21,6 +21,7 @@ prices calls that already happened.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, func, select
@@ -28,6 +29,7 @@ from sqlalchemy import case, func, select
 from app.data.db import SessionLocal
 from app.data.models import LLMCall
 from app.observability.events import RunEvent, get_default_sink, get_run_id, peek_user_id
+from app.observability.tracing import get_tracer
 from app.schemas.admin import LLMUsageAggregate, LLMUsageResponse, LLMUsageTotals
 from app.utils.logging import get_logger
 
@@ -172,6 +174,79 @@ def record_llm_call(
             },
         )
     )
+
+    _emit_llm_span(
+        run_id=run_id,
+        provider=provider,
+        model=model,
+        purpose=purpose,
+        prompt_tokens=resolved_prompt_tokens,
+        completion_tokens=resolved_completion_tokens,
+        cost_usd=cost_usd,
+        latency_ms=latency_ms,
+        success=success,
+        fallback_used=fallback_used,
+    )
+
+
+def _emit_llm_span(
+    *,
+    run_id: str,
+    provider: str,
+    model: str,
+    purpose: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost_usd: float,
+    latency_ms: float,
+    success: bool,
+    fallback_used: bool,
+) -> None:
+    """ROADMAP 1.3: mirror this same call onto an OTel span carrying the
+    ledger attributes (`llm.model`, `llm.tokens.prompt`, `llm.cost_usd`,
+    `llm.purpose`), kept in this one function (rather than a separate
+    tracing module reading `LLMCall` rows back out) so the ledger row, the
+    RunEvent above, and this span can never drift apart -- they're built
+    from the exact same already-resolved values in one call.
+
+    A true no-op when tracing is disabled: `get_tracer()` returning `None`
+    means this returns immediately without touching the `opentelemetry`
+    API (see app.observability.tracing's no-op contract).
+    """
+    tracer = get_tracer()
+    if tracer is None:
+        return
+
+    # The LLM call already finished by the time record_llm_call runs (it's
+    # called with the full result, not wrapping a live call), so this span
+    # is created after the fact with its start/end times backdated from
+    # `latency_ms` rather than using `start_as_current_span` -- that still
+    # nests correctly under whatever span is current right now (e.g. the
+    # enclosing traced_node span, or the HTTP request span), since
+    # `start_span` resolves its parent from the current context by default;
+    # it just isn't pushed onto the context itself, which is fine since it
+    # has no children. `latency_ms` comes from `time.perf_counter()` (a
+    # monotonic, not wall-clock, duration) at the call site, so this
+    # backdated wall-clock start is an approximation, not a precise replay
+    # -- adequate for a waterfall trace's node/LLM-call ordering.
+    end_time_ns = time.time_ns()
+    start_time_ns = end_time_ns - int(latency_ms * 1_000_000)
+    span = tracer.start_span(f"llm_call:{purpose}", start_time=start_time_ns)
+    try:
+        span.set_attribute("llm.provider", provider)
+        span.set_attribute("llm.model", model)
+        span.set_attribute("llm.purpose", purpose)
+        span.set_attribute("llm.tokens.prompt", prompt_tokens)
+        span.set_attribute("llm.tokens.completion", completion_tokens)
+        span.set_attribute("llm.cost_usd", cost_usd)
+        span.set_attribute("llm.fallback_used", fallback_used)
+        span.set_attribute("macrochef.run_id", run_id)
+        if not success:
+            from opentelemetry.trace import Status, StatusCode
+
+            span.set_status(Status(StatusCode.ERROR))
+    finally:
+        span.end(end_time=end_time_ns)
 
 
 def build_usage_response(days: int) -> LLMUsageResponse:
