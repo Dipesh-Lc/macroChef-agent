@@ -145,6 +145,51 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
 - **Accept:** one-line note added to DEPLOY.md cost section with observed
   monthly ingestion.
 
+### I4. `scripts/run_safety_benchmark.py` full-case wall time (~1-2s/case)
+
+- **Where:** `scripts/run_safety_benchmark.py`'s per-case graph runs
+  (found while wiring ROADMAP 3.4's CI gate: `python
+  scripts/run_safety_benchmark.py --runs 1` over the full 371-case set
+  took roughly 8-11 minutes locally, dominated by per-node `RunEvent`
+  logging (ROADMAP 1.1's `LogSink`, one structured JSON line per
+  started/finished event per node, per case) plus real embedding-based
+  retrieval per case rather than any LLM latency (the mock provider is
+  free/instant).
+- **Consequence:** the new CI gate step ("Safety benchmark gate
+  (deterministic/mock subset)" in `.github/workflows/ci.yml`) uses
+  `--runs 1` instead of the pre-registered `--runs 3` specifically to stay
+  within this budget — see that step's own comment and
+  `scripts/run_all_evals.py`'s module docstring for why 1 run is
+  equivalent for a fully deterministic provider. A faster harness would
+  let CI cheaply run the full k=3 methodology instead.
+- **Fix ideas:** a quiet/CI logging mode for `LogSink` (batch or suppress
+  per-node JSON lines during a benchmark run), or an `EventSink` no-op
+  toggle for `scripts/run_safety_benchmark.py` specifically; profile
+  whether retrieval (Chroma/hash-embedding query) or logging I/O
+  dominates before optimizing either.
+- **Accept:** full 371-case, `--runs 1` mock run completes in well under
+  2 minutes; CI gate can move to `--runs 3` without a large CI time hit.
+
+### I5. `scripts/run_safety_benchmark.py`/`run_all_evals.py` never called `init_db()` (FIXED in ROADMAP 3.4, noting the failure mode for visibility)
+
+- **Where:** both scripts call `run_recommendation_graph`/
+  `run_library_discovery_graph` directly, bypassing
+  `app.main.create_app()`'s lifespan handler — the only place `init_db()`
+  normally runs. Found while wiring ROADMAP 3.4's CI gate: against a
+  FRESH sqlite file (a clean checkout, or a fresh CI runner with no
+  pre-existing `macrochef.db`), `recipe_retriever_node`'s
+  `user_saved_recipes` query raised `OperationalError: no such table` on
+  every single case; `_run_recommendation_graph_surface`'s `except
+  Exception` silently caught it and recorded "0 recipes served" — a
+  false-negative gate (every `recommendation_graph`-surface case reads as
+  "no violation" because nothing was ever served, and `safe_control`
+  over-blocking read ~100%), not a real one. **Both scripts now call
+  `init_db()` before running any case** (idempotent, safe). Left here as
+  a backlog note only so the failure mode is documented/searchable if it
+  ever resurfaces (e.g. a new script added later that also bypasses the
+  app lifespan) — no further action needed unless that happens.
+- **Accept:** N/A — already fixed; entry is for visibility/history only.
+
 ### I3. `GET /admin/llm-usage` is session-gated, not user-scoped
 
 - **Where:** `app/api/routes_admin.py` (ROADMAP 1.2).
