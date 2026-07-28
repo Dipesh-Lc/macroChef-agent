@@ -17,3 +17,7 @@ google-genai>=1.73.1
 rapidfuzz>=3.9.0
 itsdangerous>=2.1.0
 posthog>=7.0.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-exporter-otlp>=1.27.0
+opentelemetry-instrumentation-fastapi>=0.48b0
+opentelemetry-instrumentation-requests>=0.48b0

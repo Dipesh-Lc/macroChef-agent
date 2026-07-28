@@ -17,6 +17,7 @@ from app.api.routes_share import router as share_router
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
 from app.observability.events import new_run_id, reset_run_id, set_run_id
+from app.observability.tracing import init_tracing, shutdown_tracing
 from app.spa import mount_spa
 
 # Header a request can supply to propagate its own correlation id (e.g. an
@@ -81,6 +82,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_session_secret_at_startup()
     init_db()
     yield
+    # OpenTelemetry shutdown/flush (ROADMAP.md Phase 1, Step 1.3) -- this
+    # function had no shutdown code at all before this: a no-op when
+    # tracing was never enabled (app.observability.tracing.shutdown_tracing
+    # checks that itself), otherwise flushes any spans still buffered in
+    # the BatchSpanProcessor before the process exits so they aren't
+    # silently dropped. NOTE: OTel initialization itself happens earlier,
+    # synchronously in create_app() below -- NOT here -- see that call
+    # site's comment for why.
+    shutdown_tracing()
 
 
 def create_app() -> FastAPI:
@@ -156,6 +166,19 @@ def create_app() -> FastAPI:
     # fallback. Must stay after every app.include_router(...) call above --
     # see app/spa.py's module docstring for why ordering matters here.
     mount_spa(app)
+
+    # OpenTelemetry tracing (ROADMAP.md Phase 1, Step 1.3) -- called here,
+    # synchronously during app construction, NOT from inside `lifespan`
+    # above: FastAPIInstrumentor.instrument_app monkeypatches
+    # `app.build_middleware_stack`, and Starlette caches that method's
+    # result on the very first ASGI `__call__` regardless of scope type --
+    # including the `lifespan` scope itself, which runs BEFORE our
+    # `lifespan()` function's body starts executing. Calling this from
+    # inside `lifespan()` would therefore silently fail to instrument the
+    # app. A true no-op (no SDK provider constructed, no FastAPI/requests
+    # instrumentation installed) when OTEL_EXPORTER_OTLP_ENDPOINT is unset
+    # -- see app.observability.tracing's module docstring.
+    init_tracing(app)
 
     return app
 

@@ -33,7 +33,8 @@ import logging
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from functools import wraps
@@ -41,6 +42,8 @@ from threading import Lock
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+from app.observability.tracing import get_tracer
 
 # ---------------------------------------------------------------------------
 # run_id / request-id contextvar
@@ -276,6 +279,14 @@ def traced_node(
     - `sink` defaults to the process-wide `get_default_sink()` at CALL time
       (not decoration time), so tests/scripts can swap sinks via
       `set_default_sink` without needing to re-decorate anything.
+    - ROADMAP 1.3: also emits one OTel span per node execution, nested
+      under whatever span is current (the HTTP request span when tracing
+      is active, or a parent node's span for a subgraph) -- but ONLY when
+      `app.observability.tracing.get_tracer()` returns a real tracer.
+      When it returns `None` (the default -- see that module's no-op
+      contract), `_node_span` below never touches the `opentelemetry` API
+      at all; the RunEvent bookkeeping above is completely unaffected
+      either way, so this is strictly additive.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -286,63 +297,85 @@ def traced_node(
             input_state = args[0] if args else kwargs.get("state")
             before_trace = _debug_trace_of(input_state)
 
-            active_sink.emit(
-                RunEvent(
-                    run_id=run_id,
-                    node=name,
-                    status="started",
-                    summary=f"{name}: started.",
-                )
-            )
-            start = time.perf_counter()
-            try:
-                result = fn(*args, **kwargs)
-            except Exception as exc:
-                elapsed_ms = (time.perf_counter() - start) * 1000
+            with _node_span(name, run_id) as span:
                 active_sink.emit(
                     RunEvent(
                         run_id=run_id,
                         node=name,
-                        status="failed",
-                        elapsed_ms=elapsed_ms,
-                        summary=f"{name}: failed after {elapsed_ms:.1f}ms ({exc}).",
-                        payload={"error_type": type(exc).__name__},
+                        status="started",
+                        summary=f"{name}: started.",
                     )
                 )
-                raise
+                start = time.perf_counter()
+                try:
+                    result = fn(*args, **kwargs)
+                except Exception as exc:
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    active_sink.emit(
+                        RunEvent(
+                            run_id=run_id,
+                            node=name,
+                            status="failed",
+                            elapsed_ms=elapsed_ms,
+                            summary=f"{name}: failed after {elapsed_ms:.1f}ms ({exc}).",
+                            payload={"error_type": type(exc).__name__},
+                        )
+                    )
+                    if span is not None:
+                        from opentelemetry.trace import Status, StatusCode
 
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            after_trace = _debug_trace_of(result)
-            new_entries = after_trace[len(before_trace) :]
+                        span.record_exception(exc)
+                        span.set_status(Status(StatusCode.ERROR, str(exc)))
+                    raise
 
-            if new_entries:
-                summary = " ".join(new_entries)
-            else:
-                summary = f"{name}: completed in {elapsed_ms:.1f}ms (no state change)."
-                if isinstance(result, dict):
-                    result = {**result, "debug_trace": [*before_trace, summary]}
-                # A node's contract (ensure_state/library_state_update) is to
-                # always return a plain dict -- see app.graph.state.
-                # state_update / app.graph.library_state.
-                # library_state_update, both called by every node in
-                # app/graph/nodes.py and app/graph/library_nodes.py. If a
-                # future node ever breaks that contract, fall through here
-                # without touching debug_trace rather than guessing at a
-                # BaseModel's field layout.
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                after_trace = _debug_trace_of(result)
+                new_entries = after_trace[len(before_trace) :]
 
-            payload = payload_fn(input_state, result) if payload_fn else {}
-            active_sink.emit(
-                RunEvent(
-                    run_id=run_id,
-                    node=name,
-                    status="finished",
-                    elapsed_ms=elapsed_ms,
-                    summary=summary,
-                    payload=payload,
+                if new_entries:
+                    summary = " ".join(new_entries)
+                else:
+                    summary = f"{name}: completed in {elapsed_ms:.1f}ms (no state change)."
+                    if isinstance(result, dict):
+                        result = {**result, "debug_trace": [*before_trace, summary]}
+                    # A node's contract (ensure_state/library_state_update) is to
+                    # always return a plain dict -- see app.graph.state.
+                    # state_update / app.graph.library_state.
+                    # library_state_update, both called by every node in
+                    # app/graph/nodes.py and app/graph/library_nodes.py. If a
+                    # future node ever breaks that contract, fall through here
+                    # without touching debug_trace rather than guessing at a
+                    # BaseModel's field layout.
+
+                payload = payload_fn(input_state, result) if payload_fn else {}
+                active_sink.emit(
+                    RunEvent(
+                        run_id=run_id,
+                        node=name,
+                        status="finished",
+                        elapsed_ms=elapsed_ms,
+                        summary=summary,
+                        payload=payload,
+                    )
                 )
-            )
-            return result
+                return result
 
         return wrapper
 
     return decorator
+
+
+@contextmanager
+def _node_span(name: str, run_id: str) -> Iterator[Any]:
+    """Yield an active OTel span for one node execution, or `None` when
+    tracing is disabled -- see `traced_node`'s docstring. `None` is a
+    contract, not just an implementation detail: callers must not call any
+    `opentelemetry` API on it, only check `is not None`."""
+    tracer = get_tracer()
+    if tracer is None:
+        yield None
+        return
+    with tracer.start_as_current_span(name) as span:
+        span.set_attribute("macrochef.node", name)
+        span.set_attribute("macrochef.run_id", run_id)
+        yield span

@@ -195,6 +195,27 @@ class Settings(BaseSettings):
     # without a Node build, which is the normal case for pytest/CI today.
     web_dist: str = Field(default="./web/dist", alias="MACROCHEF_WEB_DIST")
 
+    # OpenTelemetry hosted-backend tracing (ROADMAP.md Phase 1, Step 1.3) --
+    # see app.observability.tracing, whose `init_tracing` is a true no-op
+    # (no provider installed, no exporter thread, no FastAPI/requests
+    # instrumentation) whenever `otel_exporter_otlp_endpoint` is blank,
+    # which is the default for local dev and CI. Read through Settings
+    # (like every other env var in this file) rather than raw `os.environ`
+    # inside tracing.py, so a value that only lives in a local `.env` file
+    # (pydantic-settings parses that itself; it does not export it into the
+    # real process environment) is honored consistently instead of only
+    # being visible to this class and silently invisible to the OTel SDK's
+    # own env-var reads. `otel_exporter_otlp_headers` uses the OTel-spec
+    # comma-separated "key1=value1,key2=value2" format -- for Honeycomb
+    # (the recommended backend; see docs/HUMAN_INPUTS.md entry H1) that's
+    # "x-honeycomb-team=<API_KEY>". Never logged.
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT"
+    )
+    otel_exporter_otlp_headers: str | None = Field(
+        default=None, alias="OTEL_EXPORTER_OTLP_HEADERS"
+    )
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)
