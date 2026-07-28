@@ -90,6 +90,15 @@ class LLMCall(Base):
     which have no native structured-output mechanism and fall back to a
     JSON-mode prompt + regex/brace-scan extraction -- see
     `generate_structured`'s docstring and `_STRUCTURED_PARSE_FALLBACK`.
+
+    `cache_hit` (ROADMAP.md Phase 2, Step 2.3) is True only for a
+    `generate_structured` call served from `app.services.llm_cache` instead
+    of a real provider call -- same "only ever non-default through
+    generate_structured" rule as `retries`/`parse_fallback` above. A
+    cache-hit row always has `prompt_tokens=0, completion_tokens=0,
+    cost_usd=0.0, success=True` (see `generate_structured`'s cache-hit
+    `record_llm_call` call site) -- the row exists so GET /admin/llm-usage
+    can report cache-hit savings, not to double-count real usage.
     """
 
     __tablename__ = "llm_calls"
@@ -108,6 +117,7 @@ class LLMCall(Base):
     cost_usd: Mapped[float] = mapped_column(Float)
     retries: Mapped[int] = mapped_column(Integer, default=0)
     parse_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
     )
@@ -144,3 +154,43 @@ class SharedPlan(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
+
+
+class LLMCacheEntry(Base):
+    """Response-level cache for `app.services.model_provider.
+    generate_structured` calls (ROADMAP.md Phase 2, Step 2.3) -- see
+    `app.services.llm_cache` for the read/write API and the TTL-per-purpose
+    policy. Stores the exact validated JSON response, never a post-
+    processed decision -- same "cache FACTS, not DECISIONS" principle as
+    `app.services.nutrition_cache.FdcCache` (a logic change downstream of
+    the cached response never needs a cache invalidation pass, since
+    nothing decision-shaped lives here).
+
+    `cache_key` is the SHA256 hex digest of (provider, model, purpose,
+    canonicalized prompt, canonicalized schema) -- see
+    `app.services.llm_cache.build_cache_key`. It is the only thing this
+    table is ever looked up by, hence `unique=True`.
+
+    TTL is resolved to a concrete `expires_at` at WRITE time (from
+    `app.services.llm_cache.TTL_BY_PURPOSE`) rather than stored as a raw
+    `ttl_seconds` re-checked against `created_at` on every read: a future
+    change to a purpose's TTL policy then only affects NEWLY written rows,
+    never silently reinterprets rows already on disk -- the same "never
+    reinterpret old data under new rules" principle as
+    `FdcCache`'s `_SCHEMA_VERSION`. The single writer is
+    `app.services.llm_cache.store_response`; never hand-write to this table
+    elsewhere.
+    """
+
+    __tablename__ = "llm_cache_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(128), index=True)
+    purpose: Mapped[str] = mapped_column(String(64), index=True)
+    response_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

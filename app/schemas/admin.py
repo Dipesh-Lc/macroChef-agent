@@ -28,6 +28,12 @@ class LLMUsageAggregate(BaseModel):
     # Gemini/OpenAI/Anthropic's native structured-output calls). See
     # `app.data.models.LLMCall`'s docstring.
     parse_fallback_count: int
+    # ROADMAP.md Phase 2, Step 2.3 -- count of calls served from
+    # `app.services.llm_cache` instead of a real provider call. Each one is
+    # already reflected in `cost_usd`/`prompt_tokens`/`completion_tokens`
+    # being 0 for that row; this count is what makes the savings legible
+    # (e.g. "12 of 40 detailed_instructions calls today were free").
+    cache_hit_count: int
 
 
 class LLMUsageTotals(BaseModel):

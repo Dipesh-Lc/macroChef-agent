@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.config import Settings, get_settings
 from app.observability.llm_ledger import record_llm_call
 from app.schemas.inventory import InventoryObservation
+from app.services import llm_cache
 from app.utils.ingredient_normalizer import normalize_ingredient
 from app.utils.logging import get_logger
 
@@ -39,6 +40,16 @@ DEFAULT_MODELS = {
     "gemini": {"chat": "gemini-2.5-flash", "vision": "gemini-2.5-flash"},
     "anthropic": {"chat": "claude-sonnet-4-5", "vision": "claude-sonnet-4-5"},
     "ollama": {"chat": "llama3.2", "vision": "gemma3"},
+    # Previously absent -- `_model_for(settings, "mock", kind)` only ever
+    # avoided a `KeyError` here by luck of `usage.model or _model_for(...)`
+    # short-circuit evaluation (every mock generator always sets
+    # `usage.model = "mock"` first, so the right-hand `_model_for` call was
+    # never actually evaluated). ROADMAP 2.3's cache-key computation calls
+    # `_model_for` unconditionally (before any provider call has run, so
+    # there is no `usage.model` yet to short-circuit on) -- giving mock a
+    # real entry here fixes that latent fragility outright rather than
+    # continuing to depend on call-site evaluation order.
+    "mock": {"chat": "mock", "vision": "mock"},
 }
 
 VISION_PROMPT = """
@@ -462,11 +473,50 @@ def generate_structured(
     `RecipeGenerationService` reuses its own battle-tested `_extract_json`
     (fenced-block + substring scan, already covered by
     tests/test_recipe_library_builder.py) instead of a second, weaker one.
+
+    Response-level cache (ROADMAP.md Phase 2, Step 2.3): before calling any
+    provider, checks `app.services.llm_cache` for a prior response to the
+    exact same `(provider, model, purpose, prompt, schema)` -- see
+    `llm_cache.build_cache_key`. Only attempted when `settings.
+    llm_cache_enabled` is True, `image_path` is `None` (a vision call is
+    NEVER cached here, structurally, regardless of what `purpose` says --
+    see `llm_cache.TTL_BY_PURPOSE`'s `vision_extract` entry for why: the
+    cache key does not include image bytes), and `purpose` has a configured
+    TTL. A hit skips the real call entirely and records a ledger row with
+    `cache_hit=True, success=True, cost_usd=0` (see the `record_llm_call`
+    call site below) so `GET /admin/llm-usage` can report cache-hit
+    savings; a miss falls through to the normal generate-and-validate flow
+    below, then writes a fresh cache entry afterwards (only for purposes
+    with a TTL -- `llm_cache.store_response` itself no-ops otherwise).
     """
     generator = _STRUCTURED_GENERATORS.get(provider)
     if generator is None:
         raise ValueError(f"Unsupported provider: {provider}")
     parse_fallback = _STRUCTURED_PARSE_FALLBACK.get(provider, False)
+    kind = "vision" if image_path is not None else "chat"
+    cache_model = _model_for(settings, provider, kind)
+
+    cache_key: str | None = None
+    if (
+        settings.llm_cache_enabled
+        and image_path is None
+        and llm_cache.ttl_for_purpose(purpose) is not None
+    ):
+        cache_key = llm_cache.build_cache_key(provider, cache_model, purpose, prompt, schema)
+        cached = llm_cache.get_cached_response(cache_key, schema)
+        if cached is not None:
+            record_llm_call(
+                provider=provider,
+                model=cache_model,
+                purpose=purpose,
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency_ms=0.0,
+                success=True,
+                fallback_used=_is_fallback_provider(provider, settings),
+                cache_hit=True,
+            )
+            return cached
 
     usage = _UsageInfo()
     attempt_prompt = prompt
@@ -488,11 +538,10 @@ def generate_structured(
                 continue
     elapsed_ms = (time.perf_counter() - start) * 1000
 
-    kind = "vision" if image_path is not None else "chat"
     if result is None:
         record_llm_call(
             provider=provider,
-            model=usage.model or _model_for(settings, provider, kind),
+            model=usage.model or cache_model,
             purpose=purpose,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
@@ -508,9 +557,10 @@ def generate_structured(
             f"{retries + 1} attempt(s): {last_error}"
         ) from last_error
 
+    resolved_model = usage.model or cache_model
     record_llm_call(
         provider=provider,
-        model=usage.model or _model_for(settings, provider, kind),
+        model=resolved_model,
         purpose=purpose,
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
@@ -522,6 +572,8 @@ def generate_structured(
         retries=retries,
         parse_fallback=parse_fallback,
     )
+    if cache_key is not None:
+        llm_cache.store_response(cache_key, provider, resolved_model, purpose, result)
     return result
 
 
