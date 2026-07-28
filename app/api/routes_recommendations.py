@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.config import get_settings
 from app.dependencies import require_recommend_rate_limit
 from app.graph.builder import run_recommendation_graph
+from app.observability.events import bind_user_id, reset_user_id
 from app.rag.loaders import load_corpus
 from app.schemas.instructions import DetailedInstructionsRequest, DetailedInstructionsResponse
 from app.schemas.recipe import Recipe
@@ -174,20 +175,24 @@ def get_detailed_instructions(
     # /recipes/recommend (require_recommend_rate_limit resolves
     # app.dependencies.get_session_user internally before keying the rate
     # limit) -- this reuses that endpoint's existing, already-tested
-    # session/rate-limit tier rather than inventing a new one. `session_user_id`
-    # is otherwise unused here: this endpoint is a pure function of its
-    # request body (it reads/writes no per-user data), so the only reason it
-    # requires a session at all is to share the same abuse-guard bucket as
-    # the other LLM-backed /recipes/* call.
-    del session_user_id
+    # session/rate-limit tier rather than inventing a new one. This endpoint
+    # otherwise reads/writes no per-user data (it's a pure function of its
+    # request body) -- `session_user_id` is used ONLY to bind the LLM ledger
+    # (ROADMAP 1.2) contextvar for the duration of the
+    # generate_detailed_instructions_with_provider_chain call below, so that
+    # call's `llm_calls` row is attributable; nothing else reads it.
     settings = get_settings()
-    steps, generated = generate_detailed_instructions_with_provider_chain(
-        title=request.title,
-        ingredients=request.ingredients,
-        instructions=request.instructions,
-        servings=request.servings,
-        cuisine=request.cuisine,
-    )
+    user_id_token = bind_user_id(session_user_id)
+    try:
+        steps, generated = generate_detailed_instructions_with_provider_chain(
+            title=request.title,
+            ingredients=request.ingredients,
+            instructions=request.instructions,
+            servings=request.servings,
+            cuisine=request.cuisine,
+        )
+    finally:
+        reset_user_id(user_id_token)
     provider_note = None
     if not generated:
         if settings.model_provider == "mock":

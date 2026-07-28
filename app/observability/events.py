@@ -91,6 +91,56 @@ def reset_run_id(token: Token) -> None:
 
 
 # ---------------------------------------------------------------------------
+# user_id contextvar (ROADMAP 1.2)
+#
+# `user_id` is the LLM call ledger's other correlation key (alongside
+# run_id above), but unlike run_id it is NOT threaded through every graph
+# node's signature -- model_provider.py's `_generate_text`/`_extract_
+# inventory` choke points are several call-frames below the handful of
+# entry points that actually resolve a verified user_id
+# (app.graph.builder.run_recommendation_graph,
+# app.graph.library_builder.run_library_discovery_graph/
+# run_library_save_graph, app.api.routes_recommendations.
+# get_detailed_instructions). Those entry points bind it here, once, the
+# same way app.main.RequestIdMiddleware binds run_id per request; anything
+# deeper in the call stack (app.observability.llm_ledger.record_llm_call)
+# reads it back via `peek_user_id()`.
+#
+# Deliberately no `get_user_id()` mint-on-miss sibling the way `get_run_id`
+# has for run_id: there is no sensible synthetic user id to invent, and
+# some call paths are genuinely anonymous/unauthenticated (e.g. POST
+# /inventory/extract, which requires no session at all) -- the ledger must
+# persist a NULL user_id there, not a fabricated one.
+#
+# NEVER put this in a RunEvent's `payload`/`summary` -- see this module's
+# docstring on why that stream must stay free of anything PII-shaped. It
+# is only ever written to the `llm_calls` SQL table (a private,
+# session-gated-but-not-per-user-scoped admin view; see
+# app.api.routes_admin).
+# ---------------------------------------------------------------------------
+
+_USER_ID_CTX: ContextVar[str | None] = ContextVar("macrochef_user_id", default=None)
+
+
+def bind_user_id(user_id: str | None) -> Token:
+    """Bind the verified session user id for the current context. Returns a
+    Token for `reset_user_id` (mirrors `set_run_id`/`reset_run_id`).
+    Passing `None` is valid and means "no verified user in this context" --
+    never guessed at, never defaulted to a placeholder string."""
+    return _USER_ID_CTX.set(user_id)
+
+
+def peek_user_id() -> str | None:
+    """Return the currently bound user id, or None if nothing was bound in
+    this context. Never mints a value -- see module note above."""
+    return _USER_ID_CTX.get()
+
+
+def reset_user_id(token: Token) -> None:
+    _USER_ID_CTX.reset(token)
+
+
+# ---------------------------------------------------------------------------
 # RunEvent + sinks
 # ---------------------------------------------------------------------------
 

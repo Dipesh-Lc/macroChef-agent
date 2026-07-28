@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.data.db import Base
@@ -59,6 +59,44 @@ class UserSavedRecipe(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class LLMCall(Base):
+    """Append-only LLM call ledger (ROADMAP.md Phase 1, Step 1.2).
+
+    One row per provider HTTP call made through
+    `app.services.model_provider`'s `_generate_text`/`_extract_inventory`
+    choke points -- including the mock-provider short-circuit branches
+    (`provider="mock"`, zero tokens/cost), so ledger coverage is complete
+    even when no real provider is configured. The single writer is
+    `app.observability.llm_ledger.record_llm_call`; never hand-write to
+    this table elsewhere.
+
+    `run_id` correlates a row back to the `RunEvent` stream (Step 1.1);
+    `user_id` is nullable because some call paths are genuinely
+    unauthenticated (e.g. POST /inventory/extract) -- see
+    `app.observability.events`'s user_id contextvar docstring. `cost_usd`
+    is a best-effort estimate from the static `PRICE_PER_MTOK` table in
+    `app.observability.llm_ledger`, not billing-accurate.
+    """
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), index=True)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(128), index=True)
+    purpose: Mapped[str] = mapped_column(String(64), index=True)
+    prompt_tokens: Mapped[int] = mapped_column(Integer)
+    completion_tokens: Mapped[int] = mapped_column(Integer)
+    latency_ms: Mapped[float] = mapped_column(Float)
+    success: Mapped[bool] = mapped_column(Boolean)
+    fallback_used: Mapped[bool] = mapped_column(Boolean)
+    cost_usd: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
     )
 
 
