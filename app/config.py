@@ -244,6 +244,17 @@ class Settings(BaseSettings):
     # into any harder than the sequential version already risked.
     llm_max_concurrency: int = Field(default=4, alias="LLM_MAX_CONCURRENCY")
 
+    # Response-level LLM cache kill switch (ROADMAP.md Phase 2, Step 2.3) --
+    # see app.services.llm_cache (TTL-per-purpose policy, cache key shape)
+    # and model_provider.generate_structured's cache wiring. True (default):
+    # a `generate_structured` call for a purpose with a configured TTL
+    # (app.services.llm_cache.TTL_BY_PURPOSE) checks the cache before
+    # calling any provider, and writes a fresh entry on a miss. False:
+    # `generate_structured` behaves EXACTLY as it did before this step
+    # existed -- no cache read, no cache write, in either direction (see
+    # tests/test_llm_cache.py's kill-switch test, which asserts both).
+    llm_cache_enabled: bool = Field(default=True, alias="LLM_CACHE_ENABLED")
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)

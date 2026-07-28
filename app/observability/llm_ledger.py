@@ -96,6 +96,7 @@ def record_llm_call(
     completion_text: str = "",
     retries: int = 0,
     parse_fallback: bool = False,
+    cache_hit: bool = False,
 ) -> None:
     """Persist one `llm_calls` row and mirror it onto the RunEvent sink.
 
@@ -103,8 +104,11 @@ def record_llm_call(
     0/False for every pre-existing call site (`_generate_text`'s plain-chat
     chokepoint, the mock-provider short-circuits) -- they're only ever
     non-default for calls made through `app.services.model_provider.
-    generate_structured`. See `app.data.models.LLMCall`'s docstring for
-    what each one means.
+    generate_structured`. `cache_hit` (ROADMAP.md Phase 2, Step 2.3)
+    follows the exact same rule -- only ever True for a `generate_
+    structured` call served from `app.services.llm_cache` instead of a real
+    provider call. See `app.data.models.LLMCall`'s docstring for what each
+    one means.
 
     `prompt_tokens`/`completion_tokens` should be the REAL counts read off
     the provider's response when available; pass `None` for whichever one
@@ -148,6 +152,7 @@ def record_llm_call(
                     cost_usd=cost_usd,
                     retries=retries,
                     parse_fallback=parse_fallback,
+                    cache_hit=cache_hit,
                 )
             )
             db.commit()
@@ -184,6 +189,7 @@ def record_llm_call(
                 "fallback_used": fallback_used,
                 "retries": retries,
                 "parse_fallback": parse_fallback,
+                "cache_hit": cache_hit,
             },
         )
     )
@@ -201,6 +207,7 @@ def record_llm_call(
         fallback_used=fallback_used,
         retries=retries,
         parse_fallback=parse_fallback,
+        cache_hit=cache_hit,
     )
 
 
@@ -218,14 +225,16 @@ def _emit_llm_span(
     fallback_used: bool,
     retries: int = 0,
     parse_fallback: bool = False,
+    cache_hit: bool = False,
 ) -> None:
     """ROADMAP 1.3: mirror this same call onto an OTel span carrying the
     ledger attributes (`llm.model`, `llm.tokens.prompt`, `llm.cost_usd`,
     `llm.purpose`, and -- since ROADMAP 2.1 -- `llm.retries`/`llm.
-    parse_fallback`), kept in this one function (rather than a separate
-    tracing module reading `LLMCall` rows back out) so the ledger row, the
-    RunEvent above, and this span can never drift apart -- they're built
-    from the exact same already-resolved values in one call.
+    parse_fallback`, and -- since ROADMAP 2.3 -- `llm.cache_hit`), kept in
+    this one function (rather than a separate tracing module reading
+    `LLMCall` rows back out) so the ledger row, the RunEvent above, and
+    this span can never drift apart -- they're built from the exact same
+    already-resolved values in one call.
 
     A true no-op when tracing is disabled: `get_tracer()` returning `None`
     means this returns immediately without touching the `opentelemetry`
@@ -260,6 +269,7 @@ def _emit_llm_span(
         span.set_attribute("llm.fallback_used", fallback_used)
         span.set_attribute("llm.retries", retries)
         span.set_attribute("llm.parse_fallback", parse_fallback)
+        span.set_attribute("llm.cache_hit", cache_hit)
         span.set_attribute("macrochef.run_id", run_id)
         if not success:
             from opentelemetry.trace import Status, StatusCode
@@ -301,6 +311,14 @@ def build_usage_response(days: int) -> LLMUsageResponse:
                 func.sum(case((LLMCall.parse_fallback.is_(True), 1), else_=0)).label(
                     "parse_fallback_count"
                 ),
+                # ROADMAP 2.3 acceptance criterion: cache-hit savings must be
+                # measurable via GET /admin/llm-usage, not just recorded in
+                # the raw `llm_calls` table -- a cache-hit row always has
+                # cost_usd=0, so this count next to a bucket's cost_usd is
+                # what makes "how much did caching save this purpose" legible.
+                func.sum(case((LLMCall.cache_hit.is_(True), 1), else_=0)).label(
+                    "cache_hit_count"
+                ),
             )
             .where(LLMCall.created_at >= since)
             .group_by(
@@ -337,6 +355,7 @@ def build_usage_response(days: int) -> LLMUsageResponse:
                 failure_count=int(row.failure_count or 0),
                 fallback_count=int(row.fallback_count or 0),
                 parse_fallback_count=int(row.parse_fallback_count or 0),
+                cache_hit_count=int(row.cache_hit_count or 0),
             )
         )
         total_calls += int(row.calls)
