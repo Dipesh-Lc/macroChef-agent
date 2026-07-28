@@ -78,7 +78,7 @@ import math  # noqa: E402
 import re  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
-from datetime import datetime, timezone  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -562,7 +562,7 @@ def build_report(
         }
     )
     return BenchmarkReport(
-        generated_at_utc=datetime.now(timezone.utc).isoformat(),
+        generated_at_utc=datetime.now(UTC).isoformat(),
         git_commit=_git_commit_hash(),
         runs=len(per_run_outcomes),
         total_cases=len(cases),
@@ -982,7 +982,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _default_report_path() -> Path:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return ROOT / "data" / "evaluation" / f"safety_benchmark_report_{timestamp}.md"
 
 
@@ -1007,6 +1007,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.cost_estimate:
         print(render_cost_estimate())
         return 0
+
+    # This script calls `run_recommendation_graph`/`run_library_discovery_graph`
+    # directly, bypassing `app.main.create_app()`'s lifespan handler entirely --
+    # so unlike every route reached through the real app (or through
+    # `TestClient(create_app())` in pytest, which runs that same lifespan),
+    # nothing has ever called `init_db()` for this process. Against a FRESH
+    # sqlite file (a clean checkout, or a fresh CI runner with no pre-existing
+    # macrochef.db) that means `recipe_retriever_node`'s `user_saved_recipes`
+    # query 500s with "no such table" on literally every case, which
+    # `_run_recommendation_graph_surface`'s `except Exception` catches and
+    # silently records as "0 recipes served" -- turning the recommendation_graph
+    # surface into a no-op that can never register a violation (a false-negative
+    # gate, not a passing one) and inflating safe_control's "nothing was served"
+    # over-block rate to ~100%. Found and fixed while wiring this script into
+    # CI (ROADMAP.md Phase 3, Step 3.4) -- see that task's report for the
+    # before/after evidence. `init_db()` is idempotent (`Base.metadata.
+    # create_all`), so this is safe to call unconditionally, including against
+    # an already-initialized DB.
+    from app.data.db import init_db
+
+    init_db()
 
     if args.provider == "real":
         if not args.confirm_real_provider_spend:

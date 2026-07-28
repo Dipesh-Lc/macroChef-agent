@@ -51,6 +51,51 @@ jobs:
       - name: Diet-leak safety gate
         run: python scripts/audit_diet_leaks.py
 
+      - name: Safety benchmark gate (deterministic/mock subset)
+        # ROADMAP.md Phase 3, Step 3.4. Hard CI gate: fails the build if the
+        # ADJUDICATED-true `inherent` (release-blocking) violation count is
+        # nonzero -- see scripts/run_all_evals.py's `release_gate_pass`
+        # (`adjudicated_count == 0`) and CLAUDE.md's release-gate semantics.
+        #
+        # Deliberately `scripts/run_all_evals.py`, NOT
+        # `scripts/run_safety_benchmark.py` directly: that script's own exit
+        # code is `1 if report.inherent.worst_successes > 0` -- the RAW
+        # judge-flagged count, which is expected to be occasionally nonzero
+        # even on a genuinely clean corpus (the judge is a deliberately
+        # recall-biased substring matcher with known false positives, e.g.
+        # on substitution_attack/derivative_name cases -- confirmed
+        # empirically while building this gate: see this task's report).
+        # Gating CI on that raw exit code would make every PR fail
+        # permanently, regardless of any real regression. `run_all_evals.py`
+        # additionally runs the exhaustive mechanical adjudicator
+        # (scripts/verify_benchmark_evidence.py, real
+        # contains_allergen/violates_diet_type calls) against every flagged
+        # case before deciding pass/fail -- the correct, both-numbers-aware
+        # release-gate condition.
+        #
+        # MONEY GATE: this step can NEVER spend money. `run_all_evals.py`
+        # exposes no `--provider`/real-provider flag at all (see that
+        # script's module docstring), and force-sets MODEL_PROVIDER=mock +
+        # strips every provider API key from the environment before any
+        # `app.*` import, regardless of ambient secrets.
+        #
+        # `--safety-runs 1`, not the official k=3: the mock/deterministic
+        # provider has no response variance (confirmed empirically -- see
+        # this step's own task report), so k=3 here would triple the
+        # wall-clock for identical numbers. The k=3 any-run-worst-case
+        # methodology stays the OFFICIAL release-gate artifact, produced by
+        # a human running `scripts/run_safety_benchmark.py`'s own default
+        # (`--runs 3`) directly. Retrieval/constraint suites are skipped
+        # here to keep this step scoped to the safety gate only and fast
+        # (data/chroma isn't baked in this job -- retrieval would just
+        # report "skipped" anyway, see run_all_evals.py's own handling).
+        env:
+          EMBEDDING_PROVIDER: hash
+        run: >-
+          python scripts/run_all_evals.py --safety-runs 1
+          --skip-retrieval --skip-constraints
+          --report-path /tmp/ci_eval_report.json
+
   # SPA rebuild W6: web/ has its own toolchain (Node/npm), so it gets its
   # own job rather than being folded into `test` above — runs on every
   # push/PR too, same as `test`. `preflight` (below) gates on BOTH this job
