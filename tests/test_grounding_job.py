@@ -1,6 +1,8 @@
+import asyncio
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 import requests
 
@@ -17,6 +19,7 @@ from app.services.grounding_job import (
     compute_seed_macro_accuracy,
     render_report,
     run_grounding,
+    run_grounding_async,
 )
 from app.services.nutrition_cache import FdcCache
 from app.services.usda_client import UsdaClient
@@ -788,3 +791,172 @@ def test_render_report_includes_flags_and_counts(tmp_path) -> None:
     assert "r_9" in markdown
     assert "RAW/COOKED BLOWUP" in markdown
     assert "grounded: 1 (100.0%)" in markdown
+
+
+# ---------------------------------------------------------------------------
+# run_grounding_async (ROADMAP.md Phase 2, Step 2.2) -- the actual sequential
+# bottleneck fix this step targets: fans every recipe's ingredient lookups
+# out concurrently instead of one at a time. No `pytest-asyncio` dependency
+# -- each test drives its own coroutine via a plain `asyncio.run(...)`.
+# ---------------------------------------------------------------------------
+
+
+def _chicken_breast_payload() -> dict:
+    return {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": "Chicken breast",
+                "dataType": "SR Legacy",
+                "foodNutrients": [
+                    {"nutrientNumber": "208", "value": 165},
+                    {"nutrientNumber": "203", "value": 31},
+                    {"nutrientNumber": "204", "value": 3.57},
+                    {"nutrientNumber": "205", "value": 0},
+                ],
+            }
+        ]
+    }
+
+
+class _StaticResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
+
+
+def test_run_grounding_async_produces_the_same_report_run_grounding_would(tmp_path) -> None:
+    """The async fan-out must be a pure concurrency change -- same corpus,
+    same real UsdaClient matching logic (just driven by an async transport
+    instead of a sync one), same computed report."""
+    recipe = _recipe(
+        "r_40", "Chicken Bowl",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=330,
+    )
+    payload = _chicken_breast_payload()
+    settings = Settings(FDC_API_KEY="test-key", FDC_BASE_URL="https://api.nal.usda.gov/fdc/v1")
+
+    sync_client = UsdaClient(
+        settings=settings,
+        session=type(
+            "S", (), {"get": lambda self, url, params=None, timeout=None: _StaticResponse(payload)}
+        )(),
+        cache=FdcCache(tmp_path / "sync_cache.json"),
+        sleep=lambda _: None,
+    )
+    sync_report = run_grounding(
+        client=sync_client, sidecar_path=tmp_path / "sync.jsonl", corpus=[recipe], seeds=[recipe]
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    async_client = UsdaClient(
+        settings=settings,
+        cache=FdcCache(tmp_path / "async_cache.json"),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+    async_report = asyncio.run(
+        run_grounding_async(
+            client=async_client,
+            sidecar_path=tmp_path / "async.jsonl",
+            corpus=[recipe],
+            seeds=[recipe],
+        )
+    )
+
+    assert async_report.status_counts == sync_report.status_counts
+    assert async_report.seed_rows[0].computed_kcal == sync_report.seed_rows[0].computed_kcal
+    assert async_report.seed_rows[0].status == sync_report.seed_rows[0].status
+    assert async_report.terminal_outcome_counts == sync_report.terminal_outcome_counts
+
+
+def test_run_grounding_async_fans_out_across_recipes_bounded_by_concurrency(tmp_path) -> None:
+    """Multiple recipes' USDA lookups genuinely overlap in flight, bounded
+    by `max_concurrency` -- this is the concrete concurrency win the step
+    exists for."""
+    recipes = [
+        _recipe(
+            f"r_5{i}", f"Recipe {i}",
+            [Ingredient(name=f"food {i}", amount=100, unit="g")],
+            calories=200,
+        )
+        for i in range(6)
+    ]
+    settings = Settings(FDC_API_KEY="test-key", FDC_BASE_URL="https://api.nal.usda.gov/fdc/v1")
+    in_flight = {"current": 0, "max": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        in_flight["current"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["current"])
+        await asyncio.sleep(0.02)
+        in_flight["current"] -= 1
+        return httpx.Response(200, json=_chicken_breast_payload())
+
+    client = UsdaClient(
+        settings=settings,
+        cache=FdcCache(tmp_path / "cache.json"),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    report = asyncio.run(
+        run_grounding_async(
+            client=client,
+            sidecar_path=tmp_path / "grounding.jsonl",
+            corpus=recipes,
+            seeds=[],
+            max_concurrency=3,
+        )
+    )
+
+    assert report.total_recipes == 6
+    assert in_flight["max"] > 1  # genuinely overlapped
+    assert in_flight["max"] <= 3  # never exceeded the configured bound
+
+
+def test_run_grounding_async_flushes_cache_on_normal_completion(tmp_path) -> None:
+    """Async sibling of test_run_grounding_flushes_cache_on_normal_
+    completion -- the finally-block cache flush must survive the async
+    rewrite too."""
+    recipe = _recipe(
+        "r_41", "Chicken Bowl",
+        [Ingredient(name="chicken breast", amount=200, unit="g")],
+        calories=330,
+    )
+    payload = _chicken_breast_payload()
+    settings = Settings(FDC_API_KEY="test-key", FDC_BASE_URL="https://api.nal.usda.gov/fdc/v1")
+    cache_path = tmp_path / "fdc_cache.json"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = UsdaClient(
+        settings=settings,
+        cache=FdcCache(cache_path),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    asyncio.run(
+        run_grounding_async(
+            client=client,
+            sidecar_path=tmp_path / "grounding.jsonl",
+            corpus=[recipe],
+            seeds=[recipe],
+        )
+    )
+
+    assert cache_path.exists()
+    reloaded = FdcCache(cache_path)
+    assert (
+        reloaded.get_payload("chicken breast", ["Foundation", "SR Legacy", "Survey (FNDDS)"], 5)
+        is not None
+    )

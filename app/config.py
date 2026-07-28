@@ -230,6 +230,20 @@ class Settings(BaseSettings):
     # enable this.
     enable_hsts: bool = Field(default=False, alias="ENABLE_HSTS")
 
+    # Async fan-out concurrency bound (ROADMAP.md Phase 2, Step 2.2) -- the
+    # single shared budget for how many outbound network calls this process
+    # makes at once via the async paths added in that step: both `app.
+    # services.usda_client.UsdaClient`'s async USDA FDC lookups (see
+    # `nutrition_grounding.compute_recipe_macros_async` / `grounding_job.
+    # run_grounding_async`) and `app.services.model_provider`'s async
+    # provider chat/vision calls share this one knob rather than each having
+    # its own, since both are ultimately "how many concurrent HTTP requests
+    # is this process allowed to have in flight." Kept low by default (4):
+    # USDA FDC has its own hourly rate limit (see usda_client.py's
+    # `_RATE_LIMIT_*` constants) that a large corpus fan-out must not run
+    # into any harder than the sequential version already risked.
+    llm_max_concurrency: int = Field(default=4, alias="LLM_MAX_CONCURRENCY")
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)

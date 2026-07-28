@@ -17,17 +17,19 @@ around `run_grounding` + `render_report`, mirroring
 
 from __future__ import annotations
 
+import asyncio
 import json
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.config import get_settings
 from app.rag.loaders import load_corpus, load_recipes
 from app.schemas.ingredient import Ingredient
 from app.schemas.nutrition import GroundingStatus, IngredientContribution, RecipeNutrition
 from app.schemas.recipe import Recipe
-from app.services.nutrition_grounding import compute_recipe_macros
+from app.services.nutrition_grounding import compute_recipe_macros, compute_recipe_macros_async
 from app.services.usda_client import (
     REASON_ALL_CANDIDATES_REJECTED,
     REASON_GROUNDED,
@@ -542,61 +544,24 @@ def _write_sidecar(path: Path, results: dict[str, RecipeNutrition]) -> None:
     tmp_path.replace(path)
 
 
-def run_grounding(
+def _assemble_report(
     *,
-    client: UsdaClient | None = None,
-    sidecar_path: str | Path = "data/processed/grounding.jsonl",
-    corpus: list[Recipe] | None = None,
-    seeds: list[Recipe] | None = None,
+    client: UsdaClient,
+    corpus: list[Recipe],
+    seeds: list[Recipe],
+    results: dict[str, RecipeNutrition],
+    terminal_outcome_counts: Counter[str],
+    sidecar_path: Path,
 ) -> GroundingReport:
-    """Ground `corpus` (default: seeds ∪ imported via load_corpus()), write the
-    sidecar, and build the full report (corpus-wide diagnostics plus the
-    seed tag-vs-computed comparison for `seeds`, default: the 25
-    hand-authored recipes via load_recipes() -- the only recipes with
-    authored quantities to meaningfully compare against a self-reported tag).
+    """Shared tail of `run_grounding`/`run_grounding_async` (ROADMAP.md
+    Phase 2, Step 2.2 pulled this out of `run_grounding` so the new async
+    fan-out couldn't quietly diverge from it): writes the sidecar, pulls
+    `UsdaClient`'s cumulative diagnostics, and builds the final
+    `GroundingReport` via `build_report`. Called once each corpus pass's own
+    try/finally cache-flush has already completed -- this function does no
+    grounding itself and makes no network calls.
     """
-    client = client or UsdaClient()
-    corpus = corpus if corpus is not None else load_corpus()
-    seeds = seeds if seeds is not None else load_recipes()
-
-    results: dict[str, RecipeNutrition] = {}
-    terminal_outcome_counts: Counter[str] = Counter()
-    total_ingredient_occurrences = 0
-    try:
-        for recipe in sorted(corpus, key=lambda r: r.recipe_id):
-            nutrition = compute_recipe_macros(recipe.ingredients, servings=recipe.servings or 1, client=client)
-            results[recipe.recipe_id] = _apply_trust_flags(nutrition)
-            for ingredient in recipe.ingredients:
-                total_ingredient_occurrences += 1
-                terminal_outcome_counts[_terminal_outcome_for_ingredient(ingredient, client)] += 1
-    finally:
-        # `FdcCache.set_payload` now batches disk writes (A3 prep -- see its
-        # docstring), so the corpus loop above may leave fetched payloads
-        # sitting unflushed in memory. Flushing here in `finally` -- on
-        # ordinary completion AND on any unexpected exception (e.g. a
-        # non-rate-limit crash the loop doesn't otherwise handle) -- is what
-        # makes everything fetched so far durable either way. `getattr`
-        # defensive, matching how `rejection_counts` is read below: callers
-        # (mainly tests) pass test doubles with no real cache at all, and a
-        # missing cache must be a silent no-op here, not an AttributeError.
-        cache = getattr(client, "_cache", None)
-        if cache is not None and hasattr(cache, "flush"):
-            cache.flush()
-
-    # The five buckets are constructed to be mutually exclusive and
-    # exhaustive over every ingredient occurrence in `corpus` (see the
-    # module comment above `_terminal_outcome_for_ingredient`) -- this is
-    # what makes the tally trustworthy rather than just another partial
-    # count. A mismatch here would mean the classification logic itself is
-    # broken (e.g. double-counting or silently skipping an occurrence), not
-    # a data quirk, so it fails loudly rather than shipping a report with an
-    # unreconciled table.
-    assert sum(terminal_outcome_counts.values()) == total_ingredient_occurrences, (
-        f"terminal-outcome tally ({sum(terminal_outcome_counts.values())}) does not reconcile "
-        f"with total ingredient occurrences ({total_ingredient_occurrences})"
-    )
-
-    _write_sidecar(Path(sidecar_path), results)
+    _write_sidecar(sidecar_path, results)
 
     # `rejection_counts`/`branded_dispersion_events` are diagnostic-only
     # attributes on `UsdaClient` (see their docstrings) -- read defensively
@@ -630,6 +595,163 @@ def run_grounding(
         )
 
     return report
+
+
+def _assert_terminal_outcomes_reconcile(
+    terminal_outcome_counts: Counter[str], total_ingredient_occurrences: int
+) -> None:
+    # The five buckets are constructed to be mutually exclusive and
+    # exhaustive over every ingredient occurrence in `corpus` (see the
+    # module comment above `_terminal_outcome_for_ingredient`) -- this is
+    # what makes the tally trustworthy rather than just another partial
+    # count. A mismatch here would mean the classification logic itself is
+    # broken (e.g. double-counting or silently skipping an occurrence), not
+    # a data quirk, so it fails loudly rather than shipping a report with an
+    # unreconciled table.
+    assert sum(terminal_outcome_counts.values()) == total_ingredient_occurrences, (
+        f"terminal-outcome tally ({sum(terminal_outcome_counts.values())}) does not reconcile "
+        f"with total ingredient occurrences ({total_ingredient_occurrences})"
+    )
+
+
+def run_grounding(
+    *,
+    client: UsdaClient | None = None,
+    sidecar_path: str | Path = "data/processed/grounding.jsonl",
+    corpus: list[Recipe] | None = None,
+    seeds: list[Recipe] | None = None,
+) -> GroundingReport:
+    """Ground `corpus` (default: seeds ∪ imported via load_corpus()), write the
+    sidecar, and build the full report (corpus-wide diagnostics plus the
+    seed tag-vs-computed comparison for `seeds`, default: the 25
+    hand-authored recipes via load_recipes() -- the only recipes with
+    authored quantities to meaningfully compare against a self-reported tag).
+
+    See `run_grounding_async` (ROADMAP.md Phase 2, Step 2.2) for the fanned-
+    out sibling that grounds the corpus's USDA lookups concurrently instead
+    of sequentially -- this sequential version stays as the default/script
+    entry point unchanged.
+    """
+    client = client or UsdaClient()
+    corpus = corpus if corpus is not None else load_corpus()
+    seeds = seeds if seeds is not None else load_recipes()
+
+    results: dict[str, RecipeNutrition] = {}
+    terminal_outcome_counts: Counter[str] = Counter()
+    total_ingredient_occurrences = 0
+    try:
+        for recipe in sorted(corpus, key=lambda r: r.recipe_id):
+            nutrition = compute_recipe_macros(recipe.ingredients, servings=recipe.servings or 1, client=client)
+            results[recipe.recipe_id] = _apply_trust_flags(nutrition)
+            for ingredient in recipe.ingredients:
+                total_ingredient_occurrences += 1
+                terminal_outcome_counts[_terminal_outcome_for_ingredient(ingredient, client)] += 1
+    finally:
+        # `FdcCache.set_payload` now batches disk writes (A3 prep -- see its
+        # docstring), so the corpus loop above may leave fetched payloads
+        # sitting unflushed in memory. Flushing here in `finally` -- on
+        # ordinary completion AND on any unexpected exception (e.g. a
+        # non-rate-limit crash the loop doesn't otherwise handle) -- is what
+        # makes everything fetched so far durable either way. `getattr`
+        # defensive, matching how `rejection_counts` is read below: callers
+        # (mainly tests) pass test doubles with no real cache at all, and a
+        # missing cache must be a silent no-op here, not an AttributeError.
+        cache = getattr(client, "_cache", None)
+        if cache is not None and hasattr(cache, "flush"):
+            cache.flush()
+
+    _assert_terminal_outcomes_reconcile(terminal_outcome_counts, total_ingredient_occurrences)
+
+    return _assemble_report(
+        client=client,
+        corpus=corpus,
+        seeds=seeds,
+        results=results,
+        terminal_outcome_counts=terminal_outcome_counts,
+        sidecar_path=Path(sidecar_path),
+    )
+
+
+async def run_grounding_async(
+    *,
+    client: UsdaClient | None = None,
+    sidecar_path: str | Path = "data/processed/grounding.jsonl",
+    corpus: list[Recipe] | None = None,
+    seeds: list[Recipe] | None = None,
+    max_concurrency: int | None = None,
+) -> GroundingReport:
+    """Async, fanned-out sibling of `run_grounding` (ROADMAP.md Phase 2, Step
+    2.2) -- this is the actual sequential-bottleneck fix that step targets:
+    `run_grounding` looks up every ingredient of every recipe in the corpus
+    one at a time (~4,263 recipes x several ingredients each, each a
+    synchronous USDA FDC round trip); this version fans every recipe's
+    ingredient lookups out concurrently via `asyncio.gather`, bounded by a
+    single `asyncio.Semaphore` shared across the ENTIRE run (not
+    per-recipe) so the effective concurrency never exceeds `max_concurrency`
+    (default: `Settings.llm_max_concurrency`, env `LLM_MAX_CONCURRENCY`)
+    regardless of how many recipes/ingredients are in flight at once --
+    this is what keeps a large corpus run from hitting FDC's hourly rate
+    limit any harder than the sequential version already risked.
+
+    Produces the same sidecar/report a `run_grounding` call over the same
+    corpus/client would (same aggregation via `nutrition_grounding.
+    _aggregate_recipe_nutrition`, same `_assemble_report` tail) -- fanning
+    out changes HOW FAST the USDA lookups happen, never WHAT gets computed.
+
+    The terminal-outcome classification pass (`_terminal_outcome_for_
+    ingredient`) is a pure cache-hit re-classification against the SAME
+    client/`FdcCache` the fan-out above just populated -- no new network
+    I/O -- so it stays a plain sequential loop afterward rather than being
+    fanned out again; the concurrency win already happened in the gather
+    above.
+    """
+    client = client or UsdaClient()
+    corpus = corpus if corpus is not None else load_corpus()
+    seeds = seeds if seeds is not None else load_recipes()
+    settings = get_settings()
+    semaphore = asyncio.Semaphore(max_concurrency or settings.llm_max_concurrency)
+
+    sorted_corpus = sorted(corpus, key=lambda r: r.recipe_id)
+    results: dict[str, RecipeNutrition] = {}
+    try:
+
+        async def _ground_one(recipe: Recipe) -> tuple[str, RecipeNutrition]:
+            nutrition = await compute_recipe_macros_async(
+                recipe.ingredients,
+                servings=recipe.servings or 1,
+                client=client,
+                semaphore=semaphore,
+            )
+            return recipe.recipe_id, _apply_trust_flags(nutrition)
+
+        pairs = await asyncio.gather(*(_ground_one(recipe) for recipe in sorted_corpus))
+        for recipe_id, nutrition in pairs:
+            results[recipe_id] = nutrition
+    finally:
+        # Same "flush whatever was fetched so far, success or crash" contract
+        # as `run_grounding`'s finally block -- see its comment for the full
+        # rationale (A3 prep write-batching in `FdcCache`).
+        cache = getattr(client, "_cache", None)
+        if cache is not None and hasattr(cache, "flush"):
+            cache.flush()
+
+    terminal_outcome_counts: Counter[str] = Counter()
+    total_ingredient_occurrences = 0
+    for recipe in sorted_corpus:
+        for ingredient in recipe.ingredients:
+            total_ingredient_occurrences += 1
+            terminal_outcome_counts[_terminal_outcome_for_ingredient(ingredient, client)] += 1
+
+    _assert_terminal_outcomes_reconcile(terminal_outcome_counts, total_ingredient_occurrences)
+
+    return _assemble_report(
+        client=client,
+        corpus=corpus,
+        seeds=seeds,
+        results=results,
+        terminal_outcome_counts=terminal_outcome_counts,
+        sidecar_path=Path(sidecar_path),
+    )
 
 
 def build_report(
