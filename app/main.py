@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.routes_admin import router as admin_router
 from app.api.routes_day_planner import router as day_planner_router
@@ -14,6 +15,7 @@ from app.api.routes_recommendations import router as recommendations_router
 from app.api.routes_safety_tools import router as safety_tools_router
 from app.api.routes_session import router as session_router
 from app.api.routes_share import router as share_router
+from app.config import get_settings
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
 from app.observability.events import new_run_id, reset_run_id, set_run_id
@@ -72,6 +74,113 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send_with_request_id)
         finally:
             reset_run_id(token)
+
+
+# Content-Security-Policy applied to every HTTP response (ROADMAP.md Phase 5,
+# Step 5.4). Same-origin only: the SPA is served BY this same FastAPI
+# process (app/spa.py) and its own JS calls this process's own API
+# same-origin, so `'self'` alone covers script/style/font/connect-src -- no
+# cross-origin allowance is needed for either of those.
+#
+# PostHog (app/services/analytics.py) does NOT need an allowance here: it is
+# a server-side Python client that calls PostHog's HTTP API directly from
+# this backend process -- there is no `posthog-js` dependency and no
+# PostHog <script> tag anywhere in web/ (verified: grepped web/ for
+# "posthog", nothing found), so the *browser* never talks to PostHog at
+# all, and CSP only governs what the browser is allowed to load/call. If a
+# browser-side PostHog SDK is ever added, this CSP must be revisited first
+# to allowlist PostHog's actual script/connect-src origins.
+#
+# `placehold.co` (a prior remote image-placeholder dependency) was fully
+# removed by ROADMAP Steps 4.1/4.4 (verified: only historical code-comment
+# references remain, e.g. app/services/recipe_image_service.py) -- so
+# img-src needs no external host either; `data:` covers any inline
+# data-URI/SVG usage.
+#
+# `style-src 'self' 'unsafe-inline'`: several chart/gauge components (e.g.
+# web/src/components/MacroRadial.tsx, NutritionBreakdown.tsx) use React's
+# `style={{...}}` prop, which renders as an inline `style` attribute on the
+# DOM node -- CSP's style-src governs those too, and this app has no
+# nonce/hash plumbing to avoid `'unsafe-inline'` there. `script-src` stays
+# free of it: the built SPA has no inline `<script>` tags.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+# Blocks browser features this app never uses. Well-known Permissions-Policy
+# syntax: `name=()` means "allowed origin list is empty" -- disallowed
+# everywhere, including this origin itself.
+PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+# 1 year + subdomains + preload-eligible: the standard "serious about HTTPS"
+# HSTS configuration securityheaders.com/hstspreload.org grade highest. Only
+# ever sent when Settings.enable_hsts is True -- see app/config.py for why
+# that defaults off.
+HSTS_VALUE = "max-age=31536000; includeSubDomains; preload"
+
+
+class SecurityHeadersMiddleware:
+    """Plain ASGI middleware (same style/rationale as `RequestIdMiddleware`
+    above): setting a fixed set of response headers needs no
+    `BaseHTTPMiddleware` `call_next` indirection, and there is no reason to
+    introduce a second middleware idiom into this module when the simpler,
+    already-proven-safe plain-ASGI style covers this case too.
+
+    Appends CSP / X-Content-Type-Options / Referrer-Policy / X-Frame-Options
+    / Permissions-Policy (and, when enabled, HSTS) to every HTTP response's
+    headers, regardless of what an inner middleware or route handler already
+    set -- ROADMAP.md Phase 5, Step 5.4.
+    """
+
+    def __init__(self, app: Callable, *, enable_hsts: bool) -> None:
+        self.app = app
+        self._extra_headers: list[tuple[bytes, bytes]] = [
+            (b"content-security-policy", CONTENT_SECURITY_POLICY.encode("latin-1")),
+            (b"x-content-type-options", b"nosniff"),
+            # `strict-origin-when-cross-origin`: send the full URL as
+            # Referer for same-origin requests (this app is same-origin
+            # only, so this is effectively "always full path"), but would
+            # downgrade to origin-only on a cross-origin navigation and omit
+            # it entirely on an HTTPS->HTTP downgrade -- the standard safe
+            # default that avoids leaking full URLs (which can carry
+            # sensitive path/query data) to third parties while still being
+            # useful for same-origin analytics/debugging.
+            (b"referrer-policy", b"strict-origin-when-cross-origin"),
+            # Belt-and-suspenders with CSP's `frame-ancestors 'none'` above:
+            # `frame-ancestors` supersedes X-Frame-Options in every browser
+            # that honors CSP, but X-Frame-Options is still checked by the
+            # rare client that doesn't parse frame-ancestors, and
+            # securityheaders.com grades it separately.
+            (b"x-frame-options", b"DENY"),
+            (b"permissions-policy", PERMISSIONS_POLICY.encode("latin-1")),
+        ]
+        if enable_hsts:
+            self._extra_headers.append(
+                (b"strict-transport-security", HSTS_VALUE.encode("latin-1"))
+            )
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_security_headers(message):  # type: ignore[no-untyped-def]
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                headers.extend(self._extra_headers)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_security_headers)
 
 
 @asynccontextmanager
@@ -151,6 +260,24 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # gzip compression for the SPA + JSON responses (ROADMAP.md Phase 5,
+    # Step 5.4). Starlette's built-in `GZipMiddleware` is plain ASGI (not
+    # `BaseHTTPMiddleware`) and needs zero extra dependencies, unlike brotli
+    # (`brotli`/`brotli-asgi`), which would add a compiled dependency to the
+    # deploy image for a marginal win on top of gzip -- Vite's build output
+    # is already content-hashed and long-cached (see
+    # `_ImmutableCacheStaticFiles` in app/spa.py) so the compression ratio
+    # only matters on first load / cache misses. `minimum_size` is
+    # Starlette's own default (500 bytes) -- skips compressing already-tiny
+    # responses where the gzip framing overhead would net-lose.
+    app.add_middleware(GZipMiddleware, minimum_size=500)
+    # Security headers (ROADMAP.md Phase 5, Step 5.4) -- added LAST among
+    # this function's `add_middleware` calls so it sits OUTERMOST (Starlette
+    # wraps in reverse add-order): that guarantees these headers land on
+    # every response this process ever sends, including CORS preflight
+    # (OPTIONS) responses that CORSMiddleware short-circuits before
+    # reaching any middleware added before it.
+    app.add_middleware(SecurityHeadersMiddleware, enable_hsts=get_settings().enable_hsts)
     app.include_router(health_router)
     app.include_router(inventory_router)
     app.include_router(recommendations_router)

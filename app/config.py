@@ -216,6 +216,20 @@ class Settings(BaseSettings):
         default=None, alias="OTEL_EXPORTER_OTLP_HEADERS"
     )
 
+    # Security-headers hardening (ROADMAP.md Phase 5, Step 5.4) --
+    # app.main.SecurityHeadersMiddleware only sends `Strict-Transport-Security`
+    # when this is True. HSTS tells a browser "only ever speak HTTPS to this
+    # origin for the next `max-age`" -- a promise this app cannot itself
+    # verify, since ACA terminates TLS at the ingress and forwards plain HTTP
+    # to this container (the request this process sees is never actually
+    # "http" vs "https" in a way that's safe to trust without also trusting
+    # `X-Forwarded-Proto`, and even then, sending HSTS is a deployment-wide
+    # promise, not a per-request one). Defaults off so local `http://
+    # localhost` dev (and any HTTP-only deployment) is never told by its own
+    # server to distrust HTTP -- see .env.example for how production should
+    # enable this.
+    enable_hsts: bool = Field(default=False, alias="ENABLE_HSTS")
+
     @property
     def chroma_dir(self) -> Path:
         return Path(self.chroma_path)

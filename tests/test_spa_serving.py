@@ -18,6 +18,15 @@ Covers:
 9. Route-collision guard: no API route may equal or be a prefix-parent of
    any SPA client route in `app.spa.SPA_ROUTES` -- this MUST fail if
    someone later adds e.g. `GET /day` to the API.
+10. Security headers (ROADMAP.md Phase 5, Step 5.4, `app.main.
+    SecurityHeadersMiddleware`): CSP / X-Content-Type-Options /
+    Referrer-Policy / X-Frame-Options / Permissions-Policy present on every
+    response.
+11. HSTS absent by default (`ENABLE_HSTS` unset).
+12. HSTS present when `ENABLE_HSTS=true`.
+13. Cache headers differ between `index.html` (`no-cache`) and a hashed
+    asset path (`public, max-age=31536000, immutable`) -- covered by test 1
+    and test 3 above; a combined assertion is also included below.
 
 No safety/nutrition logic is exercised here -- this module is pure
 static-file serving.
@@ -293,3 +302,59 @@ def test_no_api_route_collides_with_spa_client_routes(monkeypatch: pytest.Monkey
                 f"{spa_route!r} -- it would shadow the SPA fallback for "
                 f"that browser navigation instead of serving the SPA shell."
             )
+
+
+# ---------------------------------------------------------------------------
+# 10-13: security headers (ROADMAP.md Phase 5, Step 5.4,
+# app.main.SecurityHeadersMiddleware)
+# ---------------------------------------------------------------------------
+
+
+def test_security_headers_present_on_every_response(client: TestClient) -> None:
+    # Deliberately checked on a plain JSON endpoint, not the SPA shell --
+    # the middleware is added outside routing entirely, so it must apply
+    # uniformly to API responses too, not just SPA/static ones.
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert "camera=()" in resp.headers["permissions-policy"]
+
+    csp = resp.headers["content-security-policy"]
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    # No PostHog/placehold.co (or any other external) origin should ever
+    # leak into the CSP -- both are server-side-only/removed respectively;
+    # see app/main.py's CONTENT_SECURITY_POLICY comment for why.
+    assert "posthog" not in csp
+    assert "placehold.co" not in csp
+
+
+def test_hsts_absent_by_default(client: TestClient) -> None:
+    resp = client.get("/health")
+    assert "strict-transport-security" not in resp.headers
+
+
+def test_hsts_present_when_enabled(
+    web_dist: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MACROCHEF_WEB_DIST", str(web_dist))
+    monkeypatch.setenv("ENABLE_HSTS", "true")
+    get_settings.cache_clear()
+    hsts_client = TestClient(create_app())
+    try:
+        resp = hsts_client.get("/health")
+        assert (
+            resp.headers["strict-transport-security"]
+            == "max-age=31536000; includeSubDomains; preload"
+        )
+    finally:
+        get_settings.cache_clear()
+
+
+def test_cache_control_differs_between_index_and_hashed_asset(client: TestClient) -> None:
+    index_resp = client.get("/")
+    asset_resp = client.get("/assets/app.js")
+    assert index_resp.headers["cache-control"] == "no-cache"
+    assert asset_resp.headers["cache-control"] == "public, max-age=31536000, immutable"
