@@ -69,11 +69,33 @@ class _ProviderInventory(BaseModel):
     items: list[_ProviderIngredient]
 
 
+class DetailedInstructions(BaseModel):
+    """Structured-output schema for `generate_detailed_instructions_with_
+    provider_chain` (ROADMAP 2.1). Replaces the old free-text numbered-list
+    scrape (`_parse_numbered_steps`) as the primary path for every provider
+    with a native structured-output mechanism; `_parse_numbered_steps` is
+    kept as an ADDITIONAL parse-fallback safety net wired in via `generate_
+    structured`'s `text_fallback` hook for Ollama/mock (see
+    `_detailed_instructions_text_fallback` below), in case a local model
+    ignores the JSON-mode instruction and just emits a numbered list like it
+    always used to."""
+
+    steps: list[str] = Field(default_factory=list)
+
+
+class StructuredGenerationError(RuntimeError):
+    """Raised by `generate_structured` when both the initial attempt and its
+    one-shot repair retry fail to produce a schema-valid response. Callers
+    that loop over `provider_chain()` (mirroring `_generate_text`'s existing
+    contract) catch this exactly like any other provider failure and move
+    on to the next provider."""
+
+
 class _UsageInfo:
-    """Mutable out-parameter each `_generate_text_with_*`/`_extract_
-    inventory_with_*` function fills in as a side effect (alongside its
+    """Mutable out-parameter each `_generate_text_with_*`/`_generate_
+    structured_with_*` function fills in as a side effect (alongside its
     normal return value) when the provider response carries real usage
-    metadata -- see `_generate_text`/`_extract_inventory` below, the two
+    metadata -- see `_generate_text`/`generate_structured` below, the two
     choke points that turn this into an `app.observability.llm_ledger.
     record_llm_call` row. `model` is set even on providers with no usage
     metadata (e.g. which of Gemini's per-model fallback list actually
@@ -102,7 +124,7 @@ def _record_mock_call(purpose: str, settings: Settings) -> None:
     `generate_detailed_instructions_with_provider_chain`,
     `extract_inventory_with_provider_chain`, and
     `RecipeGenerationService.generate` -- none of those go through
-    `_generate_text`/`_extract_inventory` when the provider chain lands on
+    `_generate_text`/`generate_structured` when the provider chain lands on
     "mock" (no real HTTP call happens), so without this call those calls
     would be invisible to GET /admin/llm-usage entirely."""
     record_llm_call(
@@ -172,10 +194,16 @@ def generate_detailed_instructions_with_provider_chain(
             )
             continue
         try:
-            text = _generate_text(provider, prompt, settings, purpose="detailed_instructions")
-            steps = _parse_numbered_steps(text)
-            if steps:
-                return steps, True
+            result = generate_structured(
+                provider,
+                prompt,
+                DetailedInstructions,
+                settings,
+                purpose="detailed_instructions",
+                text_fallback=_detailed_instructions_text_fallback,
+            )
+            if result.steps:
+                return result.steps, True
             logger.warning(
                 "%s detailed-instructions response parsed to zero steps, trying fallback provider.",
                 provider,
@@ -188,6 +216,17 @@ def generate_detailed_instructions_with_provider_chain(
             )
 
     return fallback, False
+
+
+def _detailed_instructions_text_fallback(text: str) -> dict[str, Any]:
+    """`generate_structured`'s `text_fallback` hook for `DetailedInstructions`
+    -- only reached on the Ollama/mock `parse_fallback=True` path, and only
+    when `_parse_json_object` can't find a `{...}` object at all (e.g. a
+    local model ignores the JSON-mode instruction entirely and returns a
+    plain numbered list like this feature used to expect everywhere).
+    Recovers that via the same numbered-list parser this module always
+    used, rather than treating the response as unusable."""
+    return {"steps": _parse_numbered_steps(text)}
 
 
 def extract_inventory_with_provider_chain(
@@ -204,9 +243,17 @@ def extract_inventory_with_provider_chain(
             logger.info("Skipping %s vision provider; it is not configured.", provider)
             continue
         try:
-            observations = _extract_inventory(
-                provider, image_path, settings, purpose="vision_extract"
+            if image_path is None:
+                raise ValueError(f"{provider} vision requires an uploaded image path.")
+            parsed = generate_structured(
+                provider,
+                VISION_PROMPT,
+                _ProviderInventory,
+                settings,
+                purpose="vision_extract",
+                image_path=image_path,
             )
+            observations = [_provider_observation(item, settings) for item in parsed.items]
             if observations:
                 return observations
         except Exception as exc:  # pragma: no cover - optional hosted/local provider paths
@@ -283,10 +330,31 @@ def _parse_numbered_steps(text: str) -> list[str]:
 
 
 _TextGenerator = Callable[[str, Settings, "_UsageInfo"], str]
-_VisionExtractor = Callable[[str | Path, Settings, "_UsageInfo"], list[InventoryObservation]]
+_StructuredGenerator = Callable[
+    [str, Settings, "_UsageInfo", "type[BaseModel]", "str | Path | None"], str
+]
 
 _TEXT_GENERATORS: dict[str, _TextGenerator] = {}
-_VISION_EXTRACTORS: dict[str, _VisionExtractor] = {}
+_STRUCTURED_GENERATORS: dict[str, _StructuredGenerator] = {}
+
+# Whether provider P's `_STRUCTURED_GENERATORS[P]` uses a NATIVE structured-
+# output mechanism (Gemini `response_schema`, OpenAI Responses API
+# `text.format` json_schema, Anthropic forced tool-use) vs. a JSON-mode
+# prompt + regex/brace-scan extraction (`_parse_json_object`) because the
+# provider has no native mechanism at all (Ollama, mock). Purely a ledger
+# measurability signal (`record_llm_call`'s `parse_fallback` column, ROADMAP
+# 2.1's acceptance criterion) -- static per provider, not computed per call
+# (a native-mechanism provider that happens to return dirty text on one call
+# is still recorded as `parse_fallback=False`; the flag answers "did this
+# provider even attempt a schema-constrained call", not "did extraction take
+# the easy path this time").
+_STRUCTURED_PARSE_FALLBACK: dict[str, bool] = {
+    "gemini": False,
+    "openai": False,
+    "anthropic": False,
+    "ollama": True,
+    "mock": True,
+}
 
 
 def _generate_text(
@@ -336,58 +404,157 @@ def _generate_text(
     return text
 
 
-def _extract_inventory(
+def generate_structured(
     provider: ProviderName,
-    image_path: str | Path | None,
+    prompt: str,
+    schema: type[BaseModel],
     settings: Settings,
-    purpose: str = "vision_extract",
-) -> list[InventoryObservation]:
-    """The single choke point where a real (non-mock) vision provider HTTP
-    call happens -- mirrors `_generate_text` above, including ledger
-    reporting on both the success and failure paths."""
-    if image_path is None:
-        raise ValueError(f"{provider} vision requires an uploaded image path.")
-    extractor = _VISION_EXTRACTORS.get(provider)
-    if extractor is None:
+    *,
+    purpose: str,
+    image_path: str | Path | None = None,
+    text_fallback: Callable[[str], dict[str, Any]] | None = None,
+) -> BaseModel:
+    """The structured-output choke point (ROADMAP.md Phase 2, Step 2.1) --
+    the schema-validated sibling of `_generate_text` above (and, since this
+    step, the replacement for the old `_extract_inventory` vision
+    chokepoint, which duplicated this same JSON-mode-prompt-plus-manual-
+    parse pattern for every provider instead of using each one's real
+    structured-output mechanism). Same ledger-instrumentation contract as
+    `_generate_text`/`_extract_inventory` (timing, `record_llm_call` on both
+    the success and failure path, `run_id`/`purpose` threading), plus two
+    things those two don't need:
+
+    - a one-shot "repair loop": on a JSON-parse or Pydantic-validation
+      failure, retry exactly once with the validation errors appended to
+      the prompt, then raise `StructuredGenerationError`. `retries` in the
+      ledger row is 0 (succeeded first try) or 1 (needed the repair retry).
+    - a `parse_fallback` flag (see `_STRUCTURED_PARSE_FALLBACK` above):
+      True for Ollama/mock, which have no native structured-output
+      mechanism and fall back to a JSON-mode prompt + `_parse_json_object`'s
+      regex/brace-scan extraction; False for Gemini/OpenAI/Anthropic, which
+      use their own native mechanism (`response_schema`, `text.format`
+      json_schema, forced tool-use respectively) -- see each
+      `_generate_structured_with_*` function below.
+
+    `image_path`, when given, routes to the multimodal variant of the
+    provider's structured call (mirrors `_extract_inventory`'s old vision
+    path) -- `schema` describes the JSON shape either way, chat or vision.
+
+    `text_fallback` is an OPTIONAL caller-supplied JSON extractor, tried
+    only on the Ollama/mock `parse_fallback=True` path, only after
+    `_parse_json_object`'s generic brace-scan fails to find a `{...}`
+    object at all (NOT on a structurally-valid-but-wrong-shape response,
+    which the repair loop above handles instead). Lets callers reuse a
+    more domain-aware extractor than the generic one here -- e.g.
+    `RecipeGenerationService` reuses its own battle-tested `_extract_json`
+    (fenced-block + substring scan, already covered by
+    tests/test_recipe_library_builder.py) instead of a second, weaker one.
+    """
+    generator = _STRUCTURED_GENERATORS.get(provider)
+    if generator is None:
         raise ValueError(f"Unsupported provider: {provider}")
+    parse_fallback = _STRUCTURED_PARSE_FALLBACK.get(provider, False)
 
     usage = _UsageInfo()
+    attempt_prompt = prompt
+    retries = 0
+    last_error: Exception | None = None
+    result: BaseModel | None = None
+
     start = time.perf_counter()
-    try:
-        observations = extractor(image_path, settings, usage)
-    except Exception:
-        elapsed_ms = (time.perf_counter() - start) * 1000
+    for attempt in range(2):
+        try:
+            raw_text = generator(attempt_prompt, settings, usage, schema, image_path)
+            result = _validate_structured_payload(raw_text, schema, text_fallback)
+            break
+        except Exception as exc:  # noqa: BLE001 - repair loop treats JSON and schema failures alike
+            last_error = exc
+            if attempt == 0:
+                retries = 1
+                attempt_prompt = _append_repair_instructions(prompt, exc)
+                continue
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    kind = "vision" if image_path is not None else "chat"
+    if result is None:
         record_llm_call(
             provider=provider,
-            model=usage.model or _model_for(settings, provider, "vision"),
+            model=usage.model or _model_for(settings, provider, kind),
             purpose=purpose,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
             latency_ms=elapsed_ms,
             success=False,
             fallback_used=_is_fallback_provider(provider, settings),
-            prompt_text=VISION_PROMPT,
+            prompt_text=prompt,
+            retries=retries,
+            parse_fallback=parse_fallback,
         )
-        raise
+        raise StructuredGenerationError(
+            f"{provider} structured generation for {schema.__name__} failed after "
+            f"{retries + 1} attempt(s): {last_error}"
+        ) from last_error
 
-    elapsed_ms = (time.perf_counter() - start) * 1000
     record_llm_call(
         provider=provider,
-        model=usage.model or _model_for(settings, provider, "vision"),
+        model=usage.model or _model_for(settings, provider, kind),
         purpose=purpose,
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         latency_ms=elapsed_ms,
         success=True,
         fallback_used=_is_fallback_provider(provider, settings),
-        prompt_text=VISION_PROMPT,
-        # Vision responses don't have a single "completion text" the way
-        # chat does; token-estimate fallback (only used when the provider
-        # doesn't report real usage) has no cheap proxy here, so it's left
-        # at 0 rather than guessed at -- real usage data is what actually
-        # matters for the hosted providers this counts.
+        prompt_text=prompt,
+        completion_text=result.model_dump_json(),
+        retries=retries,
+        parse_fallback=parse_fallback,
     )
-    return observations
+    return result
+
+
+def _validate_structured_payload(
+    raw_text: str,
+    schema: type[BaseModel],
+    text_fallback: Callable[[str], dict[str, Any]] | None,
+) -> BaseModel:
+    """Turn `raw_text` (a provider's raw completion) into a validated
+    `schema` instance. Tries the generic brace-scan extractor first
+    (`_parse_json_object`, already used by the old vision path); if THAT
+    can't find any `{...}` object at all and the caller supplied
+    `text_fallback`, tries that instead. Either way, a structurally-valid-
+    but-wrong-shape result still raises `pydantic.ValidationError` here,
+    which `generate_structured`'s repair loop (not this function) is
+    responsible for retrying."""
+    try:
+        payload = _parse_json_object(raw_text)
+    except (json.JSONDecodeError, ValueError):
+        if text_fallback is None:
+            raise
+        payload = text_fallback(raw_text)
+    return schema.model_validate(payload)
+
+
+def _append_repair_instructions(prompt: str, error: Exception) -> str:
+    """Build the one-shot "repair loop" retry prompt (ROADMAP 2.1): the
+    original prompt plus the validation/parse errors from the first
+    attempt, asking for corrected JSON only. Never used more than once per
+    `generate_structured` call -- see its `for attempt in range(2)` loop."""
+    return (
+        f"{prompt}\n\n"
+        "Your previous response did not match the required JSON schema. "
+        f"Validation errors:\n{error}\n\n"
+        "Return ONLY corrected JSON satisfying the schema -- fix these "
+        "errors, do not add commentary or markdown fences."
+    )
+
+
+def _model_json_schema(schema: type[BaseModel]) -> dict[str, Any]:
+    """JSON Schema for `schema`, in the plain-dict flavor every native
+    structured-output mechanism below accepts directly: Gemini's SDK takes
+    a raw dict for `response_schema` (see `_gemini_generate_config`),
+    OpenAI's Responses API `text.format` takes a JSON Schema dict, and
+    Anthropic's tool `input_schema` is JSON Schema too."""
+    return schema.model_json_schema()
 
 
 def _generate_text_with_gemini(prompt: str, settings: Settings, usage: _UsageInfo) -> str:
@@ -481,31 +648,45 @@ _TEXT_GENERATORS.update(
 )
 
 
-def _extract_inventory_with_gemini(
-    image_path: str | Path,
+def _generate_structured_with_gemini(
+    prompt: str,
     settings: Settings,
     usage: _UsageInfo,
-) -> list[InventoryObservation]:
+    schema: type[BaseModel],
+    image_path: str | Path | None,
+) -> str:
+    """Gemini's native structured-output mechanism: `response_mime_type=
+    "application/json"` + an explicit `response_schema` (ROADMAP 2.1 --
+    previously only the mime-type half of this was set, for vision only;
+    every call through here now also passes the target JSON Schema, for
+    both chat and vision)."""
     from google.genai import types
 
-    path = Path(image_path)
     client = _gemini_client(settings)
-    image_part = types.Part.from_bytes(
-        data=path.read_bytes(),
-        mime_type=_guess_image_mime_type(path),
-    )
+    kind = "vision" if image_path is not None else "chat"
+    contents: Any
+    if image_path is not None:
+        path = Path(image_path)
+        image_part = types.Part.from_bytes(
+            data=path.read_bytes(), mime_type=_guess_image_mime_type(path)
+        )
+        contents = [image_part, prompt]
+    else:
+        contents = prompt
+
     last_error: Exception | None = None
-    for model in _models_for(settings, "gemini", "vision"):
+    for model in _models_for(settings, "gemini", kind):
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=[image_part, VISION_PROMPT],
+                contents=contents,
                 config=_gemini_generate_config(
                     types,
                     settings,
                     model=model,
-                    temperature=0,
+                    temperature=0 if image_path is not None else 0.2,
                     response_mime_type="application/json",
+                    response_schema=_model_json_schema(schema),
                 ),
             )
             usage.model = model
@@ -513,11 +694,11 @@ def _extract_inventory_with_gemini(
             if usage_metadata is not None:
                 usage.prompt_tokens = getattr(usage_metadata, "prompt_token_count", None)
                 usage.completion_tokens = getattr(usage_metadata, "candidates_token_count", None)
-            return _observations_from_json_text(response.text or "", settings)
+            return _require_text(response.text, f"Gemini model {model}")
         except Exception as exc:  # pragma: no cover - optional hosted provider path
             last_error = exc
-            logger.warning("Gemini vision model %s failed, trying next model: %s", model, exc)
-    raise last_error or ValueError("No Gemini vision models were configured.")
+            logger.warning("Gemini structured model %s failed, trying next model: %s", model, exc)
+    raise last_error or ValueError("No Gemini models were configured.")
 
 
 def _gemini_client(settings: Settings):
@@ -541,10 +722,17 @@ def _gemini_generate_config(
     model: str,
     temperature: float,
     response_mime_type: str | None = None,
+    response_schema: dict[str, Any] | None = None,
 ):
     config_kwargs: dict[str, Any] = {"temperature": temperature}
     if response_mime_type:
         config_kwargs["response_mime_type"] = response_mime_type
+    if response_schema is not None:
+        # The SDK accepts a plain JSON-Schema dict directly for
+        # `response_schema` (see `google.genai.types.GenerateContentConfig`
+        # -- verified against the installed google-genai 2.x signature,
+        # which types this as `dict[Any, Any] | type | types.Schema | ...`).
+        config_kwargs["response_schema"] = response_schema
 
     thinking_kwargs: dict[str, Any] = {}
     if settings.gemini_thinking_level and model.startswith("gemini-3"):
@@ -557,32 +745,74 @@ def _gemini_generate_config(
     return types_module.GenerateContentConfig(**config_kwargs)
 
 
-def _extract_inventory_with_openai(
-    image_path: str | Path,
+# OpenAI's Responses API structured-output tool names / max_tokens for
+# Anthropic's forced tool-use are separate constants from the plain-chat
+# path's -- see ANTHROPIC_STRUCTURED_MAX_TOKENS below for why.
+
+
+def _generate_structured_with_openai(
+    prompt: str,
     settings: Settings,
     usage: _UsageInfo,
-) -> list[InventoryObservation]:
+    schema: type[BaseModel],
+    image_path: str | Path | None,
+) -> str:
+    """OpenAI's native structured-output mechanism on the Responses API
+    (`client.responses.create`, NOT Chat Completions -- confirmed against
+    the installed `openai` 2.x SDK, `openai.types.responses.response_text_
+    config_param.ResponseTextConfigParam`/`response_format_text_json_
+    schema_config_param.ResponseFormatTextJSONSchemaConfigParam`): pass
+    `text={"format": {"type": "json_schema", "schema": ...}}`, the Responses-
+    API equivalent of Chat Completions' `response_format={"type":
+    "json_schema", ...}` (the roadmap's suggested shape, which does NOT
+    exist on this API). Deliberately NOT `strict: True` -- OpenAI's strict
+    mode additionally requires every property be listed as `required` (with
+    `null` folded into the type for anything optional) and `additionalProp
+    erties: false` on every nested object, which `Pydantic.model_json_
+    schema()` does not produce out of the box for models with optional/
+    default fields (all three schemas this module passes here have several)
+    -- adding a schema-flattening transform to satisfy strict mode was out
+    of scope for this pass; non-strict json_schema mode still constrains
+    the model's output shape, and `generate_structured`'s own Pydantic
+    validation + repair loop catch anything that still doesn't conform.
+    """
     from openai import OpenAI
 
-    path = Path(image_path)
-    data_url = _image_data_url(path)
     client_kwargs = {"api_key": settings.openai_api_key}
     if settings.openai_base_url:
         client_kwargs["base_url"] = settings.openai_base_url
     client = OpenAI(**client_kwargs)
-    model = _model_for(settings, "openai", "vision")
-    response = client.responses.create(
-        model=model,
-        input=[
+    kind = "vision" if image_path is not None else "chat"
+    model = _model_for(settings, "openai", kind)
+
+    if image_path is not None:
+        data_url = _image_data_url(Path(image_path))
+        input_payload: Any = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": VISION_PROMPT},
+                    {"type": "input_text", "text": prompt},
                     {"type": "input_image", "image_url": data_url},
                 ],
             }
-        ],
-        temperature=0,
+        ]
+        temperature = 0
+    else:
+        input_payload = prompt
+        temperature = 0.2
+
+    response = client.responses.create(
+        model=model,
+        input=input_payload,
+        temperature=temperature,
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": schema.__name__.lstrip("_"),
+                "schema": _model_json_schema(schema),
+                "strict": False,
+            }
+        },
     )
     usage.model = model
     # Responses API usage shape -- see _generate_text_with_openai's comment.
@@ -590,72 +820,207 @@ def _extract_inventory_with_openai(
     if response_usage is not None:
         usage.prompt_tokens = getattr(response_usage, "input_tokens", None)
         usage.completion_tokens = getattr(response_usage, "output_tokens", None)
-    return _observations_from_json_text(response.output_text or "", settings)
+    return _require_text(response.output_text, "OpenAI")
 
 
-def _extract_inventory_with_anthropic(
-    image_path: str | Path,
+# Anthropic's forced tool-use `input` is already a JSON object off the wire
+# (not a text blob to scrape) -- this module still json.dumps it back into
+# text so `generate_structured` has exactly one parse path
+# (`_validate_structured_payload` -> `_parse_json_object`) regardless of
+# provider, rather than a special case for Anthropic. Raised well above the
+# plain-chat path's 240/700-token caps (see `_generate_text_with_anthropic`
+# / `_extract_inventory_with_anthropic`'s history -- git blame shows no
+# documented rationale for those two beyond "small enough for a short
+# rewrite/short item list"): a forced-tool-use structured call encodes a
+# full JSON schema's worth of field names/punctuation per candidate and,
+# for recipe generation, can be asked for up to 50 recipes
+# (`RecipeDiscoveryRequest.count`, `app/schemas/library.py`) each with a
+# full ingredient/instruction list -- 240 tokens would truncate on the
+# first candidate.
+ANTHROPIC_STRUCTURED_MAX_TOKENS = 4096
+
+
+def _anthropic_tool_name(schema: type[BaseModel]) -> str:
+    return schema.__name__.lstrip("_") or "structured_output"
+
+
+def _generate_structured_with_anthropic(
+    prompt: str,
     settings: Settings,
     usage: _UsageInfo,
-) -> list[InventoryObservation]:
-    path = Path(image_path)
-    model = _model_for(settings, "anthropic", "vision")
+    schema: type[BaseModel],
+    image_path: str | Path | None,
+) -> str:
+    """Anthropic's native structured-output mechanism: forced tool-use with
+    a single tool whose `input_schema` is `schema`'s JSON Schema and
+    `tool_choice` pinned to that one tool by name, so the model has no
+    choice but to call it (rather than replying with prose)."""
+    kind = "vision" if image_path is not None else "chat"
+    model = _model_for(settings, "anthropic", kind)
+    tool_name = _anthropic_tool_name(schema)
+
+    content: Any
+    if image_path is not None:
+        path = Path(image_path)
+        content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": _guess_image_mime_type(path),
+                    "data": _base64_image(path),
+                },
+            },
+            {"type": "text", "text": prompt},
+        ]
+        temperature = 0
+    else:
+        content = prompt
+        temperature = 0.2
+
     payload = {
         "model": model,
-        "max_tokens": 700,
-        "temperature": 0,
-        "messages": [
+        "max_tokens": ANTHROPIC_STRUCTURED_MAX_TOKENS,
+        "temperature": temperature,
+        "messages": [{"role": "user", "content": content}],
+        "tools": [
             {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": _guess_image_mime_type(path),
-                            "data": _base64_image(path),
-                        },
-                    },
-                    {"type": "text", "text": VISION_PROMPT},
-                ],
+                "name": tool_name,
+                "description": f"Return {schema.__name__} as structured JSON.",
+                "input_schema": _model_json_schema(schema),
             }
         ],
+        "tool_choice": {"type": "tool", "name": tool_name},
     }
     data = _post_anthropic(payload, settings)
     usage.model = model
     call_usage = data.get("usage") or {}
     usage.prompt_tokens = call_usage.get("input_tokens")
     usage.completion_tokens = call_usage.get("output_tokens")
-    return _observations_from_json_text(_anthropic_text(data), settings)
+    return json.dumps(_anthropic_tool_input(data, tool_name))
 
 
-def _extract_inventory_with_ollama(
-    image_path: str | Path,
+def _anthropic_tool_input(data: dict[str, Any], tool_name: str) -> dict[str, Any]:
+    for part in data.get("content", []):
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "tool_use" and part.get("name") == tool_name:
+            return part.get("input") or {}
+    raise ValueError(f"Anthropic response did not include a {tool_name!r} tool_use block.")
+
+
+def _json_mode_prompt(prompt: str, schema: type[BaseModel]) -> str:
+    """Ollama has no native structured-output mechanism (ROADMAP 2.1) --
+    append the target JSON Schema to the prompt and ask for JSON-only
+    output. The `/api/chat` payload's `format: "json"` (below) additionally
+    constrains Ollama's decoding to syntactically-valid JSON -- NOT schema
+    conformance, which is still enforced afterwards by
+    `schema.model_validate` (with `generate_structured`'s repair loop as
+    the safety net if it doesn't conform)."""
+    return (
+        f"{prompt}\n\n"
+        "Respond with JSON only, matching this JSON Schema exactly "
+        f"(no commentary, no markdown fences):\n{json.dumps(_model_json_schema(schema))}"
+    )
+
+
+def _generate_structured_with_ollama(
+    prompt: str,
     settings: Settings,
     usage: _UsageInfo,
-) -> list[InventoryObservation]:
-    path = Path(image_path)
-    model = _model_for(settings, "ollama", "vision")
+    schema: type[BaseModel],
+    image_path: str | Path | None,
+) -> str:
+    kind = "vision" if image_path is not None else "chat"
+    model = _model_for(settings, "ollama", kind)
+    message: dict[str, Any] = {"role": "user", "content": _json_mode_prompt(prompt, schema)}
+    if image_path is not None:
+        message["images"] = [_base64_image(Path(image_path))]
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": VISION_PROMPT, "images": [_base64_image(path)]}],
+        "messages": [message],
         "stream": False,
         "format": "json",
-        "options": {"temperature": 0},
+        "options": {"temperature": 0 if image_path is not None else 0.2},
     }
     data = _post_ollama(payload, settings)
     usage.model = model
     usage.prompt_tokens = data.get("prompt_eval_count")
     usage.completion_tokens = data.get("eval_count")
-    return _observations_from_json_text(data.get("message", {}).get("content", ""), settings)
+    return _require_text(data.get("message", {}).get("content"), "Ollama")
 
 
-_VISION_EXTRACTORS.update(
+def _generate_structured_with_mock(
+    prompt: str,
+    settings: Settings,
+    usage: _UsageInfo,
+    schema: type[BaseModel],
+    image_path: str | Path | None,
+) -> str:
+    """Mock provider's structured "response" -- makes no HTTP call (like
+    every other mock-mode code path in this module) and deliberately is NOT
+    clean JSON (wrapped in a chatty preamble + markdown fence), so
+    `generate_structured` is forced through the same `_parse_json_object`
+    brace-scan fallback path Ollama uses, rather than a trivial happy-path
+    parse. This makes `generate_structured("mock", ...)` directly testable/
+    measurable in isolation for ANY schema (see tests/test_model_provider.py)
+    -- but note the three higher-level callers in this module
+    (`RecipeGenerationService.generate`, `generate_detailed_instructions_
+    with_provider_chain`, `extract_inventory_with_provider_chain`) all still
+    special-case `provider == "mock"` BEFORE ever reaching this function,
+    returning canned/deterministic data via `_record_mock_call` with no LLM
+    call at all -- unchanged from before ROADMAP 2.1, and pinned by
+    tests/test_llm_ledger.py's mock-path ledger tests.
+    """
+    del prompt, settings, image_path  # unused: mock never inspects the prompt or calls a network
+    usage.model = "mock"
+    example = _mock_schema_example(schema)
+    return f"Sure! Here is the JSON you asked for:\n```json\n{json.dumps(example)}\n```"
+
+
+def _mock_schema_example(schema: type[BaseModel]) -> dict[str, Any]:
+    """Best-effort placeholder JSON for `schema`'s REQUIRED fields, built
+    generically off its JSON Schema (never off domain knowledge of any
+    specific schema) -- so `_generate_structured_with_mock` above works for
+    any schema passed to `generate_structured`, not just the ones this
+    module happens to define today."""
+    root = _model_json_schema(schema)
+    return _mock_value_for_node(root, root.get("$defs", {}))
+
+
+def _mock_value_for_node(node: dict[str, Any], defs: dict[str, Any]) -> Any:
+    if "$ref" in node:
+        ref_name = node["$ref"].rsplit("/", 1)[-1]
+        return _mock_value_for_node(defs.get(ref_name, {}), defs)
+    node_type = node.get("type")
+    if node_type == "object" or "properties" in node:
+        properties = node.get("properties", {})
+        required = node.get("required", [])
+        return {
+            name: _mock_value_for_node(prop, defs)
+            for name, prop in properties.items()
+            if name in required
+        }
+    if node_type == "array":
+        return []
+    if node_type == "string":
+        return "mock"
+    if node_type == "integer":
+        return 0
+    if node_type == "number":
+        return 0.0
+    if node_type == "boolean":
+        return False
+    return None
+
+
+_STRUCTURED_GENERATORS.update(
     {
-        "gemini": _extract_inventory_with_gemini,
-        "openai": _extract_inventory_with_openai,
-        "anthropic": _extract_inventory_with_anthropic,
-        "ollama": _extract_inventory_with_ollama,
+        "gemini": _generate_structured_with_gemini,
+        "openai": _generate_structured_with_openai,
+        "anthropic": _generate_structured_with_anthropic,
+        "ollama": _generate_structured_with_ollama,
+        "mock": _generate_structured_with_mock,
     }
 )
 
@@ -683,15 +1048,6 @@ def _post_ollama(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
     )
     response.raise_for_status()
     return response.json()
-
-
-def _observations_from_json_text(text: str, settings: Settings) -> list[InventoryObservation]:
-    payload = _parse_json_object(text)
-    parsed = _ProviderInventory.model_validate(payload)
-    observations = [_provider_observation(item, settings) for item in parsed.items]
-    if not observations:
-        raise ValueError("Provider did not return any ingredients.")
-    return observations
 
 
 def _provider_observation(item: _ProviderIngredient, settings: Settings) -> InventoryObservation:

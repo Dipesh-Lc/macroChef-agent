@@ -94,8 +94,17 @@ def record_llm_call(
     fallback_used: bool,
     prompt_text: str = "",
     completion_text: str = "",
+    retries: int = 0,
+    parse_fallback: bool = False,
 ) -> None:
     """Persist one `llm_calls` row and mirror it onto the RunEvent sink.
+
+    `retries`/`parse_fallback` (ROADMAP.md Phase 2, Step 2.1) default to
+    0/False for every pre-existing call site (`_generate_text`'s plain-chat
+    chokepoint, the mock-provider short-circuits) -- they're only ever
+    non-default for calls made through `app.services.model_provider.
+    generate_structured`. See `app.data.models.LLMCall`'s docstring for
+    what each one means.
 
     `prompt_tokens`/`completion_tokens` should be the REAL counts read off
     the provider's response when available; pass `None` for whichever one
@@ -137,6 +146,8 @@ def record_llm_call(
                     success=success,
                     fallback_used=fallback_used,
                     cost_usd=cost_usd,
+                    retries=retries,
+                    parse_fallback=parse_fallback,
                 )
             )
             db.commit()
@@ -171,6 +182,8 @@ def record_llm_call(
                 "cost_usd": cost_usd,
                 "success": success,
                 "fallback_used": fallback_used,
+                "retries": retries,
+                "parse_fallback": parse_fallback,
             },
         )
     )
@@ -186,6 +199,8 @@ def record_llm_call(
         latency_ms=latency_ms,
         success=success,
         fallback_used=fallback_used,
+        retries=retries,
+        parse_fallback=parse_fallback,
     )
 
 
@@ -201,10 +216,13 @@ def _emit_llm_span(
     latency_ms: float,
     success: bool,
     fallback_used: bool,
+    retries: int = 0,
+    parse_fallback: bool = False,
 ) -> None:
     """ROADMAP 1.3: mirror this same call onto an OTel span carrying the
     ledger attributes (`llm.model`, `llm.tokens.prompt`, `llm.cost_usd`,
-    `llm.purpose`), kept in this one function (rather than a separate
+    `llm.purpose`, and -- since ROADMAP 2.1 -- `llm.retries`/`llm.
+    parse_fallback`), kept in this one function (rather than a separate
     tracing module reading `LLMCall` rows back out) so the ledger row, the
     RunEvent above, and this span can never drift apart -- they're built
     from the exact same already-resolved values in one call.
@@ -240,6 +258,8 @@ def _emit_llm_span(
         span.set_attribute("llm.tokens.completion", completion_tokens)
         span.set_attribute("llm.cost_usd", cost_usd)
         span.set_attribute("llm.fallback_used", fallback_used)
+        span.set_attribute("llm.retries", retries)
+        span.set_attribute("llm.parse_fallback", parse_fallback)
         span.set_attribute("macrochef.run_id", run_id)
         if not success:
             from opentelemetry.trace import Status, StatusCode
@@ -272,6 +292,14 @@ def build_usage_response(days: int) -> LLMUsageResponse:
                 func.sum(case((LLMCall.success.is_(False), 1), else_=0)).label("failure_count"),
                 func.sum(case((LLMCall.fallback_used.is_(True), 1), else_=0)).label(
                     "fallback_count"
+                ),
+                # ROADMAP 2.1 acceptance criterion: parse_fallback activations
+                # must be measurable, not just recorded -- see LLMCall's
+                # docstring for what this counts (Ollama/mock's JSON-mode-
+                # prompt fallback, never Gemini/OpenAI/Anthropic's native
+                # structured-output calls).
+                func.sum(case((LLMCall.parse_fallback.is_(True), 1), else_=0)).label(
+                    "parse_fallback_count"
                 ),
             )
             .where(LLMCall.created_at >= since)
@@ -308,6 +336,7 @@ def build_usage_response(days: int) -> LLMUsageResponse:
                 success_count=int(row.success_count or 0),
                 failure_count=int(row.failure_count or 0),
                 fallback_count=int(row.fallback_count or 0),
+                parse_fallback_count=int(row.parse_fallback_count or 0),
             )
         )
         total_calls += int(row.calls)

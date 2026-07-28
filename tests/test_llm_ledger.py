@@ -249,6 +249,49 @@ def test_fallback_used_flags_a_non_primary_provider(
     assert rows[0].fallback_used is True
 
 
+def test_record_llm_call_retries_and_parse_fallback_default_to_zero_and_false(
+    isolated_ledger_db,
+) -> None:
+    """ROADMAP 2.1: every pre-existing call site (this direct call included)
+    that doesn't pass `retries`/`parse_fallback` gets 0/False, not NULL --
+    matches every other `record_llm_call` caller predating this ledger
+    schema change."""
+    record_llm_call(
+        provider="mock",
+        model="mock",
+        purpose="direct_test_defaults",
+        prompt_tokens=0,
+        completion_tokens=0,
+        latency_ms=1.0,
+        success=True,
+        fallback_used=False,
+    )
+    rows = _all_calls(isolated_ledger_db)
+    assert rows[0].retries == 0
+    assert rows[0].parse_fallback is False
+
+
+def test_record_llm_call_persists_retries_and_parse_fallback(isolated_ledger_db) -> None:
+    """ROADMAP 2.1: `generate_structured`'s repair-loop retry count and
+    Ollama/mock parse_fallback flag round-trip through the `llm_calls`
+    table unchanged."""
+    record_llm_call(
+        provider="ollama",
+        model="llama3.2",
+        purpose="detailed_instructions",
+        prompt_tokens=10,
+        completion_tokens=5,
+        latency_ms=2.0,
+        success=True,
+        fallback_used=False,
+        retries=1,
+        parse_fallback=True,
+    )
+    rows = _all_calls(isolated_ledger_db)
+    assert rows[0].retries == 1
+    assert rows[0].parse_fallback is True
+
+
 def test_record_llm_call_prefers_real_counts_over_estimate(isolated_ledger_db) -> None:
     """A provided real count is never overridden by the len//4 estimate,
     even when prompt_text/completion_text would estimate differently."""
@@ -345,6 +388,43 @@ def test_admin_llm_usage_aggregates_calls_tokens_and_cost(
     mock_row = next(row for row in response.rows if row.provider == "mock")
     assert mock_row.calls == 1
     assert mock_row.cost_usd == 0.0
+
+
+def test_admin_llm_usage_aggregates_parse_fallback_count(
+    isolated_ledger_db, _session_secret
+) -> None:
+    """ROADMAP 2.1 acceptance criterion: parse_fallback activations must be
+    measurable via GET /admin/llm-usage, the same way fallback_used already
+    is -- not just recorded in the raw `llm_calls` table."""
+    record_llm_call(
+        provider="ollama",
+        model="llama3.2",
+        purpose="recipe_generation",
+        prompt_tokens=100,
+        completion_tokens=50,
+        latency_ms=10.0,
+        success=True,
+        fallback_used=False,
+        parse_fallback=True,
+    )
+    record_llm_call(
+        provider="openai",
+        model="gpt-4.1-mini",
+        purpose="recipe_generation",
+        prompt_tokens=100,
+        completion_tokens=50,
+        latency_ms=10.0,
+        success=True,
+        fallback_used=False,
+        parse_fallback=False,
+    )
+
+    response = build_usage_response(days=7)
+
+    ollama_row = next(row for row in response.rows if row.provider == "ollama")
+    openai_row = next(row for row in response.rows if row.provider == "openai")
+    assert ollama_row.parse_fallback_count == 1
+    assert openai_row.parse_fallback_count == 0
 
 
 def test_admin_llm_usage_http_endpoint_returns_aggregates(
