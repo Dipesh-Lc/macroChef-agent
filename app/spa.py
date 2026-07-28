@@ -28,7 +28,16 @@ logger = get_logger(__name__)
 # tests/test_spa_serving.py as a guard: no API route may equal or be a
 # prefix-parent of any of these, or a browser GET to that path would hit the
 # JSON API instead of the SPA shell.
-SPA_ROUTES: list[str] = ["/", "/plan", "/chat", "/day", "/week", "/my-recipes", "/shared/{id}"]
+SPA_ROUTES: list[str] = [
+    "/",
+    "/plan",
+    "/chat",
+    "/day",
+    "/week",
+    "/my-recipes",
+    "/shared/{id}",
+    "/evals",
+]
 
 # Name assigned to the catch-all fallback route, so other code (e.g. the
 # route-collision guard test) can identify and exclude it -- it is a

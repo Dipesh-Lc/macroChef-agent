@@ -20,6 +20,7 @@ import WeekPlanPage from "./pages/WeekPlanPage";
 import MyRecipesPage from "./pages/MyRecipesPage";
 import RecipeSearchPage from "./pages/RecipeSearchPage";
 import SharedPlanPage from "./pages/SharedPlanPage";
+import EvalsPage from "./pages/EvalsPage";
 import { ComingSoonPage } from "./components/ComingSoonPage";
 
 const queryClient = new QueryClient();
@@ -42,6 +43,7 @@ createRoot(rootElement).render(
             <Route path="my-recipes" element={<MyRecipesPage />} />
             <Route path="search" element={<RecipeSearchPage />} />
             <Route path="shared/:shareId" element={<SharedPlanPage />} />
+            <Route path="evals" element={<EvalsPage />} />
             <Route
               path="chat"
               element={

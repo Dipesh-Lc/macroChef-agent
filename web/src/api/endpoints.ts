@@ -12,6 +12,8 @@ import type {
   DeleteRecipeResponse,
   DetailedInstructionsRequest,
   DetailedInstructionsResponse,
+  EvalReport,
+  EvalReportNotAvailable,
   FeedbackRequest,
   InventoryObservation,
   Recipe,
@@ -327,5 +329,28 @@ export async function deleteLibraryRecipe(recipeId: string): Promise<DeleteRecip
   return apiRequest<DeleteRecipeResponse>(`/library/${encodeURIComponent(recipeId)}`, {
     method: "DELETE",
     sessionRequired: true,
+  });
+}
+
+// GET /evals/latest reads a static, already-written JSON file off disk
+// (`app.api.routes_evals`'s docstring) -- no LLM call, no corpus scan, so it
+// gets a short timeout rather than one of the generous LLM-shaped budgets
+// above.
+const EVAL_REPORT_TIMEOUT_MS = 10_000;
+
+/**
+ * Public call: no session bootstrap, no CSRF header (`GET /evals/latest` is
+ * an unauthenticated route, same posture as `getSharedPlan` -- see
+ * `app.api.routes_evals`'s module docstring: it's meant for a public eval
+ * page and for anyone reading the repo). Returns either the real
+ * `EvalReport` or the typed "not generated yet" body -- both are ordinary
+ * HTTP 200s (see that module's docstring for why a missing report is not an
+ * error); `EvalsPage.tsx` discriminates on the `status` field. A malformed
+ * report file surfaces as a 502, which this rejects as a normal `ApiError`.
+ */
+export async function getLatestEvalReport(): Promise<EvalReport | EvalReportNotAvailable> {
+  return apiRequest<EvalReport | EvalReportNotAvailable>("/evals/latest", {
+    method: "GET",
+    timeoutMs: EVAL_REPORT_TIMEOUT_MS,
   });
 }
