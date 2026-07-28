@@ -159,6 +159,35 @@ service runs the built image's single FastAPI/uvicorn process only (no
 `web/` dev loop) — useful for smoke-testing the production topology, not
 for day-to-day SPA development (see that file's own comment).
 
+## SSE / long-lived connections (ROADMAP.md Phase 3, Step 3.1)
+
+`POST /recipes/recommend/stream` (`app/api/routes_stream.py`) holds one HTTP
+connection open for the duration of a full graph run (20-45s is typical
+today; a slow LLM provider call or USDA grounding lookup could push this
+longer) while relaying `RunEvent`s as Server-Sent Events, ending with a
+terminal `result`/`error` event. Two ACA ingress behaviors matter for this:
+
+- **Idle timeout:** ACA's HTTP ingress (Envoy-based) closes a connection
+  after a period with no bytes sent, independent of total connection
+  duration. The stream endpoint sends an SSE comment line (`: heartbeat`)
+  every ~10s of silence between node events specifically to stay under
+  this — see `HEARTBEAT_INTERVAL_SECONDS` in `routes_stream.py`. If a
+  future change ever needs a *longer* per-request wall-clock timeout (not
+  just idle), Container Apps ingress does not currently expose that as a
+  first-class Terraform/`az containerapp` setting the way, e.g., Azure
+  Application Gateway does — this would need re-checking against the
+  Container Apps ingress docs before relying on any specific number.
+- **`X-Accel-Buffering: no`:** set on the stream response so an
+  nginx-style intermediary (not currently in this app's own path — ACA's
+  ingress is Envoy, not nginx — but relevant if a CDN/reverse proxy is ever
+  added in front of it) doesn't buffer the whole response before sending
+  it, which would defeat "live" streaming entirely.
+- Because `min-replicas=1`/`max-replicas=1` is already the deployed
+  topology (see "Cost implication" below), an SSE connection pinned to the
+  single replica is not a new scaling concern this step introduces — it's
+  the same single-writer/single-process posture the rest of this document
+  already documents.
+
 ## Safety-benchmark gate status
 
 The release gate is **zero adjudicated-true `inherent` violations** on the

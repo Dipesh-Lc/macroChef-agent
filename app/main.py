@@ -16,6 +16,7 @@ from app.api.routes_recommendations import router as recommendations_router
 from app.api.routes_safety_tools import router as safety_tools_router
 from app.api.routes_session import router as session_router
 from app.api.routes_share import router as share_router
+from app.api.routes_stream import router as stream_router
 from app.config import get_settings
 from app.data.db import init_db
 from app.dependencies import validate_session_secret_at_startup
@@ -282,6 +283,11 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(inventory_router)
     app.include_router(recommendations_router)
+    # ROADMAP 3.1: SSE streaming variant of POST /recipes/recommend -- see
+    # app/api/routes_stream.py's module docstring. Registered right after
+    # recommendations_router (both are under the same /recipes prefix; this
+    # keeps the two recommend-flavored routers adjacent in this list).
+    app.include_router(stream_router)
     app.include_router(library_router)
     app.include_router(feedback_router)
     app.include_router(day_planner_router)

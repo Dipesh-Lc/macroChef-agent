@@ -172,6 +172,46 @@ class EventSink(Protocol):
     def emit(self, event: RunEvent) -> None: ...
 
 
+# ---------------------------------------------------------------------------
+# sink-override contextvar (ROADMAP 3.1)
+#
+# `traced_node` resolves its sink at CALL time from (in priority order): an
+# explicit `sink=` kwarg baked in at decoration time (no node uses this
+# today), then this contextvar, then the process-wide `get_default_sink()`.
+# This exists so the SSE streaming endpoint (app.api.routes_stream) can give
+# ONE in-flight request its own private `InMemorySink` -- scoped to that
+# request's worker thread via `asyncio.to_thread`, which copies the calling
+# coroutine's `contextvars.Context` (including this var) into the thread it
+# spawns -- without swapping the process-wide default sink (which would mean
+# every OTHER concurrent request, including the plain synchronous
+# POST /recipes/recommend, also started accumulating events in that sink
+# with no one to ever call `InMemorySink.clear()` on their behalf: a slow
+# unbounded memory leak). Mirrors `bind_user_id`/`peek_user_id`/
+# `reset_user_id` above: `None` is a valid, common state ("no override, use
+# the process default") and is never synthesized -- only explicitly bound.
+# ---------------------------------------------------------------------------
+
+_SINK_OVERRIDE_CTX: ContextVar[EventSink | None] = ContextVar(
+    "macrochef_sink_override", default=None
+)
+
+
+def bind_sink_override(sink: EventSink | None) -> Token:
+    """Bind a per-context sink override for `traced_node` to prefer over the
+    process-wide default. Returns a Token for `reset_sink_override`."""
+    return _SINK_OVERRIDE_CTX.set(sink)
+
+
+def peek_sink_override() -> EventSink | None:
+    """Return the currently bound sink override, or None if nothing was
+    bound in this context -- never mints/falls back to a default itself."""
+    return _SINK_OVERRIDE_CTX.get()
+
+
+def reset_sink_override(token: Token) -> None:
+    _SINK_OVERRIDE_CTX.reset(token)
+
+
 class InMemorySink:
     """Per-run, in-process event buffer.
 
@@ -276,9 +316,12 @@ def traced_node(
       degrading it just because a node happened to short-circuit. When the
       node already added its own entry, `debug_trace` is left exactly as
       the node produced it -- no duplicate line.
-    - `sink` defaults to the process-wide `get_default_sink()` at CALL time
-      (not decoration time), so tests/scripts can swap sinks via
-      `set_default_sink` without needing to re-decorate anything.
+    - `sink` defaults, at CALL time (not decoration time), to the current
+      `peek_sink_override()` if one is bound in this context (ROADMAP 3.1 --
+      see that function's docstring), else the process-wide
+      `get_default_sink()`. Tests/scripts can swap the process-wide default
+      via `set_default_sink`, or scope a sink to a single in-flight request
+      via `bind_sink_override`, without needing to re-decorate anything.
     - ROADMAP 1.3: also emits one OTel span per node execution, nested
       under whatever span is current (the HTTP request span when tracing
       is active, or a parent node's span for a subgraph) -- but ONLY when
@@ -292,7 +335,7 @@ def traced_node(
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            active_sink = sink if sink is not None else get_default_sink()
+            active_sink = sink if sink is not None else (peek_sink_override() or get_default_sink())
             run_id = get_run_id()
             input_state = args[0] if args else kwargs.get("state")
             before_trace = _debug_trace_of(input_state)

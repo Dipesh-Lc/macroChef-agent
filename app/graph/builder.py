@@ -58,61 +58,72 @@ class SequentialMacroChefGraph:
 
 
 def build_macrochef_graph():
+    # ROADMAP 3.1: narrowed from a bare `try: <entire build+compile> except
+    # Exception: return SequentialMacroChefGraph()` to wrap ONLY the import,
+    # matching app.graph.library_builder.build_library_discovery_graph's
+    # existing pattern. The old broad `try` silently swallowed ANY error
+    # during graph construction (a typo in an edge label, a node-signature
+    # mismatch, a `StateGraph`/`graph.compile()` bug) with zero logging,
+    # silently degrading every request to the untraced-by-LangGraph
+    # sequential fallback runner -- exactly the kind of failure this same
+    # streaming work needs to surface loudly, not hide. A missing/broken
+    # `langgraph` import is the only case that should fall back quietly;
+    # anything else in graph construction is a real bug that must raise.
     try:
         from langgraph.graph import END, START, StateGraph
-
-        graph = StateGraph(MacroChefState)
-        graph.add_node("intake_node", intake_node)
-        graph.add_node("inventory_confirmation_node", inventory_confirmation_node)
-        graph.add_node("constraint_builder_node", constraint_builder_node)
-        graph.add_node("recipe_retriever_node", recipe_retriever_node)
-        graph.add_node("safety_filter_node", safety_filter_node)
-        graph.add_node("fallback_relaxation_node", fallback_relaxation_node)
-        # Phase 3: deterministic substitution engine -- see app.graph.nodes.
-        # substitution_node's docstring. Wired below (via the "nutrition_
-        # scoring" conditional-edge label) after safety_filter_node/
-        # fallback_relaxation_node, before nutrition_scoring_node.
-        graph.add_node("substitution_node", substitution_node)
-        graph.add_node("nutrition_scoring_node", nutrition_scoring_node)
-        graph.add_node("meal_ranking_node", meal_ranking_node)
-        graph.add_node("procurement_node", procurement_node)
-        graph.add_node("memory_update_node", memory_update_node)
-
-        graph.add_edge(START, "intake_node")
-        graph.add_conditional_edges(
-            "intake_node",
-            after_intake,
-            {"inventory_confirmation": "inventory_confirmation_node", "end": END},
-        )
-        graph.add_conditional_edges(
-            "inventory_confirmation_node",
-            after_inventory_confirmation,
-            {"constraint_builder": "constraint_builder_node", "end": END},
-        )
-        graph.add_edge("constraint_builder_node", "recipe_retriever_node")
-        graph.add_edge("recipe_retriever_node", "safety_filter_node")
-        graph.add_conditional_edges(
-            "safety_filter_node",
-            after_safety_filter,
-            {
-                "fallback_relaxation": "fallback_relaxation_node",
-                "nutrition_scoring": "substitution_node",
-                "end": END,
-            },
-        )
-        graph.add_conditional_edges(
-            "fallback_relaxation_node",
-            after_fallback,
-            {"nutrition_scoring": "substitution_node", "end": END},
-        )
-        graph.add_edge("substitution_node", "nutrition_scoring_node")
-        graph.add_edge("nutrition_scoring_node", "meal_ranking_node")
-        graph.add_edge("meal_ranking_node", "procurement_node")
-        graph.add_edge("procurement_node", "memory_update_node")
-        graph.add_edge("memory_update_node", END)
-        return graph.compile()
     except Exception:
         return SequentialMacroChefGraph()
+
+    graph = StateGraph(MacroChefState)
+    graph.add_node("intake_node", intake_node)
+    graph.add_node("inventory_confirmation_node", inventory_confirmation_node)
+    graph.add_node("constraint_builder_node", constraint_builder_node)
+    graph.add_node("recipe_retriever_node", recipe_retriever_node)
+    graph.add_node("safety_filter_node", safety_filter_node)
+    graph.add_node("fallback_relaxation_node", fallback_relaxation_node)
+    # Phase 3: deterministic substitution engine -- see app.graph.nodes.
+    # substitution_node's docstring. Wired below (via the "nutrition_
+    # scoring" conditional-edge label) after safety_filter_node/
+    # fallback_relaxation_node, before nutrition_scoring_node.
+    graph.add_node("substitution_node", substitution_node)
+    graph.add_node("nutrition_scoring_node", nutrition_scoring_node)
+    graph.add_node("meal_ranking_node", meal_ranking_node)
+    graph.add_node("procurement_node", procurement_node)
+    graph.add_node("memory_update_node", memory_update_node)
+
+    graph.add_edge(START, "intake_node")
+    graph.add_conditional_edges(
+        "intake_node",
+        after_intake,
+        {"inventory_confirmation": "inventory_confirmation_node", "end": END},
+    )
+    graph.add_conditional_edges(
+        "inventory_confirmation_node",
+        after_inventory_confirmation,
+        {"constraint_builder": "constraint_builder_node", "end": END},
+    )
+    graph.add_edge("constraint_builder_node", "recipe_retriever_node")
+    graph.add_edge("recipe_retriever_node", "safety_filter_node")
+    graph.add_conditional_edges(
+        "safety_filter_node",
+        after_safety_filter,
+        {
+            "fallback_relaxation": "fallback_relaxation_node",
+            "nutrition_scoring": "substitution_node",
+            "end": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "fallback_relaxation_node",
+        after_fallback,
+        {"nutrition_scoring": "substitution_node", "end": END},
+    )
+    graph.add_edge("substitution_node", "nutrition_scoring_node")
+    graph.add_edge("nutrition_scoring_node", "meal_ranking_node")
+    graph.add_edge("meal_ranking_node", "procurement_node")
+    graph.add_edge("procurement_node", "memory_update_node")
+    graph.add_edge("memory_update_node", END)
+    return graph.compile()
 
 
 def request_to_state(request: RecommendationRequest, user_id: str) -> MacroChefState:
