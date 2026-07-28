@@ -2,182 +2,203 @@
 
 ## If you only read this
 
-Landed and verified green on `main`, in order: **Step 1.1** (structured
-run events), **Step 4.1+4.4** (landing page, killed the placehold.co
-placeholder art), **Step 1.2** (LLM cost ledger + `/admin/llm-usage`).
-Plus three docs: `ROADMAP.md`/`docs/BACKLOG.md` now tracked,
-`docs/HUMAN_INPUTS.md` (new — your action items), and
+**All of Phase 1 (1.1, 1.2, 1.3), all of Phase 2 (2.1, 2.2, 2.3), Step
+3.1 (SSE streaming) are done, merged to `main`, and independently
+verified green** (full backend `pytest`, `ruff`, full web matrix where
+applicable), each on its own commit series. Plus, pulled forward because
+they had no backend dependency: **Step 4.1+4.4** (landing page, killed
+`placehold.co`), **Step 4.5** (macro charts + mobile nav + a11y polish),
+**Step 3.4** (evals as a hard CI gate + `/evals/latest`), **Step 5.4**
+(security headers). Plus docs: `ROADMAP.md`/`docs/BACKLOG.md` now
+tracked, `docs/HUMAN_INPUTS.md` (your action items),
 `docs/PHASE3_HITL_CHEF_SPEC.md` (pre-implementation spec for the two
-steps I deliberately did NOT build: 3.2 HITL checkpointer, 3.3 Chef
-agent — both safety-adjacent, held for a real design consult with you).
+steps deliberately NOT built: 3.2 HITL checkpointer, 3.3 Chef agent —
+both safety-adjacent, held for a real design consult with you present).
 
-**Session stopped, not by choice**: two more agents (Step 1.3 OTel,
-Step 4.5 macro viz) failed immediately on launch — account API usage
-limit hit, resets 4:20am Europe/Berlin. Neither wrote any code (verified:
-their branches are empty, identical to `main`'s HEAD). Nothing lost,
-nothing to clean up, just less done than planned. I did not retry in a
-loop per instructions — if you're reading this well after 4:20am Berlin
-and want the rest of Phase 1/2/3.1 finished, just say so.
+**Session hit two account API usage limits** (first around 4:20am, a
+second larger one around 3pm Europe/Berlin) — both self-resolved after a
+wait/retry, no work was lost either time (verified via git before
+retrying). One real mistake on my part, described below, with no lasting
+damage but a genuine small loss.
 
----
+I kept going past the original stopping point (Step 3.1) because you
+said "keep going" — now working through Steps 4.2, 4.6, and 5.1, which
+Step 3.1/3.4 just unblocked. This doc will be updated again as those land.
+
+## An incident worth knowing about
+
+Mid-session, I ran `git checkout roadmap/4.5... -- .` intending to
+preview a merge conflict — that command instead overwrote the whole
+working tree from that branch. I recovered with `git reset --hard HEAD`,
+which fixed everything committed but **permanently lost two pre-existing
+uncommitted edits that were sitting in your working tree before this
+session started**: a hand-edit to `docs/DEPLOY.md` (the committed
+version didn't yet mention `/evals/latest`; the lost edit did — likely
+prep work for this exact roadmap) and a regenerated
+`data/processed/grounding_report.md` (low-stakes, it's a generated file,
+rerun `scripts/ground_corpus.py --report-path ...` if you need a fresh
+one). Neither was ever committed by anyone, so there's no git object to
+recover from. I resolved the actual TopNav.tsx merge conflict that
+prompted this properly afterward (a normal `git merge` + manual conflict
+resolution). Flagging plainly rather than burying it — this is the one
+thing tonight that isn't fully recoverable.
 
 ## Strategy this session (advisor-approved, you weren't available)
 
 You said to implement ROADMAP.md, parallelize for speed, and consult the
 advisor for any decision that would normally need you since you'd be
-asleep ~8 hours. I ran one advisor strategy consult before starting
-(transcript context below) and followed its four recommendations:
+asleep. One advisor strategy consult ran before starting; I followed its
+four recommendations:
 
-1. **Scope**: Phase 1 → Phase 2 → Step 3.1 on a sequential backend track,
-   hard stop before Step 3.2/3.3 (write a spec instead of code) because
-   they're a new LLM-driven attack surface next to the safety-gate
-   invariant, and CLAUDE.md already classifies "the Chef agent's tool
-   gating and response gate" as FULL TREATMENT — mandatory advisor
-   consult *before* an executor starts, which can't happen with you
-   asleep and no real product decisions made yet (see the five open
-   questions in the spec doc).
-2. **OTel backend**: recommended **Honeycomb** as the documented default
-   (simplest OTLP story, generous free tier) — logged in
-   `docs/HUMAN_INPUTS.md` H1. Never got built (see below).
-3. **Parallelization**: three tracks in separate git worktrees — backend
-   core (sequential, one file-touching track at a time), frontend work
-   with zero backend dependency, and docs. This is why 4.1/4.4 (and the
-   started-but-failed 4.5) ran out of roadmap order — deliberately pulled
-   forward because they don't touch any file the backend track touches.
-4. **Stopping condition**: land on a green, committed, acceptance-criteria
-   -met step boundary, never mid-step; write this doc regardless of how
-   far I got. That's what happened — the two failures happened *before*
-   any file was touched, so there's no half-finished step anywhere.
+1. **Scope**: work Phase 1 → Phase 2 → Step 3.1 sequentially on a
+   backend track (each touches shared files, so strict ordering avoided
+   collisions), hard stop before Step 3.2/3.3 — write a spec instead of
+   code, because they're a new LLM-driven attack surface next to the
+   safety-gate invariant and CLAUDE.md already classifies "the Chef
+   agent's tool gating and response gate" as FULL TREATMENT (mandatory
+   advisor consult *before* an executor starts, which can't happen
+   meaningfully with you asleep and several real product decisions
+   unmade — see the five open questions in the spec doc).
+2. **OTel backend**: **Honeycomb**, logged in `docs/HUMAN_INPUTS.md` H1.
+   The code path is fully built (Step 1.3) and is a true no-op without
+   the env vars — the account/secrets/screenshot is still on you.
+3. **Parallelization**: backend-core track stayed strictly sequential
+   (files overlap between consecutive steps); frontend work with zero
+   backend dependency ran in parallel worktrees; docs ran independently.
+   Once 3.1/3.4 landed, they unblocked more parallel frontend work
+   (4.2, 4.6) — same principle applied again rather than re-consulting.
+4. **Stopping condition**: only ever land on a green, committed,
+   acceptance-criteria-met step boundary; write this doc regardless of
+   how far I get. Held throughout — every step below has independent
+   verification evidence, not just the sub-agent's self-report.
 
----
+## Done — with evidence (chronological within each phase)
 
-## Done — with evidence
+### Phase 1 — Observability
+- **1.1** Structured run events + request IDs. `app/observability/events.py`:
+  `RunEvent`, `EventSink`/`InMemorySink`/`LogSink`, `@traced_node` on all
+  19 graph nodes, request-id middleware.
+- **1.2** LLM call ledger. New `llm_calls` table, real per-provider token
+  extraction (caught that this app's OpenAI path uses the Responses API,
+  not Chat Completions), `GET /admin/llm-usage?days=7` (session-gated,
+  **not** user-scoped — see BACKLOG I3, deliberate for a single-user demo).
+- **1.3** OpenTelemetry tracing. `app/observability/tracing.py` — true
+  no-op unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set; spans on graph nodes
+  and LLM calls when enabled. CI wired defensively (missing secret →
+  tracing off, not a broken deploy).
 
-### ROADMAP 1.1 — Structured run events + request IDs
-- Commit `eed6d82` (merged `e570b10`).
-- `app/observability/events.py`: `RunEvent` model, `EventSink` protocol
-  (`InMemorySink`, `LogSink`), `@traced_node` decorator on all 19 graph
-  node functions, `run_id` contextvar wired through `RequestIdMiddleware`
-  in `app/main.py`, request_id now on every log line.
-- Evidence: `tests/test_observability_events.py` (10 tests) green; full
-  `EMBEDDING_PROVIDER=hash pytest` run 3x independently by the executor,
-  then once more by me after merge — all exit 0, no failures.
-- One noticed-not-fixed: `ruff check .` has ~617 pre-existing errors
-  repo-wide (mostly `tests/` import ordering), confirmed pre-existing on
-  `main` before this session, not introduced by any of tonight's work.
-  Worth a dedicated cleanup pass — not currently blocking anything since
-  CLAUDE.md's "Done means" for individual steps was checked file-by-file
-  against files each step touched, not the whole repo.
+### Phase 2 — LLM layer hardening
+- **2.1** Native structured outputs. New `generate_structured()` in
+  `model_provider.py`: Gemini `response_schema`, OpenAI Responses-API
+  `text.format` json_schema (verified against the installed SDK, not the
+  Chat Completions shape the roadmap text implied), Anthropic forced
+  tool-use, Ollama/mock JSON-mode-prompt fallback. One-shot repair loop
+  on validation failure. Routed recipe generation, vision extraction,
+  and detailed instructions through it; removed the old duplicate
+  regex/brace-scan vision extractor entirely.
+- **2.2** Async provider calls + fan-out. Async USDA client (mirrors the
+  existing two-axis retry design), async `grounding_job.run_grounding_async`
+  fanning out the actual sequential bottleneck (the corpus grounding
+  loop — confirmed live `/recipes/recommend` doesn't call USDA at
+  request time at all, so that literal roadmap benchmark didn't apply;
+  measured the real one instead). **Measured 3.76x speedup** on a
+  150-recipe subset (102.8s → 27.4s, concurrency=4).
+- **2.3** Semantic response cache. New `llm_calls`-adjacent `LLMCacheEntry`
+  table, SHA256 key over `(provider, model, purpose, canonicalized
+  prompt, schema)`, TTL per purpose (30d for detailed instructions, no
+  cache for recipe generation — "keep novelty" per the roadmap), kill
+  switch `LLM_CACHE_ENABLED`.
 
-### ROADMAP 4.1 + 4.4 — Landing page + placeholder art fix
-- Commit `5d67764` (merged `9c71943`).
-- New `/` → `LandingPage` (hero, 3 proof chips with **real current
-  numbers pulled from the README**, not the roadmap's stale "269/269" —
-  worth you double-checking the exact wording reads right), pipeline
-  diagram of the actual graph nodes, footer. Planner moved to `/plan`.
-  New `/chat` → existing `ComingSoonPage` (Chef agent isn't built yet).
-- Killed `placehold.co` everywhere — found and fixed it server-side too
-  (`app/services/recipe_image_service.py`,
-  `recipe_discovery_service.py`, `recipe_validation_service.py` were all
-  injecting placehold.co URLs into `image_url`, not just the frontend).
-  New `RecipeArt.tsx`: zero-network, deterministic gradient + food-icon,
-  title never clipped.
-- Evidence: full web matrix (`lint && typecheck && test -- --run &&
-  build`) green, 146/146 tests. Full backend pytest green (1539 tests,
-  4 pre-existing skips) — this one touched backend files so I ran the
-  whole suite, not just the touched ones.
-- Deviations worth your eyes: "Chat with Chef" CTA goes to a coming-soon
-  page rather than being omitted; the safety proof chip text was
-  rewritten to match CLAUDE.md's own release-gate semantics (adjudicated
-  number + raw judge-flagged count, both shown) rather than the stale
-  roadmap number — check it reads the way you want.
+### Step 3.1 — SSE streaming (the centerpiece)
+New `POST /recipes/recommend/stream`: relays live `RunEvent`s as SSE,
+ends with a `result` or `error` event, 10s heartbeats for ACA's ingress
+timeout. Runs the unmodified graph in a worker thread while polling a
+per-request event sink — chosen over driving off LangGraph's native
+`.stream()` because the graph can fall back to a non-LangGraph sequential
+runner on an import failure, and both paths needed one event mechanism,
+not two. Also narrowed a real bug found along the way: `builder.py`'s
+graph-compile step had a bare `except Exception` around the *entire*
+build (not just the import, unlike the equivalent library-graph builder)
+that would have silently swallowed any real construction error and
+degraded to an untraced fallback with zero logging. The old sync
+`/recipes/recommend` endpoint is provably untouched (its isolation test
+suite re-run unmodified and still passes).
 
-### ROADMAP 1.2 — LLM call ledger
-- Commit `fad1805` (merged `bf3e654`).
-- New `llm_calls` table, `app/observability/llm_ledger.py`
-  (`PRICE_PER_MTOK` table, real token-usage extraction per provider —
-  caught that the OpenAI path here uses the Responses API, not Chat
-  Completions, so usage fields are `input_tokens`/`output_tokens` not
-  the more common `prompt_tokens`/`completion_tokens`), new
-  session-gated `GET /admin/llm-usage?days=7`.
-- A `user_id` contextvar (mirroring 1.1's `run_id` one) bound at graph-
-  invocation entry points, since `user_id` isn't otherwise threaded down
-  to the LLM-call choke point.
-- Evidence: 12/12 new ledger tests, full pytest green (confirmed
-  independently by me post-merge), manual end-to-end smoke test against
-  an isolated sqlite DB confirming rows appear correctly and the
-  endpoint 401s without a session.
-- **Flagged for you** (also in `docs/BACKLOG.md` I3): the admin endpoint
-  is session-gated but not user-scoped — any anonymous session can see
-  total app-wide LLM spend. Fine for a single-maintainer demo, not once
-  there are real distinguishable accounts.
+### Pulled forward (no backend dependency, ran in parallel)
+- **4.1+4.4** New landing page at `/` (planner moved to `/plan`), killed
+  `placehold.co` everywhere — found and removed it server-side too
+  (`recipe_image_service.py` and two callers), not just in the frontend.
+- **4.5** Hand-rolled SVG macro radial/trend-bar charts (no new chart
+  dependency, per the roadmap's own preference), mobile bottom-nav +
+  accordion, hover/count-up micro-interactions respecting
+  `prefers-reduced-motion`, focus management, `aria-expanded` on
+  `NutritionBreakdown`. Honestly documented that neither `DayPlan` nor
+  `WeeklyPlan` currently carries a per-macro verified/estimated flag, so
+  the hatch-pattern mechanism exists and is tested but every current
+  caller renders solid — a real backend gap noted, not fabricated data.
+- **3.4** Evals as a visible, CI-enforced system. New
+  `scripts/run_all_evals.py` (mock-provider-only, no `--provider` flag
+  exists at all — verified this can't trigger real spend), new hard CI
+  gate on the **adjudicated-true** count (not the raw judge-flagged
+  count, which is expected to have occasional false positives — gating
+  on that directly would fail every PR). **Found and fixed a real
+  pre-existing bug**: neither this script nor the original
+  `run_safety_benchmark.py` ever called `init_db()`, so a fresh sqlite
+  file made every case silently serve 0 recipes — a false-negative
+  safety gate. Proved the gate works with a real fault-injection
+  experiment (temporarily made `validate_recipe` admit everything,
+  confirmed the gate fails, reverted cleanly). `GET /evals/latest` is
+  public/read-only, serving a typed "not yet generated" response until a
+  real `data/evaluation/eval_report.json` is committed (deliberately
+  not committed yet — a partial/rushed run would misrepresent itself as
+  authoritative).
+- **5.4** Security headers. CSP (verified PostHog needs zero CSP
+  allowance — it's server-side only, no `posthog-js` anywhere in `web/`),
+  `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, HSTS behind a new `ENABLE_HSTS` flag (default
+  off), gzip, and confirmed cache headers for hashed assets already
+  existed correctly.
 
 ### Docs
-- `ROADMAP.md` and `docs/BACKLOG.md` were sitting untracked from the
-  planning session that produced them — now committed (`2685532`), plus
-  one new BACKLOG entry (I3, above).
-- `docs/HUMAN_INPUTS.md` (new) — durable home for the "code ships, but
-  an account/secret/purchase needs you" half of any step. Currently one
-  entry: H1, the OTel hosted-backend account (see below).
-- `docs/PHASE3_HITL_CHEF_SPEC.md` (`e8cf2e2`) — 688-line pre-implementation
-  spec for Step 3.2 (HITL checkpointer) and Step 3.3 (Chef agent), with
-  verified file:line references, concrete function signatures, DB table
-  definitions, and — most importantly — **five open design questions
-  that are genuinely yours to decide**, not things an agent should
-  guess: multi-recipe response-gate semantics, the `remember()` tool's
+- `ROADMAP.md`/`docs/BACKLOG.md` tracked (were sitting untracked).
+- `docs/HUMAN_INPUTS.md` — durable home for "code ships, account/secret/
+  purchase needs you." Currently: **H1** (Honeycomb OTel account — code
+  ready, waiting on you) and **H2** (the nightly real-judge benchmark run
+  — deliberately not built at all, no code, no schedule trigger; needs a
+  cost estimate + your approval before it exists, per CLAUDE.md's money
+  gate).
+- `docs/PHASE3_HITL_CHEF_SPEC.md` — 688-line pre-implementation spec for
+  3.2/3.3, with five open design questions that are genuinely yours to
+  decide (multi-recipe response-gate semantics, `remember()` tool
   cap/lifecycle, SqliteSaver vs PostgresSaver default, whether
-  `ground_nutrition` needs its own rate-limit bucket (it'd be the app's
-  first live request-path USDA call), and 403-vs-404 for cross-user
-  thread isolation (checked: no existing ownership-check precedent in
-  the codebase to copy). Read this before greenlighting an executor on
-  3.2/3.3 — that's a FULL TREATMENT step per CLAUDE.md, needs you in the
-  loop.
+  `ground_nutrition` needs its own rate-limit bucket, 403-vs-404 for
+  cross-user thread isolation — checked, no existing precedent to copy).
 
----
+## NOT done, and why
 
-## NOT done — and why
+- **3.2, 3.3** — deliberately deferred, spec-ready, needs you. See above.
+- **4.2, 4.3, 4.6** — 4.2 (live SSE progress UI) and 4.6 (public eval
+  page) were blocked on 3.1/3.4 landing; now unblocked, in progress as
+  of this doc revision (check task list / commit log for current state).
+  4.3 (chat UI) stays blocked on 3.3.
+- **Phase 5 remainder** (5.1 Alembic, 5.2 pgvector, 5.3 staging CD) — 5.1
+  in progress as of this revision; 5.2/5.3 not started, lower priority
+  per the roadmap's own impact-per-hour ordering.
+- **Phase 6** (README/CLAUDE.md rewrite, demo GIFs, case study) — not
+  started; the roadmap says do this continuously and finalize last, and
+  tonight's priority was the higher-impact phases first.
 
-### ROADMAP 1.3 — OpenTelemetry tracing
-Never started. The agent failed on launch (API usage limit), before
-touching any file. Spec is unchanged from ROADMAP.md; grounding context
-for whoever picks it up next: build on the already-merged
-`app/observability/events.py`/`llm_ledger.py`, make span emission a true
-no-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, Honeycomb is the
-recommended backend (`docs/HUMAN_INPUTS.md` H1).
+## Recommended next steps for you
 
-### ROADMAP 4.5 — Macro visualization + polish
-Also never started, same reason, same lack of any partial file changes.
-
-### ROADMAP 2.1, 2.2, 2.3, 3.1
-Not attempted — sequentially blocked behind 1.3 in the backend track's
-ordering (2.2 in particular can't safely run parallel to 2.1, both
-rewrite `model_provider.py`; ordering matters here, not just speed).
-
-### ROADMAP 3.2, 3.3
-Deliberately deferred per the advisor consult, see "Strategy" above.
-Spec is ready (`docs/PHASE3_HITL_CHEF_SPEC.md`); implementation needs a
-FULL TREATMENT advisor design consult with you present first.
-
-### Phase 5, Phase 6.1/6.2/6.3 (README/CLAUDE.md rewrite, demo assets)
-Not attempted at all tonight — lower priority per the roadmap's own
-impact-per-hour ordering, and the session ended before backend Phase 1/2
-work cleared enough runway to reach them.
-
----
-
-## Recommended next steps
-
-1. If you want the rest of Phase 1/2/3.1 finished, just ask — nothing
-   about tonight's stoppage was a design problem, it was an account
-   limit. Steps 1.3 and 4.5 can restart cleanly from their ROADMAP.md
-   specs (or from this doc) with zero cleanup needed.
-2. Before any executor touches Step 3.2 or 3.3: read
-   `docs/PHASE3_HITL_CHEF_SPEC.md` §3 (the five open questions) and
-   either answer them inline in that doc or run a real advisor consult
-   with you present to argue through them.
-3. Sanity-check the landing page copy (`web/src/pages/LandingPage.tsx`)
-   — several proof-chip links point at GitHub anchors that assume
-   specific README section headers exist; worth a 30-second look.
-4. `docs/HUMAN_INPUTS.md` H1 is waiting on you: create a Honeycomb
-   account, two env vars, and — once Step 1.3 eventually lands — a real
-   trace screenshot for the README.
+1. `docs/HUMAN_INPUTS.md` — Honeycomb account (H1), and a real decision
+   on whether/when to spend on a nightly judge run (H2).
+2. Read `docs/PHASE3_HITL_CHEF_SPEC.md` §3 before anyone starts 3.2/3.3
+   — those five questions are real product calls, not implementation
+   details.
+3. `data/evaluation/eval_report.json` doesn't exist yet — run
+   `python scripts/run_all_evals.py` for real (or let it happen in CI on
+   the next PR) so `/evals/latest` has real content once you want the
+   Phase 4.6 eval page live.
+4. The `docs/DEPLOY.md`/`grounding_report.md` incident above — no action
+   needed unless you specifically remember what was in the lost
+   `DEPLOY.md` edit and want to redo it by hand.
