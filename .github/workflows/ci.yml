@@ -237,6 +237,40 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        # ROADMAP.md Phase 5, Step 5.1: needed to run `alembic upgrade
+        # head` against the prod DB below, ahead of the traffic-shifting
+        # `az containerapp update` step further down. Not needed by any
+        # other step in this job.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run database migrations
+        # ROADMAP.md Phase 5, Step 5.1 acceptance criterion: migrations
+        # apply before traffic shifts to the new image. This repo has no
+        # infra for an ACA init-container / pre-traffic hook, and doesn't
+        # need one -- `alembic upgrade head` here runs directly against the
+        # prod Postgres (Neon, see docs/DEPLOY.md) using the same
+        # `DATABASE_URL` secret the container itself is given below, from
+        # this job's runner, over the network, the same way any other
+        # Postgres client would connect. This assumes the GitHub Actions
+        # runner can reach Neon directly (no VPC/private-networking
+        # boundary in front of it) -- NOT verified from within this
+        # sandboxed environment; if Neon's connection string ever requires
+        # an IP allowlist that excludes GitHub-hosted runners, this step
+        # needs a self-hosted runner or a documented allowlist entry
+        # instead.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: alembic upgrade head
+
       - name: Azure login
         uses: azure/login@v2
         with:
