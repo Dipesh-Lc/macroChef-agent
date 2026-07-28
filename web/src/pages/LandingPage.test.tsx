@@ -67,11 +67,20 @@ describe("LandingPage", () => {
     }
   });
 
-  it("renders a footer GitHub link and safety methodology link", () => {
+  it("renders a footer GitHub link and an eval methodology link to the new /evals page", () => {
     renderLandingPage();
     const githubLink = screen.getByRole("link", { name: /view on github/i });
     expect(githubLink).toHaveAttribute("href", expect.stringContaining("github.com"));
-    const methodologyLink = screen.getByRole("link", { name: /read the safety methodology/i });
-    expect(methodologyLink).toHaveAttribute("href", expect.stringContaining("github.com"));
+    // ROADMAP 4.6: the methodology link now points at the in-app eval page
+    // (previously a GitHub README anchor stand-in, since the page didn't
+    // exist yet when the landing page was built).
+    const methodologyLink = screen.getByRole("link", { name: /read the eval methodology/i });
+    expect(methodologyLink).toHaveAttribute("href", "/evals");
+  });
+
+  it("the deterministic-allergy-safety proof chip links to the new /evals page", () => {
+    renderLandingPage();
+    const chip = screen.getByRole("link", { name: /deterministic allergy safety/i });
+    expect(chip).toHaveAttribute("href", "/evals");
   });
 });

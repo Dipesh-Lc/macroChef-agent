@@ -92,8 +92,8 @@ const PROOF_CHIPS: ProofChip[] = [
   {
     label: `Deterministic allergy safety — ${SAFETY_HEADLINE}`,
     detail: SAFETY_SUBLINE,
-    href: `${GITHUB_REPO_URL}#2-adversarial-safety-benchmark`,
-    external: true,
+    href: "/evals",
+    external: false,
   },
   {
     label: "USDA-grounded macros",
@@ -228,14 +228,12 @@ export default function LandingPage() {
           <span className="font-mono text-xs text-cast-iron/50">
             Safety benchmark: {SAFETY_HEADLINE}
           </span>
-          <a
-            href={`${GITHUB_REPO_URL}#2-adversarial-safety-benchmark`}
-            target="_blank"
-            rel="noreferrer"
+          <Link
+            to="/evals"
             className="font-medium text-cast-iron underline underline-offset-2 hover:text-basil"
           >
-            Read the safety methodology
-          </a>
+            Read the eval methodology
+          </Link>
         </div>
         <p className="text-xs text-cast-iron/50">
           The LLM never enforces allergies or computes nutrition. Deterministic code does.

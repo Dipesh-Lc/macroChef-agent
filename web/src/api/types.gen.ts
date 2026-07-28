@@ -637,6 +637,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/llm-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Llm Usage
+         * @description Cost/usage dashboard for the LLM call ledger (ROADMAP.md Phase 1,
+         *     Step 1.2): calls, tokens, and estimated cost aggregated by
+         *     (day, provider, model, purpose) over the last `days` days.
+         *
+         *     SCOPING (deliberate, see this task's executor report for the full
+         *     reasoning): `Depends(get_session_user)` here is an access-control speed
+         *     bump only, NOT per-user data isolation -- the aggregates returned are
+         *     GLOBAL (every user's calls), never filtered to `session_user_id`. This
+         *     app has no admin-role concept (sessions are anonymous, one per
+         *     browser); scoping this endpoint to "the caller's own calls" would make
+         *     it useless for its actual purpose (a maintainer cost dashboard), so
+         *     instead it requires ANY valid session as a minimal deterrent against a
+         *     fully anonymous crawler. Consequence: any authenticated session
+         *     (i.e. any browser that has ever hit POST /session) can see total
+         *     app-wide LLM spend. Acceptable for a single-maintainer demo app today;
+         *     must be replaced with a real admin check before this app ever has
+         *     multiple real accounts with something to hide from each other -- see
+         *     docs/BACKLOG.md.
+         */
+        get: operations["get_llm_usage_admin_llm_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Eval Report
+         * @description Returns the current `eval_report.json` contents, or a typed
+         *     "not generated yet" body (still HTTP 200 -- this is an expected,
+         *     ordinary state for a fresh checkout, not an error) if the file is
+         *     absent. A malformed/corrupt file is the one case that surfaces as a
+         *     502: it means something upstream (a bad `scripts/run_all_evals.py`
+         *     write) is broken, which IS worth surfacing loudly rather than masking
+         *     as "not generated".
+         */
+        get: operations["get_latest_eval_report_evals_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -796,6 +859,40 @@ export interface components {
              * @default false
              */
             expires_soon: boolean;
+        };
+        /**
+         * ConstraintProfileResult
+         * @description One profile's pass over the corpus via
+         *     `app.evaluation.eval_constraints.evaluate_constraint_set` (a thin
+         *     wrapper over the real `constraint_engine.validate_recipe`). This is a
+         *     coverage/smoke snapshot, not a graded correctness metric -- there is no
+         *     external ground truth for "how many corpus recipes should a peanut
+         *     allergy reject"; the sanity check below instead watches for the two
+         *     shapes that would indicate a real bug: an unrestricted profile
+         *     rejecting anything, or a restrictive profile rejecting nothing.
+         */
+        ConstraintProfileResult: {
+            /** Label */
+            label: string;
+            /** Allergies */
+            allergies: string[];
+            /** Diet Type */
+            diet_type: string | null;
+            /** Total Recipes */
+            total_recipes: number;
+            /** Valid */
+            valid: number;
+            /** Rejected */
+            rejected: number;
+        };
+        /** ConstraintSuite */
+        ConstraintSuite: {
+            /** Total Recipes */
+            total_recipes: number;
+            /** Profiles */
+            profiles: components["schemas"]["ConstraintProfileResult"][];
+            /** Sane */
+            sane: boolean;
         };
         /**
          * DayPlan
@@ -958,6 +1055,22 @@ export interface components {
             /** Provider Note */
             provider_note?: string | null;
         };
+        /** EvalReport */
+        EvalReport: {
+            /** Generated At Utc */
+            generated_at_utc: string;
+            /** Git Commit */
+            git_commit: string;
+            safety_benchmark: components["schemas"]["SafetyBenchmarkSuite"];
+            retrieval: components["schemas"]["RetrievalSuite"];
+            constraints: components["schemas"]["ConstraintSuite"];
+            /** Deltas Vs Previous */
+            deltas_vs_previous?: {
+                [key: string]: number | boolean | string | null;
+            };
+            /** Notes */
+            notes?: string[];
+        };
         /** FeedbackRequest */
         FeedbackRequest: {
             /** Recipe Id */
@@ -1069,6 +1182,68 @@ export interface components {
              * @default false
              */
             needs_confirmation: boolean;
+        };
+        /**
+         * LLMUsageAggregate
+         * @description One (day, provider, model, purpose) bucket of `llm_calls` rows.
+         */
+        LLMUsageAggregate: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Purpose */
+            purpose: string;
+            /** Calls */
+            calls: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Success Count */
+            success_count: number;
+            /** Failure Count */
+            failure_count: number;
+            /** Fallback Count */
+            fallback_count: number;
+        };
+        /** LLMUsageResponse */
+        LLMUsageResponse: {
+            /** Days */
+            days: number;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            totals: components["schemas"]["LLMUsageTotals"];
+            /** Rows */
+            rows: components["schemas"]["LLMUsageAggregate"][];
+        };
+        /**
+         * LLMUsageTotals
+         * @description Grand totals across every row in `rows` below (same window).
+         */
+        LLMUsageTotals: {
+            /** Calls */
+            calls: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Cost Usd */
+            cost_usd: number;
         };
         /** MacroTargets */
         MacroTargets: {
@@ -1244,8 +1419,12 @@ export interface components {
             title: string;
             /** Cuisine */
             cuisine?: string | null;
+            /** Cuisine Source */
+            cuisine_source?: ("declared" | "recovered_tag" | "gazetteer_matched" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Meal Type */
             meal_type?: string | null;
+            /** Meal Type Source */
+            meal_type_source?: ("declared" | "recovered_tag" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Ingredients */
             ingredients?: components["schemas"]["Ingredient"][];
             /** Instructions */
@@ -1319,8 +1498,12 @@ export interface components {
             title: string;
             /** Cuisine */
             cuisine?: string | null;
+            /** Cuisine Source */
+            cuisine_source?: ("declared" | "recovered_tag" | "gazetteer_matched" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Meal Type */
             meal_type?: string | null;
+            /** Meal Type Source */
+            meal_type_source?: ("declared" | "recovered_tag" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Ingredients */
             ingredients?: components["schemas"]["Ingredient"][];
             /** Instructions */
@@ -1415,8 +1598,12 @@ export interface components {
             title: string;
             /** Cuisine */
             cuisine?: string | null;
+            /** Cuisine Source */
+            cuisine_source?: ("declared" | "recovered_tag" | "gazetteer_matched" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Meal Type */
             meal_type?: string | null;
+            /** Meal Type Source */
+            meal_type_source?: ("declared" | "recovered_tag" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Description */
             description?: string | null;
             /** Ingredients */
@@ -1477,8 +1664,12 @@ export interface components {
             title: string;
             /** Cuisine */
             cuisine?: string | null;
+            /** Cuisine Source */
+            cuisine_source?: ("declared" | "recovered_tag" | "gazetteer_matched" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Meal Type */
             meal_type?: string | null;
+            /** Meal Type Source */
+            meal_type_source?: ("declared" | "recovered_tag" | "llm_inferred" | "human_corrected" | "unknown") | null;
             /** Description */
             description?: string | null;
             /** Ingredients */
@@ -1801,6 +1992,121 @@ export interface components {
             title: string;
             /** Reason */
             reason: string;
+        };
+        /** RetrievalCategoryResult */
+        RetrievalCategoryResult: {
+            /** Category */
+            category: string;
+            /** Gated */
+            gated: boolean;
+            /** Semantic Mrr */
+            semantic_mrr: number;
+            /** Keyword Mrr */
+            keyword_mrr: number;
+            /** Hybrid Mrr */
+            hybrid_mrr: number;
+            /** Semantic Recall At 10 */
+            semantic_recall_at_10: number;
+            /** Keyword Recall At 10 */
+            keyword_recall_at_10: number;
+            /** Hybrid Recall At 10 */
+            hybrid_recall_at_10: number;
+            /** Win */
+            win?: boolean | null;
+        };
+        /**
+         * RetrievalSuite
+         * @description See `app.evaluation.eval_retrieval` / `scripts/evaluate_retrieval.py`
+         *     for the full methodology. `skipped` is True when the Chroma collection
+         *     hasn't been built (e.g. a bare checkout with no baked index) -- this is
+         *     NOT a failure, just "nothing to score yet".
+         */
+        RetrievalSuite: {
+            /** Skipped */
+            skipped: boolean;
+            /** Skip Reason */
+            skip_reason?: string | null;
+            /**
+             * Query Count
+             * @default 0
+             */
+            query_count: number;
+            /** Gate Pass */
+            gate_pass?: boolean | null;
+            /** Categories */
+            categories?: components["schemas"]["RetrievalCategoryResult"][];
+        };
+        /**
+         * SafetyBenchmarkBucket
+         * @description One scored bucket from a `scripts/run_safety_benchmark.py` run
+         *     (`inherent`, `precautionary`, or `safe_control_over_block`).
+         *
+         *     `raw_judge_flagged_*` is `app.evaluation.benchmark.safety_judge`'s own
+         *     count -- a deliberately recall-biased substring matcher, kept
+         *     structurally unable to import the code it grades. It is the "judge"
+         *     half of CLAUDE.md's always-both-numbers rule.
+         *
+         *     `adjudicated_true_*` is the exhaustive mechanical re-check
+         *     (`scripts/verify_benchmark_evidence.py`) that runs the REAL
+         *     `contains_allergen`/`violates_diet_type` production functions directly
+         *     against every judge-flagged case's served ingredients -- the
+         *     "adjudicated" half. It is only computed for the release-blocking
+         *     `inherent` bucket (see `SafetyBenchmarkSuite.release_gate_pass`'s
+         *     docstring for why `precautionary`/`safe_control_over_block` leave this
+         *     `None`): those two buckets are explicitly non-blocking per CLAUDE.md's
+         *     release-gate semantics, and adjudicating them would imply a gate that
+         *     does not exist.
+         */
+        SafetyBenchmarkBucket: {
+            /** Label */
+            label: string;
+            /** Total Cases */
+            total_cases: number;
+            /** Raw Judge Flagged Count */
+            raw_judge_flagged_count: number;
+            /** Raw Judge Flagged Rate */
+            raw_judge_flagged_rate: number;
+            /** Wilson Lower */
+            wilson_lower: number;
+            /** Wilson Upper */
+            wilson_upper: number;
+            /** Raw Judge Flagged Case Ids */
+            raw_judge_flagged_case_ids?: string[];
+            /** Adjudicated True Count */
+            adjudicated_true_count?: number | null;
+            /** Adjudicated True Case Ids */
+            adjudicated_true_case_ids?: string[] | null;
+        };
+        /**
+         * SafetyBenchmarkCategoryBreakdown
+         * @description Per-category (hidden_allergen, prompt_injection, morphology, ...)
+         *     counts from the same worst run used for the `inherent` bucket above.
+         *     Reference/display data for a future frontend eval page -- never itself
+         *     a gate.
+         */
+        SafetyBenchmarkCategoryBreakdown: {
+            /** Category */
+            category: string;
+            /** Total Cases */
+            total_cases: number;
+            /** Raw Judge Flagged Count */
+            raw_judge_flagged_count: number;
+        };
+        /** SafetyBenchmarkSuite */
+        SafetyBenchmarkSuite: {
+            /** Provider */
+            provider: string;
+            /** Runs */
+            runs: number;
+            /** Total Cases */
+            total_cases: number;
+            inherent: components["schemas"]["SafetyBenchmarkBucket"];
+            precautionary: components["schemas"]["SafetyBenchmarkBucket"];
+            safe_control_over_block: components["schemas"]["SafetyBenchmarkBucket"];
+            /** Category Breakdown */
+            category_breakdown?: components["schemas"]["SafetyBenchmarkCategoryBreakdown"][];
+            /** Release Gate Pass */
+            release_gate_pass: boolean;
         };
         /**
          * SaveRecipeCandidatesRequest
@@ -2941,6 +3247,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_llm_usage_admin_llm_usage_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMUsageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_eval_report_evals_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalReport"];
+                };
             };
         };
     };

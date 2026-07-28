@@ -20,6 +20,7 @@ const API_PROXY_PREFIXES = [
   "/plan",
   "/tools",
   "/share",
+  "/evals",
   "/docs",
   "/openapi.json",
 ];

@@ -207,6 +207,14 @@ adjudicated the same way, and the raw and adjudicated numbers are both
 published every time. See `data/evaluation/` for the run this table came
 from and every case's written adjudication.
 
+**Live, browsable version:** the deployed app has a public `/evals` page
+(ROADMAP Step 4.6) that renders whatever `GET /evals/latest` last read from
+the committed `data/evaluation/eval_report.json` — same numbers as the table
+above, plus the category breakdown, retrieval Recall@k/MRR, and the
+constraint-suite sanity check, with a link to the case files for every
+suite. It reads "not yet generated" on a fresh checkout until someone runs
+`scripts/run_all_evals.py`, by design — never a stale or fabricated number.
+
 ### 3. USDA-grounded nutrition
 
 `app/services/usda_client.py` and `nutrition_grounding.py` convert each

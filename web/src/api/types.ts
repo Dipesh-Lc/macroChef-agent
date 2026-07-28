@@ -100,3 +100,27 @@ export type ReindexLibraryResponse = components["schemas"]["ReindexLibraryRespon
 export type DeleteRecipeResponse = components["schemas"]["DeleteRecipeResponse"];
 
 export type HTTPValidationError = components["schemas"]["HTTPValidationError"];
+
+// ROADMAP 4.6: `GET /evals/latest` (`app.api.routes_evals`) response types.
+export type EvalReport = components["schemas"]["EvalReport"];
+export type SafetyBenchmarkSuite = components["schemas"]["SafetyBenchmarkSuite"];
+export type SafetyBenchmarkBucket = components["schemas"]["SafetyBenchmarkBucket"];
+export type SafetyBenchmarkCategoryBreakdown =
+  components["schemas"]["SafetyBenchmarkCategoryBreakdown"];
+export type RetrievalSuite = components["schemas"]["RetrievalSuite"];
+export type RetrievalCategoryResult = components["schemas"]["RetrievalCategoryResult"];
+export type ConstraintSuite = components["schemas"]["ConstraintSuite"];
+export type ConstraintProfileResult = components["schemas"]["ConstraintProfileResult"];
+
+// `EvalReportNotAvailable` (`app.schemas.evals.EvalReportNotAvailable`) has
+// no `components["schemas"]` entry -- `GET /evals/latest` returns it via a
+// hand-built `JSONResponse` rather than FastAPI's `response_model=` path
+// (see `app.api.routes_evals`'s docstring for why: the file-missing case is
+// an ordinary 200, not a schema the OpenAPI response documents), so
+// openapi-typescript never sees it. Hand-declared here to mirror the real
+// Pydantic model's field defaults exactly; `getLatestEvalReport`
+// (`api/endpoints.ts`) discriminates on the `status` field at runtime.
+export interface EvalReportNotAvailable {
+  status: "not_generated";
+  message: string;
+}
