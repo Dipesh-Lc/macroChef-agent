@@ -1,9 +1,12 @@
+import asyncio
 import re
 import time
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
+import httpx
 import requests
 
 from app.config import Settings, get_settings
@@ -814,6 +817,16 @@ class UsdaClient:
     as "this ingredient could not be grounded," never as "zero calories."
 
     `session` and `cache` are injectable so tests never touch the network.
+
+    Async (ROADMAP.md Phase 2, Step 2.2): `search_food_async`/`search_food_
+    with_reason_async` are the async siblings used by `nutrition_grounding.
+    compute_recipe_macros_async`/`grounding_job.run_grounding_async` to fan
+    out a corpus's USDA lookups concurrently instead of one at a time. They
+    share every piece of matching logic with the sync path (`_best_match`,
+    `_select_branded_match`, the plausibility/preparation gates) -- only the
+    HTTP transport and retry/backoff sleep are async; `async_session` is
+    injectable the same way `session` is, so tests never touch the network
+    here either (see `httpx.MockTransport` in tests/test_async_provider.py).
     """
 
     def __init__(
@@ -822,11 +835,22 @@ class UsdaClient:
         session: requests.Session | None = None,
         cache: FdcCache | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        async_session: httpx.AsyncClient | None = None,
+        async_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._settings = settings or get_settings()
         self._session = session or requests.Session()
         self._cache = cache if cache is not None else FdcCache(self._settings.fdc_cache_path)
         self._sleep = sleep
+        # Lazily created on first async use if not injected (see
+        # `_async_client` below) -- most callers (every sync test, and any
+        # script that never calls an `_async` method) never pay for an
+        # httpx.AsyncClient they don't use. `_owns_async_session` tracks
+        # whether THIS instance created it (and so must close it in
+        # `aclose`) versus a caller injecting one it owns the lifecycle of.
+        self._injected_async_session = async_session
+        self._owns_async_session = async_session is None
+        self._async_sleep = async_sleep
         # Cumulative, diagnostic-only tally of INDIVIDUAL-CANDIDATE rejection
         # reasons (see `MatchOutcome.rejections`), incremented once per
         # candidate skipped during matching -- NOT once per query/occurrence
@@ -844,6 +868,32 @@ class UsdaClient:
         # by `grounding_job.run_grounding` for the report; never consulted
         # by matching logic itself.
         self.branded_dispersion_events: list[tuple[str, float, float, int]] = []
+        # Guards the two diagnostic mutations above ONLY on the async path
+        # (`search_food_with_reason_async`), where multiple `asyncio.gather`-
+        # scheduled calls can interleave. Technically redundant under
+        # asyncio's own cooperative single-threaded scheduling -- neither
+        # `Counter.update()` nor `list.append()` contains an `await`, so
+        # another task can never observe a half-applied mutation even
+        # without a lock -- but it's cheap, makes the safety argument
+        # explicit rather than implicit, and future-proofs against a later
+        # change (e.g. running a fetch in a thread executor) that would
+        # actually need it. Never used by the sync path, which has no
+        # concurrent callers to guard against.
+        self._async_diagnostics_lock = asyncio.Lock()
+
+    @property
+    def _async_client(self) -> httpx.AsyncClient:
+        if self._injected_async_session is None:
+            self._injected_async_session = httpx.AsyncClient()
+        return self._injected_async_session
+
+    async def aclose(self) -> None:
+        """Closes the lazily-created `httpx.AsyncClient`, if this instance
+        created one. A no-op for a client that never used the async path, or
+        that was constructed with an injected `async_session` a caller owns
+        the lifecycle of (that client is never closed here)."""
+        if self._owns_async_session and self._injected_async_session is not None:
+            await self._injected_async_session.aclose()
 
     def search_food(self, name: str, *, preparation: str | None = None) -> FoodMatch | None:
         """Look up macros for `name`, optionally gated to a declared `preparation`
@@ -952,6 +1002,76 @@ class UsdaClient:
         reason = REASON_ALL_CANDIDATES_REJECTED if call_rejections else REASON_NO_RELEVANT_CANDIDATE
         return None, reason
 
+    async def search_food_async(
+        self, name: str, *, preparation: str | None = None
+    ) -> FoodMatch | None:
+        """Async sibling of `search_food` (ROADMAP.md Phase 2, Step 2.2) --
+        thin wrapper around `search_food_with_reason_async` that discards the
+        terminal-outcome reason, same relationship as the sync pair."""
+        match, _reason = await self.search_food_with_reason_async(name, preparation=preparation)
+        return match
+
+    async def search_food_with_reason_async(
+        self, name: str, *, preparation: str | None = None, record_diagnostics: bool = True
+    ) -> tuple[FoodMatch | None, str]:
+        """Async sibling of `search_food_with_reason` -- identical matching
+        logic (`_best_match`/`_select_branded_match`, same gates), only the
+        payload fetch (`_get_payload_async` -> `_fetch_with_retry_async`) is
+        async. See that method's docstring for the full contract; this is
+        kept in lockstep with it deliberately (same query normalization/
+        aliasing, same generic-then-Branded fetch order, same
+        `record_diagnostics` semantics) so the sync and async paths can never
+        silently diverge in what they ground.
+
+        Diagnostic mutations (`self.rejection_counts`/`self.
+        branded_dispersion_events`) are guarded by `self.
+        _async_diagnostics_lock` here -- see that attribute's docstring for
+        why this is defensive rather than strictly required under asyncio's
+        cooperative scheduling.
+        """
+        query = normalize_ingredient(name)
+        if not query:
+            return None, REASON_NO_RELEVANT_CANDIDATE
+        if query in _KNOWN_UNRELIABLE_QUERIES:
+            return None, REASON_NO_RELEVANT_CANDIDATE
+
+        query = _FDC_QUERY_ALIASES.get(query, query)
+        search_query = f"{query} {preparation}" if preparation else query
+
+        call_rejections: list[str] = []
+
+        generic_payload = await self._get_payload_async(
+            search_query, _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE
+        )
+        if generic_payload is not None:
+            outcome = _best_match(generic_payload, query, preparation)
+            if record_diagnostics:
+                async with self._async_diagnostics_lock:
+                    self.rejection_counts.update(outcome.rejections)
+            call_rejections.extend(outcome.rejections)
+            if outcome.match is not None:
+                return outcome.match, REASON_GROUNDED
+
+        branded_payload = await self._get_payload_async(
+            search_query, _BRANDED_DATA_TYPES, _BRANDED_PAGE_SIZE
+        )
+        if branded_payload is not None:
+            branded_outcome = _select_branded_match(branded_payload, query, preparation)
+            if record_diagnostics:
+                async with self._async_diagnostics_lock:
+                    self.rejection_counts.update(branded_outcome.rejections)
+            call_rejections.extend(branded_outcome.rejections)
+            if branded_outcome.dispersion is not None:
+                min_kcal, max_kcal, count = branded_outcome.dispersion
+                if record_diagnostics:
+                    async with self._async_diagnostics_lock:
+                        self.branded_dispersion_events.append((query, min_kcal, max_kcal, count))
+            if branded_outcome.match is not None:
+                return branded_outcome.match, REASON_GROUNDED
+
+        reason = REASON_ALL_CANDIDATES_REJECTED if call_rejections else REASON_NO_RELEVANT_CANDIDATE
+        return None, reason
+
     def _get_payload(
         self, search_query: str, data_types: list[str], page_size: int
     ) -> dict[str, Any] | None:
@@ -1038,6 +1158,95 @@ class UsdaClient:
 
             if attempt < _MAX_ATTEMPTS - 1:
                 self._sleep(_RETRY_BACKOFF_SECONDS[attempt])
+
+        logger.warning(
+            "USDA FDC search failed for %r (dataType=%s) after %d attempts: %s",
+            query, data_types, _MAX_ATTEMPTS, last_error,
+        )
+        return None
+
+    async def _get_payload_async(
+        self, search_query: str, data_types: list[str], page_size: int
+    ) -> dict[str, Any] | None:
+        """Async sibling of `_get_payload` -- same cache-in-front-of-fetch
+        contract (a cache hit never touches the network or checks for an API
+        key; a miss with no key configured returns `None` without fetching).
+        The cache itself (`FdcCache`) is a synchronous, in-memory-then-disk
+        dict -- no `await` needed for the cache check itself, only for a
+        genuine miss's `_fetch_with_retry_async` call."""
+        cached = self._cache.get_payload(search_query, data_types, page_size)
+        if cached is not None:
+            return cached
+        if not self._settings.fdc_api_key:
+            return None
+
+        payload = await self._fetch_with_retry_async(search_query, data_types, page_size)
+        if payload is not None:
+            self._cache.set_payload(search_query, data_types, page_size, payload)
+        return payload
+
+    async def _fetch_with_retry_async(
+        self, query: str, data_types: list[str], page_size: int = _GENERIC_PAGE_SIZE
+    ) -> dict[str, Any] | None:
+        """Async sibling of `_fetch_with_retry` -- deliberately mirrors its
+        two-axis retry design exactly (same `_MAX_ATTEMPTS`/`_RETRY_BACKOFF_
+        SECONDS` for ordinary transient failures, same separate `_RATE_
+        LIMIT_MAX_ATTEMPTS`/`_RATE_LIMIT_BACKOFF_SECONDS`-then-raise path for
+        a genuine rate limit -- see the module comments above those
+        constants for why the two are handled differently). The only
+        differences are the transport (`self._async_client.get`, an
+        `httpx.AsyncClient`, instead of `self._session.get`) and the sleep
+        (`await self._async_sleep(...)` instead of the blocking
+        `self._sleep(...)`) -- every exception type, status-code check, and
+        cache-flush-before-raise behavior is unchanged.
+        """
+        last_error: str | None = None
+        rate_limit_attempt = 0
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                response = await self._async_client.get(
+                    f"{self._settings.fdc_base_url.rstrip('/')}/foods/search",
+                    params={
+                        "api_key": self._settings.fdc_api_key,
+                        "query": query,
+                        "dataType": data_types,
+                        "pageSize": page_size,
+                    },
+                    timeout=self._settings.model_timeout_seconds,
+                )
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+                if attempt < _MAX_ATTEMPTS - 1:
+                    await self._async_sleep(_RETRY_BACKOFF_SECONDS[attempt])
+                continue
+
+            if _is_rate_limited_response(response):
+                if rate_limit_attempt < _RATE_LIMIT_MAX_ATTEMPTS - 1:
+                    await self._async_sleep(_RATE_LIMIT_BACKOFF_SECONDS[rate_limit_attempt])
+                    rate_limit_attempt += 1
+                    continue
+                logger.error(
+                    "USDA FDC rate limit exceeded for %r (dataType=%s) after %d attempts -- "
+                    "stopping so a re-run (served by FdcCache for everything already fetched) "
+                    "can resume once the hourly quota resets.",
+                    query, data_types, rate_limit_attempt + 1,
+                )
+                self._cache.flush()
+                raise UsdaRateLimitError(
+                    f"USDA FDC rate limit exceeded for query {query!r} (dataType={data_types}) "
+                    f"after {rate_limit_attempt + 1} attempts"
+                )
+
+            try:
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+            except ValueError as exc:
+                last_error = f"invalid JSON: {exc}"
+
+            if attempt < _MAX_ATTEMPTS - 1:
+                await self._async_sleep(_RETRY_BACKOFF_SECONDS[attempt])
 
         logger.warning(
             "USDA FDC search failed for %r (dataType=%s) after %d attempts: %s",

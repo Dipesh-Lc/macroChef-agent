@@ -1,11 +1,14 @@
+import asyncio
 import base64
 import json
+import random
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+import httpx
 import requests
 from pydantic import BaseModel, Field
 
@@ -102,12 +105,22 @@ class _UsageInfo:
     answered), so the ledger always knows what model served the call even
     when it doesn't know exactly how many tokens it used."""
 
-    __slots__ = ("model", "prompt_tokens", "completion_tokens")
+    __slots__ = ("model", "prompt_tokens", "completion_tokens", "retries")
 
     def __init__(self) -> None:
         self.model: str | None = None
         self.prompt_tokens: int | None = None
         self.completion_tokens: int | None = None
+        # Transient-failure retries consumed by THIS call (ROADMAP.md Phase
+        # 2, Step 2.2) -- only ever incremented by the async HTTP choke point
+        # (`_async_post_json`) on a 429/5xx/timeout. Always 0 on the sync
+        # path (`_generate_text`) and unrelated to `generate_structured`'s
+        # own repair-loop `retries` (a schema-validation retry, not a
+        # transport retry) -- both land in the SAME `record_llm_call`
+        # `retries` column (Step 2.1 already added it) since a caller only
+        # ever goes through one path or the other for a given call, never
+        # both.
+        self.retries: int = 0
 
 
 def _is_fallback_provider(provider: ProviderName, settings: Settings) -> bool:
@@ -646,6 +659,341 @@ _TEXT_GENERATORS.update(
         "ollama": _generate_text_with_ollama,
     }
 )
+
+
+# --- Async provider choke point (ROADMAP.md Phase 2, Step 2.2) ---
+#
+# Retry/backoff budget for the ASYNC HTTP choke point below -- deliberately
+# separate from, and much tighter than, usda_client.py's _MAX_ATTEMPTS/
+# _RETRY_BACKOFF_SECONDS (8 attempts, no jitter): that client is only ever
+# driven by an offline batch job with no user waiting on it (see its own
+# module comment), while this one sits directly on a request a live user IS
+# waiting on. 2 retries (3 attempts total), exponential backoff WITH jitter
+# (usda_client.py's fixed-tuple backoff has none -- a single offline batch
+# job has no "many concurrent retrying clients stampeding in lockstep"
+# concern to avoid), and -- unlike usda_client's blanket "any transient
+# failure" retry -- ONLY on a 429, a 5xx, or a timeout; any other 4xx (bad
+# request, bad auth, ...) will never succeed on retry and fails immediately.
+_ASYNC_HTTP_MAX_RETRIES = 2
+_ASYNC_HTTP_BASE_BACKOFF_SECONDS = 1.0
+
+
+def _is_retryable_async_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
+
+
+def _async_backoff_seconds(attempt: int) -> float:
+    """Exponential backoff with full jitter for (0-indexed) `attempt`:
+    doubles the base delay each retry, then returns a uniformly random value
+    in `[0, that delay]` -- the "full jitter" shape (AWS's architecture-blog
+    recommendation for a fleet of independently-retrying clients) that keeps
+    many concurrent failed requests from retrying in lockstep."""
+    max_delay = _ASYNC_HTTP_BASE_BACKOFF_SECONDS * (2**attempt)
+    return random.uniform(0, max_delay)
+
+
+async def _async_post_json(
+    async_client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_payload: dict[str, Any],
+    timeout: float,
+    usage: "_UsageInfo",
+) -> dict[str, Any]:
+    """The single async HTTP choke point in this module -- every async
+    provider call that speaks raw HTTP directly (Anthropic, Ollama; Gemini/
+    OpenAI's async SDK clients manage their own transport/retries, so they
+    never route through here -- see `_generate_text_with_gemini_async`/
+    `_generate_text_with_openai_async`) goes through this one function.
+    Retries up to `_ASYNC_HTTP_MAX_RETRIES` times with backoff + jitter (see
+    the module comment above `_ASYNC_HTTP_MAX_RETRIES`), ONLY on a 429, a
+    5xx, or a timeout. Every retry increments `usage.retries` so `record_
+    llm_call`'s existing `retries` column (Step 2.1) captures it -- see
+    `_UsageInfo.retries`; no parallel field.
+
+    Raises `httpx.TimeoutException`/`httpx.HTTPStatusError` (unwrapped) once
+    the retry budget is exhausted -- callers (the `_generate_text_with_*_
+    async` functions) let this propagate; `agenerate_text`/`agenerate_text_
+    batch` are what turn it into a ledger `success=False` row / a collected
+    error string, matching how the sync `_generate_text` choke point already
+    treats any provider exception (see its `except Exception` block).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_ASYNC_HTTP_MAX_RETRIES + 1):
+        try:
+            response = await async_client.post(
+                url, headers=headers, json=json_payload, timeout=timeout
+            )
+        except httpx.TimeoutException as exc:
+            last_exc = exc
+            if attempt >= _ASYNC_HTTP_MAX_RETRIES:
+                raise
+            usage.retries += 1
+            await asyncio.sleep(_async_backoff_seconds(attempt))
+            continue
+
+        if _is_retryable_async_status(response.status_code):
+            if attempt >= _ASYNC_HTTP_MAX_RETRIES:
+                response.raise_for_status()
+            usage.retries += 1
+            await asyncio.sleep(_async_backoff_seconds(attempt))
+            continue
+
+        response.raise_for_status()
+        return response.json()
+
+    # Unreachable in practice: every loop iteration either returns, raises
+    # directly, or -- on the final attempt -- calls raise_for_status()/
+    # re-raises, which always raises for a still-retryable outcome. Kept as
+    # an explicit fail-loud fallback rather than letting the function fall
+    # off the end and return None.
+    raise last_exc or RuntimeError(
+        f"Async provider request to {url} failed with no captured error."
+    )
+
+
+async def _generate_text_with_anthropic_async(
+    prompt: str, settings: Settings, usage: _UsageInfo, async_client: httpx.AsyncClient
+) -> str:
+    """Async sibling of `_generate_text_with_anthropic` -- routes through
+    `_async_post_json` (this module's async HTTP choke point) instead of
+    `requests.post`/`_post_anthropic`."""
+    model = _model_for(settings, "anthropic", "chat")
+    payload = {
+        "model": model,
+        "max_tokens": 240,
+        "temperature": 0.2,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    data = await _async_post_json(
+        async_client,
+        f"{settings.anthropic_base_url.rstrip('/')}/messages",
+        headers={
+            "x-api-key": settings.anthropic_api_key or "",
+            "anthropic-version": settings.anthropic_api_version,
+            "content-type": "application/json",
+        },
+        json_payload=payload,
+        timeout=settings.model_timeout_seconds,
+        usage=usage,
+    )
+    usage.model = model
+    call_usage = data.get("usage") or {}
+    usage.prompt_tokens = call_usage.get("input_tokens")
+    usage.completion_tokens = call_usage.get("output_tokens")
+    return _require_text(_anthropic_text(data), "Anthropic")
+
+
+async def _generate_text_with_ollama_async(
+    prompt: str, settings: Settings, usage: _UsageInfo, async_client: httpx.AsyncClient
+) -> str:
+    """Async sibling of `_generate_text_with_ollama` -- routes through
+    `_async_post_json` instead of `requests.post`/`_post_ollama`."""
+    model = _model_for(settings, "ollama", "chat")
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "options": {"temperature": 0.2},
+    }
+    data = await _async_post_json(
+        async_client,
+        f"{settings.ollama_base_url.rstrip('/')}/api/chat",
+        headers={},
+        json_payload=payload,
+        timeout=settings.model_timeout_seconds,
+        usage=usage,
+    )
+    usage.model = model
+    usage.prompt_tokens = data.get("prompt_eval_count")
+    usage.completion_tokens = data.get("eval_count")
+    return _require_text(data.get("message", {}).get("content"), "Ollama")
+
+
+async def _generate_text_with_gemini_async(
+    prompt: str, settings: Settings, usage: _UsageInfo, async_client: httpx.AsyncClient | None
+) -> str:
+    """Async sibling of `_generate_text_with_gemini` -- uses Gemini's own
+    async SDK client (`google.genai.Client.aio`), NOT the `_async_post_json`
+    choke point above (`async_client` is accepted only so every entry in
+    `_ASYNC_TEXT_GENERATORS` shares one call signature; unused here since
+    the SDK manages its own transport/retries for the hosted Gemini API).
+    Otherwise mirrors the sync version's per-model fallback loop exactly."""
+    del async_client
+    from google.genai import types
+
+    client = _gemini_client(settings)
+    last_error: Exception | None = None
+    for model in _models_for(settings, "gemini", "chat"):
+        try:
+            response = await client.aio.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=_gemini_generate_config(types, settings, model=model, temperature=0.2),
+            )
+            usage.model = model
+            usage_metadata = getattr(response, "usage_metadata", None)
+            if usage_metadata is not None:
+                usage.prompt_tokens = getattr(usage_metadata, "prompt_token_count", None)
+                usage.completion_tokens = getattr(usage_metadata, "candidates_token_count", None)
+            return _require_text(response.text, f"Gemini model {model}")
+        except Exception as exc:  # pragma: no cover - optional hosted provider path
+            last_error = exc
+            logger.warning("Gemini async chat model %s failed, trying next model: %s", model, exc)
+    raise last_error or ValueError("No Gemini chat models were configured.")
+
+
+async def _generate_text_with_openai_async(
+    prompt: str, settings: Settings, usage: _UsageInfo, async_client: httpx.AsyncClient | None
+) -> str:
+    """Async sibling of `_generate_text_with_openai` -- uses OpenAI's own
+    async SDK client (`openai.AsyncOpenAI`), NOT the `_async_post_json`
+    choke point (same reasoning as `_generate_text_with_gemini_async`)."""
+    del async_client
+    from openai import AsyncOpenAI
+
+    client_kwargs = {"api_key": settings.openai_api_key}
+    if settings.openai_base_url:
+        client_kwargs["base_url"] = settings.openai_base_url
+    client = AsyncOpenAI(**client_kwargs)
+    model = _model_for(settings, "openai", "chat")
+    response = await client.responses.create(model=model, input=prompt, temperature=0.2)
+    usage.model = model
+    response_usage = getattr(response, "usage", None)
+    if response_usage is not None:
+        usage.prompt_tokens = getattr(response_usage, "input_tokens", None)
+        usage.completion_tokens = getattr(response_usage, "output_tokens", None)
+    return _require_text(response.output_text, "OpenAI")
+
+
+_AsyncTextGenerator = Callable[
+    [str, Settings, "_UsageInfo", "httpx.AsyncClient | None"], Awaitable[str]
+]
+
+_ASYNC_TEXT_GENERATORS: dict[str, _AsyncTextGenerator] = {
+    "gemini": _generate_text_with_gemini_async,
+    "openai": _generate_text_with_openai_async,
+    "anthropic": _generate_text_with_anthropic_async,
+    "ollama": _generate_text_with_ollama_async,
+}
+
+
+async def agenerate_text(
+    provider: ProviderName,
+    prompt: str,
+    settings: Settings,
+    *,
+    purpose: str = "unspecified",
+    async_client: httpx.AsyncClient | None = None,
+) -> str:
+    """Async sibling of `_generate_text` (ROADMAP.md Phase 2, Step 2.2) --
+    same `record_llm_call` ledger instrumentation contract (timing,
+    success/failure, `retries`), just awaited instead of blocking. `async_
+    client` is the injectable `httpx.AsyncClient` used by the Anthropic/
+    Ollama async generators' `_async_post_json` calls (tests inject one
+    backed by `httpx.MockTransport`); Gemini/OpenAI ignore it (see their
+    async generators' docstrings). A caller that doesn't inject one gets a
+    fresh `httpx.AsyncClient()` per call -- fine for a single call, but a
+    caller making many concurrent calls (see `agenerate_text_batch`) should
+    inject one shared client so connections are pooled."""
+    generator = _ASYNC_TEXT_GENERATORS.get(provider)
+    if generator is None:
+        raise ValueError(f"Unsupported provider: {provider}")
+
+    usage = _UsageInfo()
+    start = time.perf_counter()
+    owns_client = async_client is None
+    client = async_client if async_client is not None else httpx.AsyncClient()
+    try:
+        text = await generator(prompt, settings, usage, client)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        record_llm_call(
+            provider=provider,
+            model=usage.model or _model_for(settings, provider, "chat"),
+            purpose=purpose,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            latency_ms=elapsed_ms,
+            success=False,
+            fallback_used=_is_fallback_provider(provider, settings),
+            prompt_text=prompt,
+            retries=usage.retries,
+        )
+        raise
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    record_llm_call(
+        provider=provider,
+        model=usage.model or _model_for(settings, provider, "chat"),
+        purpose=purpose,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        latency_ms=elapsed_ms,
+        success=True,
+        fallback_used=_is_fallback_provider(provider, settings),
+        prompt_text=prompt,
+        completion_text=text,
+        retries=usage.retries,
+    )
+    return text
+
+
+async def agenerate_text_batch(
+    provider: ProviderName,
+    prompts: list[str],
+    settings: Settings,
+    *,
+    purpose: str = "unspecified",
+    max_concurrency: int | None = None,
+    async_client: httpx.AsyncClient | None = None,
+) -> tuple[list[str | None], list[str]]:
+    """Bounded-concurrency fan-out over `agenerate_text` (ROADMAP.md Phase 2,
+    Step 2.2) -- issues every prompt in `prompts` concurrently, gated by an
+    `asyncio.Semaphore` sized from `max_concurrency` (default: `Settings.
+    llm_max_concurrency`, env `LLM_MAX_CONCURRENCY`).
+
+    Returns `(results, errors)`: `results[i]` is `prompts[i]`'s completion,
+    or `None` if that one call failed after its retry budget (a timeout or
+    any other exception) -- one bad prompt never takes down the whole batch.
+    `errors` collects one human-readable message per failure (empty-list
+    convention matches `RecommendationResponse.errors`/`DiscoveryResponse.
+    errors`, i.e. "readable partial-failure message, not a raised
+    exception/500" -- see app/schemas/recommendation.py and app/schemas/
+    library.py). Every completed call (success or failure) is still recorded
+    to the LLM ledger individually by the underlying `agenerate_text` call.
+    """
+    semaphore = asyncio.Semaphore(max_concurrency or settings.llm_max_concurrency)
+    owns_client = async_client is None
+    client = async_client if async_client is not None else httpx.AsyncClient()
+
+    async def _one(index: int, prompt: str) -> tuple[int, str | None, str | None]:
+        async with semaphore:
+            try:
+                text = await agenerate_text(
+                    provider, prompt, settings, purpose=purpose, async_client=client
+                )
+                return index, text, None
+            except Exception as exc:  # noqa: BLE001 - collected as a readable error, not raised
+                return index, None, f"prompt {index}: {provider} generation failed: {exc}"
+
+    try:
+        outcomes = await asyncio.gather(*(_one(i, p) for i, p in enumerate(prompts)))
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    results: list[str | None] = [None] * len(prompts)
+    errors: list[str] = []
+    for index, text, error in sorted(outcomes, key=lambda item: item[0]):
+        results[index] = text
+        if error is not None:
+            errors.append(error)
+    return results, errors
 
 
 def _generate_structured_with_gemini(

@@ -1,6 +1,8 @@
+import asyncio
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 import requests
 
@@ -1460,6 +1462,166 @@ def test_branded_dispersion_event_recorded_on_client_end_to_end(tmp_path) -> Non
     client = UsdaClient(settings=_settings(fdc_api_key="test-key"), session=session, cache=FdcCache(tmp_path / "cache.json"))
 
     match = client.search_food("widget")
-
     assert match is None
     assert client.branded_dispersion_events == [("widget", 100, 500, 3)]
+
+
+# ---------------------------------------------------------------------------
+# Async client (ROADMAP.md Phase 2, Step 2.2) -- `search_food_async`/
+# `search_food_with_reason_async`/`_fetch_with_retry_async`, exercised
+# against `httpx.MockTransport` (no real network). Mirrors the sync
+# transient-retry and rate-limit tests above to confirm the async path's
+# two-axis retry design (mirrored from `_fetch_with_retry`) behaves
+# identically, just awaited. No `pytest-asyncio` dependency -- each test
+# drives its own coroutine via a plain `asyncio.run(...)`.
+# ---------------------------------------------------------------------------
+
+
+def test_search_food_async_grounds_a_known_ingredient(tmp_path) -> None:
+    payload = _load_fixture("fdc_chicken_breast_search.json")
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=payload)
+
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        cache=FdcCache(tmp_path / "cache.json"),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    match = asyncio.run(client.search_food_async("chicken breast"))
+
+    assert match is not None
+    assert match.macros.calories == 165
+    assert calls["n"] == 1  # single generic-tier fetch, no retry needed
+
+
+def test_fetch_with_retry_async_recovers_after_transient_failures(tmp_path) -> None:
+    """Mirrors test_sidecar_is_reproducible_against_a_flaky_live_client's
+    sync proof, in async form: a request that fails twice (raises, like the
+    live FDC 400 flake) then succeeds must still resolve within the
+    ordinary transient-failure retry budget (_MAX_ATTEMPTS)."""
+    payload = _load_fixture("fdc_chicken_breast_search.json")
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise httpx.ConnectError("simulated transient network failure", request=request)
+        return httpx.Response(200, json=payload)
+
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        cache=FdcCache(tmp_path / "cache.json"),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    match = asyncio.run(client.search_food_async("chicken breast"))
+
+    assert match is not None
+    assert match.macros.calories == 165
+    assert calls["n"] == 3
+
+
+def test_fetch_with_retry_async_degrades_to_none_after_exhausting_retries(tmp_path) -> None:
+    """A permanently-failing async fetch must degrade to `None`/ungrounded
+    (never raise) -- same fail-closed contract as the sync path, see
+    `UsdaClient`'s class docstring."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("simulated permanent network failure", request=request)
+
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        cache=FdcCache(tmp_path / "cache.json"),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    match = asyncio.run(client.search_food_async("chicken breast"))
+
+    assert match is None
+
+
+def test_search_food_with_reason_async_raises_on_persistent_rate_limit(tmp_path) -> None:
+    """Async sibling of test_persistent_429_raises_rate_limit_error_and_is_
+    never_cached -- the rate-limit path is a distinct fail-loud raise, not a
+    degrade-to-None, in the async client too."""
+    from app.services.usda_client import UsdaRateLimitError
+
+    cache = FdcCache(tmp_path / "cache.json")
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, json={})
+
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        cache=cache,
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    with pytest.raises(UsdaRateLimitError):
+        asyncio.run(client.search_food_with_reason_async("chicken breast"))
+
+    # Bounded retry (_RATE_LIMIT_MAX_ATTEMPTS = 3), same budget as the sync path.
+    assert calls["n"] == 3
+    assert cache.get_payload("chicken breast", _GENERIC_DATA_TYPES, _GENERIC_PAGE_SIZE) is None
+
+
+def test_search_food_async_concurrency_is_actually_concurrent(tmp_path) -> None:
+    """Proves the fan-out story this step exists for: N concurrent
+    `search_food_async` calls (bounded by a caller-supplied semaphore, as
+    `nutrition_grounding.compute_recipe_macros_async` uses) genuinely
+    overlap in flight, rather than the async client silently serializing
+    them -- confirms there IS a concurrency win available to fan out into,
+    not just that the async API exists."""
+    payload = _load_fixture("fdc_chicken_breast_search.json")
+    in_flight = {"current": 0, "max": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        in_flight["current"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["current"])
+        await asyncio.sleep(0.02)
+        in_flight["current"] -= 1
+        return httpx.Response(200, json=payload)
+
+    client = UsdaClient(
+        settings=_settings(fdc_api_key="test-key"),
+        cache=FdcCache(tmp_path / "cache.json"),
+        async_session=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        async_sleep=lambda _: asyncio.sleep(0),
+    )
+
+    async def _run() -> None:
+        semaphore = asyncio.Semaphore(4)
+
+        async def _one(name: str):
+            async with semaphore:
+                return await client.search_food_async(name)
+
+        # Distinct, non-normalizing-to-each-other ingredient names (never
+        # cached, always a real fetch) so every one of these actually
+        # reaches the handler concurrently rather than some being served
+        # from a shared cache key.
+        names = [
+            "chicken breast", "rice", "egg", "milk",
+            "cheese", "bread", "apple", "banana",
+        ]
+        return await asyncio.gather(*(_one(name) for name in names))
+
+    results = asyncio.run(_run())
+
+    # Not asserting every result actually grounded (the fixture is a real
+    # "chicken breast" payload; only that query's own relevance check would
+    # pass -- irrelevant here) -- the point of this test is the concurrency
+    # shape, not the matching outcome.
+    assert len(results) == 8
+    assert in_flight["max"] > 1  # genuinely overlapped, not serialized
+    assert in_flight["max"] <= 4  # never exceeded the semaphore bound

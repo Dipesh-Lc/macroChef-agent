@@ -1,7 +1,9 @@
+import asyncio
+
 import pytest
 
 from app.schemas.nutrition import FoodMacros, FoodMatch, GroundingStatus, NutritionIngredient
-from app.services.nutrition_grounding import compute_recipe_macros
+from app.services.nutrition_grounding import compute_recipe_macros, compute_recipe_macros_async
 
 
 def _match(name: str, *, calories: float, protein_g: float, carbs_g: float, fat_g: float, fiber_g: float) -> FoodMatch:
@@ -235,3 +237,105 @@ def test_incomparable_unit_ungrounded() -> None:
     assert result.status == GroundingStatus.UNGROUNDED
     assert result.ungrounded_ingredients == ["mystery sauce"]
     assert client.calls == []
+
+
+# ---------------------------------------------------------------------------
+# compute_recipe_macros_async (ROADMAP.md Phase 2, Step 2.2) -- produces the
+# same RecipeNutrition a sequential compute_recipe_macros call would, over
+# ingredients looked up concurrently instead of one at a time. No
+# `pytest-asyncio` dependency -- each test drives its own coroutine via a
+# plain `asyncio.run(...)`.
+# ---------------------------------------------------------------------------
+
+
+class FakeAsyncUsdaClient:
+    """Async-sibling test double of this file's `FakeUsdaClient` -- same
+    fixed-match-per-name contract, just an `async def search_food_async`
+    instead of a sync `search_food`."""
+
+    def __init__(self, matches: dict[str, FoodMatch | None]):
+        self._matches = matches
+        self.calls: list[str] = []
+
+    async def search_food_async(
+        self, name: str, *, preparation: str | None = None
+    ) -> FoodMatch | None:
+        self.calls.append(name)
+        return self._matches.get(name)
+
+
+def test_compute_recipe_macros_async_matches_the_sync_result_for_the_same_inputs() -> None:
+    """The async path must be a pure concurrency change, never a behavior
+    change -- same ingredients/matches must produce the identical
+    RecipeNutrition (status, totals, per-serving, coverage, ungrounded
+    list) either way."""
+    ingredients = [
+        NutritionIngredient(name="chicken breast", amount=200, unit="g"),
+        NutritionIngredient(name="rice", amount=150, unit="g"),
+        NutritionIngredient(name="mystery sauce", amount=50, unit="g"),
+    ]
+    rice = _match("rice", calories=130, protein_g=2.69, carbs_g=28.17, fat_g=0.28, fiber_g=0.4)
+    matches = {"chicken breast": CHICKEN_BREAST, "rice": rice, "mystery sauce": None}
+
+    sync_result = compute_recipe_macros(ingredients, servings=2, client=FakeUsdaClient(matches))
+
+    async_client = FakeAsyncUsdaClient(matches)
+    async_result = asyncio.run(
+        compute_recipe_macros_async(
+            ingredients, servings=2, client=async_client, semaphore=asyncio.Semaphore(4)
+        )
+    )
+
+    assert async_result.status == sync_result.status
+    assert async_result.total == sync_result.total
+    assert async_result.per_serving == sync_result.per_serving
+    assert async_result.coverage == sync_result.coverage
+    assert async_result.ungrounded_ingredients == sync_result.ungrounded_ingredients
+    async_names = [c.name for c in async_result.contributions]
+    sync_names = [c.name for c in sync_result.contributions]
+    assert async_names == sync_names
+
+
+def test_compute_recipe_macros_async_never_looks_up_an_ingredient_with_no_grams() -> None:
+    """Mirrors test_volume_or_piece_unit_is_ungrounded_until_unit_converter_
+    lands's sync assertion: an unconvertible unit must never trigger a
+    lookup (and so never touch the semaphore) in the async path either."""
+    ingredient = NutritionIngredient(name="chicken breast", amount=1, unit="cup")
+    client = FakeAsyncUsdaClient({"chicken breast": CHICKEN_BREAST})
+
+    result = asyncio.run(
+        compute_recipe_macros_async(
+            [ingredient], servings=1, client=client, semaphore=asyncio.Semaphore(4)
+        )
+    )
+
+    assert result.status == GroundingStatus.UNGROUNDED
+    assert result.contributions[0].grounded is False
+    assert result.contributions[0].grams is None
+    assert client.calls == []
+
+
+def test_compute_recipe_macros_async_respects_the_semaphore_bound() -> None:
+    """Every ingredient lookup is gated by the caller-supplied semaphore --
+    with a semaphore of 1, lookups can never overlap even though they're all
+    launched via asyncio.gather."""
+    in_flight = {"current": 0, "max": 0}
+
+    class _SlowAsyncClient:
+        async def search_food_async(self, name: str, *, preparation: str | None = None):
+            in_flight["current"] += 1
+            in_flight["max"] = max(in_flight["max"], in_flight["current"])
+            await asyncio.sleep(0.01)
+            in_flight["current"] -= 1
+            return CHICKEN_BREAST
+
+    ingredients = [NutritionIngredient(name=f"food {i}", amount=100, unit="g") for i in range(5)]
+
+    result = asyncio.run(
+        compute_recipe_macros_async(
+            ingredients, servings=1, client=_SlowAsyncClient(), semaphore=asyncio.Semaphore(1)
+        )
+    )
+
+    assert result.status == GroundingStatus.GROUNDED
+    assert in_flight["max"] == 1
