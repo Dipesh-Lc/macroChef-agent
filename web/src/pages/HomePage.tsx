@@ -1,62 +1,140 @@
-import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ProfileForm } from "../components/ProfileForm";
 import { PantryInput, type PantryState } from "../components/PantryInput";
 import { SafetyAuditPanel } from "../components/SafetyAuditPanel";
 import { RecipeCard } from "../components/RecipeCard";
+import { RunProgressTimeline } from "../components/RunProgressTimeline";
 import { ShoppingList } from "../components/ShoppingList";
 import { TasteProfilePanel } from "../components/TasteProfilePanel";
 import { WasteNudges } from "../components/WasteNudges";
 import { DebugDrawer } from "../components/DebugDrawer";
 import { ApiError, RateLimitError } from "../api/client";
 import { recommendRecipes } from "../api/endpoints";
-import type { RecommendationRequest, UserProfile } from "../api/types";
+import { streamRecommend, type NodeRunEvent } from "../lib/sse";
+import type { RecommendationRequest, RecommendationResponse, UserProfile } from "../api/types";
 import { DEFAULT_PROFILE_FORM_VALUE, toUserProfile } from "../lib/profile";
-
-const SLOW_STATUS_AFTER_MS = 10_000;
-const VERY_SLOW_STATUS_AFTER_MS = 40_000;
 
 const INITIAL_VISIBLE_COUNT = 5;
 const VISIBLE_COUNT_STEP = 5;
 
-function useElapsedMs(active: boolean): number {
-  const [elapsed, setElapsed] = useState(0);
+type StreamPhase = "idle" | "streaming" | "error";
 
+/**
+ * Drives `POST /recipes/recommend/stream` (ROADMAP.md Step 4.2) and exposes
+ * the live node events + terminal result/error as plain state, so `HomePage`
+ * can render `RunProgressTimeline` while `phase === "streaming"/"error"` and
+ * swap in the existing results view once `result` lands -- see
+ * `RunProgressTimeline`'s docstring for why that swap happens here, in
+ * `HomePage`, rather than inside the timeline component itself.
+ *
+ * Sync-endpoint fallback: the streaming endpoint is additive (Step 3.1's
+ * docstring) and shares the sync endpoint's auth/rate-limit/graph logic
+ * byte-for-byte, but SOME environment between this browser and the backend
+ * (a corporate proxy that buffers `text/event-stream`, a browser without a
+ * readable-stream response body, ...) could still break the stream
+ * transport itself before any node event ever arrives. In exactly that
+ * case -- an error surfaces with zero events received -- this falls back to
+ * the plain `POST /recipes/recommend` call (`recommendRecipes`) the app
+ * used before this step, so a transport-level SSE hiccup doesn't turn into
+ * "the planner stopped working". Once at least one live event has rendered,
+ * a later failure is shown as a normal error+retry instead: silently
+ * discarding real, already-displayed progress and re-running synchronously
+ * would be a more confusing UX than just asking the user to retry.
+ */
+function useRecommendStream() {
+  const [events, setEvents] = useState<NodeRunEvent[]>([]);
+  const [phase, setPhase] = useState<StreamPhase>("idle");
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [rateLimitMessage, setRateLimitMessage] = useState<string | null>(null);
+  const [result, setResult] = useState<RecommendationResponse | null>(null);
+  const lastRequestRef = useRef<RecommendationRequest | null>(null);
+
+  const run = useCallback(async (request: RecommendationRequest) => {
+    lastRequestRef.current = request;
+    setEvents([]);
+    setErrorDetail(null);
+    setRateLimitMessage(null);
+    setResult(null);
+    setPhase("streaming");
+
+    let receivedAnyEvent = false;
+    try {
+      for await (const event of streamRecommend(request)) {
+        if (event.type === "node") {
+          receivedAnyEvent = true;
+          setEvents((current) => [...current, event.data]);
+        } else if (event.type === "result") {
+          setResult(event.data);
+          setPhase("idle");
+        } else if (event.type === "error") {
+          setErrorDetail(event.data.detail);
+          setPhase("error");
+        }
+      }
+    } catch (caught) {
+      if (caught instanceof RateLimitError) {
+        // Matches this app's existing rate-limit UX (a transient toast, no
+        // persistent error panel/retry button) -- never attempt the sync
+        // fallback here, that would just trip the same shared limit again.
+        setRateLimitMessage(caught.message);
+        setPhase("idle");
+        return;
+      }
+
+      if (!receivedAnyEvent) {
+        // No live progress was ever shown -- safe to fall back to the
+        // synchronous endpoint transparently (see this hook's docstring).
+        try {
+          const response = await recommendRecipes(request);
+          setResult(response);
+          setPhase("idle");
+          return;
+        } catch (fallbackError) {
+          if (fallbackError instanceof RateLimitError) {
+            setRateLimitMessage(fallbackError.message);
+            setPhase("idle");
+            return;
+          }
+          setErrorDetail(
+            fallbackError instanceof ApiError
+              ? fallbackError.message
+              : "Something went wrong while finding recipes. Please try again.",
+          );
+          setPhase("error");
+          return;
+        }
+      }
+
+      setErrorDetail(
+        caught instanceof ApiError
+          ? caught.message
+          : "Something went wrong while finding recipes. Please try again.",
+      );
+      setPhase("error");
+    }
+  }, []);
+
+  const retry = useCallback(() => {
+    if (lastRequestRef.current) {
+      void run(lastRequestRef.current);
+    }
+  }, [run]);
+
+  // Auto-dismiss the rate-limit toast after 6s -- same behavior the
+  // pre-streaming mutation-based flow had. Scheduling the clear inside a
+  // `setTimeout` callback (rather than calling `setRateLimitMessage`
+  // directly in the effect body) keeps this out of
+  // `react-hooks/set-state-in-effect`: this effect only *subscribes* to a
+  // timer, it doesn't synchronously derive one piece of state from another.
   useEffect(() => {
-    if (!active) {
+    if (!rateLimitMessage) {
       return;
     }
-    const startedAt = Date.now();
-    const interval = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
-    return () => clearInterval(interval);
-  }, [active]);
+    const timeout = setTimeout(() => setRateLimitMessage(null), 6000);
+    return () => clearTimeout(timeout);
+  }, [rateLimitMessage]);
 
-  // Ignore any stale reading from a previous run rather than resetting
-  // state synchronously inside the effect above -- the component only
-  // ever reads this value while `active` is true.
-  return active ? elapsed : 0;
-}
-
-function LoadingStatus({ elapsedMs }: { elapsedMs: number }) {
-  let message = "Finding recipes…";
-  if (elapsedMs >= VERY_SLOW_STATUS_AFTER_MS) {
-    message = "Still working — the solver is thorough…";
-  } else if (elapsedMs >= SLOW_STATUS_AFTER_MS) {
-    message = "Scoring recipes against your pantry…";
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm text-cast-iron/70">{message}</p>
-      <div className="flex flex-col gap-3">
-        {[0, 1, 2].map((index) => (
-          <div
-            key={index}
-            className="h-28 animate-pulse rounded-lg border border-dashed border-sage-line bg-white"
-          />
-        ))}
-      </div>
-    </div>
-  );
+  return { events, phase, errorDetail, rateLimitMessage, result, run, retry };
 }
 
 export default function HomePage() {
@@ -67,27 +145,10 @@ export default function HomePage() {
     mealType: "dinner",
     confirmedInventory: [],
   });
-  const [rateLimitToast, setRateLimitToast] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
 
-  const recommendMutation = useMutation({
-    mutationFn: (request: RecommendationRequest) => recommendRecipes(request),
-    onError: (error) => {
-      if (error instanceof RateLimitError) {
-        setRateLimitToast(error.message);
-      }
-    },
-  });
-
-  const elapsedMs = useElapsedMs(recommendMutation.isPending);
-
-  useEffect(() => {
-    if (!rateLimitToast) {
-      return;
-    }
-    const timeout = setTimeout(() => setRateLimitToast(null), 6000);
-    return () => clearTimeout(timeout);
-  }, [rateLimitToast]);
+  const stream = useRecommendStream();
+  const isPending = stream.phase === "streaming";
 
   function handleFindRecipes() {
     setVisibleCount(INITIAL_VISIBLE_COUNT);
@@ -100,11 +161,10 @@ export default function HomePage() {
       cuisine_preference: pantryState.cuisine,
       meal_type: pantryState.mealType,
     };
-    recommendMutation.mutate(request);
+    void stream.run(request);
   }
 
-  const result = recommendMutation.data;
-  const failure = recommendMutation.error;
+  const result = stream.result;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
@@ -114,31 +174,30 @@ export default function HomePage() {
         <button
           type="button"
           onClick={handleFindRecipes}
-          disabled={recommendMutation.isPending}
+          disabled={isPending}
           className="rounded-md bg-cast-iron px-4 py-2.5 text-sm font-semibold text-porcelain disabled:opacity-50"
         >
-          {recommendMutation.isPending ? "Finding recipes…" : "Find recipes"}
+          {isPending ? "Finding recipes…" : "Find recipes"}
         </button>
       </div>
 
       <div className="flex flex-col gap-4">
-        {rateLimitToast && (
+        {stream.rateLimitMessage && (
           <div className="rounded-md border border-honey-dark bg-honey/15 px-3 py-2 text-sm text-honey-dark">
-            {rateLimitToast}
+            {stream.rateLimitMessage}
           </div>
         )}
 
-        {failure && !(failure instanceof RateLimitError) && (
-          <div className="rounded-md border border-chili bg-chili/5 px-3 py-2 text-sm text-chili">
-            {failure instanceof ApiError
-              ? failure.message
-              : "Something went wrong while finding recipes. Please try again."}
-          </div>
+        {(stream.phase === "streaming" || stream.phase === "error") && (
+          <RunProgressTimeline
+            events={stream.events}
+            phase={stream.phase}
+            errorDetail={stream.errorDetail}
+            onRetry={stream.retry}
+          />
         )}
 
-        {recommendMutation.isPending && <LoadingStatus elapsedMs={elapsedMs} />}
-
-        {!recommendMutation.isPending && result && (
+        {stream.phase === "idle" && result && (
           <>
             {result.errors && result.errors.length > 0 && (
               <div className="rounded-md border border-honey-dark bg-honey/10 px-3 py-2 text-sm text-honey-dark">
@@ -190,7 +249,7 @@ export default function HomePage() {
           </>
         )}
 
-        {!recommendMutation.isPending && !result && !failure && (
+        {stream.phase === "idle" && !result && (
           <p className="text-sm text-cast-iron/60">
             Add what's in your kitchen and set your profile, then find recipes.
           </p>

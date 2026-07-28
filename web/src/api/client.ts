@@ -205,6 +205,44 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 }
 
+/**
+ * Like `apiRequest`, but returns the raw `Response` instead of parsing its
+ * body as JSON -- for streaming (SSE) responses, whose body a caller reads
+ * incrementally as it arrives (see `lib/sse.ts`) rather than all at once.
+ * Shares the exact same session-bootstrap / CSRF-header / one-time-401-retry
+ * contract as `apiRequest` above (this project's SSE endpoints are `POST`,
+ * see `app/api/routes_stream.py`'s docstring for why -- browsers' native
+ * `EventSource` only supports `GET`, so this has to go through the same
+ * fetch path `apiRequest` uses, not a separate one).
+ *
+ * Deliberately does NOT honor `options.timeoutMs`: a stream is meant to
+ * stay open for the lifetime of a long-running server operation (a
+ * recommend run can take 20-45s) with server-sent heartbeat comments (see
+ * `HEARTBEAT_INTERVAL_SECONDS` in `app/api/routes_stream.py`) as the
+ * liveness signal instead of one fixed deadline -- an idle/dead connection
+ * is the caller's concern (e.g. its own inactivity watchdog on the parsed
+ * events), not this transport call's. `options.signal` is still honored for
+ * caller-initiated cancellation (e.g. unmount, explicit retry-abort).
+ */
+export async function apiStream(path: string, options: RequestOptions = {}): Promise<Response> {
+  if (options.sessionRequired) {
+    await bootstrapSession();
+  }
+
+  let response = await fetch(path, buildRequestInit(options, options.signal));
+
+  if (response.status === 401 && options.sessionRequired) {
+    await forceResessionBootstrap();
+    response = await fetch(path, buildRequestInit(options, options.signal));
+  }
+
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+
+  return response;
+}
+
 /** Exposed for tests only -- resets the module-level single-flight state. */
 export function _resetSessionBootstrapForTests(): void {
   sessionBootstrapPromise = null;
