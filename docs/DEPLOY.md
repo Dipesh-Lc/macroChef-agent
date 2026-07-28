@@ -55,6 +55,19 @@ nothing builds, pushes, or deploys automatically. Deploys are a deliberate,
 human-triggered action, never a side effect of pushing to `main`: everything
 is prepared by CI, a human clicks "Run workflow".
 
+**Database migrations (ROADMAP.md Phase 5, Step 5.1):** as of this step, the
+`deploy` job runs `alembic upgrade head` against the prod Postgres (Neon,
+`DATABASE_URL` secret) directly from the GitHub Actions runner, before the
+traffic-shifting `az containerapp secret set`/`az containerapp update` steps
+— see the `Run database migrations` step in `.github/workflows/ci.yml`. This
+repo has no ACA init-container or pre-traffic-hook infra, so the runner talks
+to Neon over the network the same way any other Postgres client would; that
+assumes the runner can reach Neon directly (no VPC/private-networking
+boundary in front of it), which has not been independently verified. Local
+dev and the test suite still use `Base.metadata.create_all` under sqlite
+only (see `app/data/db.py`'s `init_db`) — Postgres is Alembic-only from here
+on.
+
 ## Topology — single container, single process (SPA rebuild W6 cutover)
 
 **Changed in this cutover** (previously: two processes, Streamlit public +
@@ -252,7 +265,7 @@ hobby-scope clearance still applies.
 | Secret | Status | Used for |
 |---|---|---|
 | `AZURE_CREDENTIALS` | set (confirmed 2026-07-17) | SP JSON for `azure/login`; needs Contributor on the subscription |
-| `DATABASE_URL` | set (confirmed 2026-07-17) | Neon Postgres connection string -> ACA secret `database-url` |
+| `DATABASE_URL` | set (confirmed 2026-07-17) | Neon Postgres connection string -> ACA secret `database-url`; also consumed directly (as a job env var, not an ACA secret) by the `deploy` job's `alembic upgrade head` step (ROADMAP.md Step 5.1) |
 | `GEMINI_API_KEY` | set (confirmed 2026-07-17) | LLM phrasing/explanation only, never safety or nutrition -> ACA secret `gemini-api-key` |
 | `SESSION_SECRET` | set (confirmed 2026-07-17) | signs/verifies the anonymous session token (`app/dependencies.py`) -> ACA secret `session-secret`; falls back to an insecure dev default with a logged warning if unset — never leave unset in production |
 | `POSTHOG_API_KEY` | set (confirmed 2026-07-17) | analytics; absent = silent no-op -> ACA secret `posthog-api-key` |
