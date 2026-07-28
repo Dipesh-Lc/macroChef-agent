@@ -23,6 +23,11 @@ class LLMUsageAggregate(BaseModel):
     success_count: int
     failure_count: int
     fallback_count: int
+    # ROADMAP.md Phase 2, Step 2.1 -- count of calls where `parse_fallback`
+    # was True (Ollama/mock's JSON-mode-prompt + regex/brace-scan path, NOT
+    # Gemini/OpenAI/Anthropic's native structured-output calls). See
+    # `app.data.models.LLMCall`'s docstring.
+    parse_fallback_count: int
 
 
 class LLMUsageTotals(BaseModel):

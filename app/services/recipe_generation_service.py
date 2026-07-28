@@ -3,15 +3,67 @@ import re
 from typing import Any
 from uuid import uuid4
 
+from pydantic import BaseModel, Field
+
 from app.config import get_settings
 from app.observability.llm_ledger import record_llm_call
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
 from app.services.model_provider import (  # type: ignore[attr-defined]
-    _generate_text,
     _is_fallback_provider,
+    generate_structured,
 )
 from app.utils.quantity_parser import parse_quantity_string
+
+
+class _RecipeCandidatePayload(BaseModel):
+    """Structured-output schema for `RecipeGenerationService`'s prompt
+    (ROADMAP 2.1) -- a plain, loosely-typed mirror of the prompt's field
+    list in `_prompt` below, deliberately NOT `RecipeCandidate` itself:
+    `RecipeCandidate` has a `derived_allergens` computed field the model
+    must never be asked to fill in (it's deterministically derived, see
+    that field's docstring), and its `ingredients` field is the fully-typed
+    `Ingredient` model, while this LLM-facing schema keeps ingredients as
+    loose strings (e.g. "150 g chicken breast") so the existing, already-
+    tested `_sanitize_candidate_payload` -> `RecipeCandidate.model_validate`
+    pipeline (which already parses that shape via
+    `app.utils.quantity_parser`) stays the single place ingredient strings
+    get turned into {name, amount, unit}."""
+
+    candidate_id: str | None = None
+    title: str
+    cuisine: str | None = None
+    meal_type: str | None = None
+    description: str | None = None
+    ingredients: list[str] = Field(default_factory=list)
+    instructions: list[str] = Field(default_factory=list)
+    cook_time_min: int | None = None
+    difficulty: str | None = None
+    servings: int | None = None
+    calories: float | None = None
+    protein_g: float | None = None
+    carbs_g: float | None = None
+    fat_g: float | None = None
+    fiber_g: float | None = None
+    allergens: list[str] = Field(default_factory=list)
+    diet_tags: list[str] = Field(default_factory=list)
+    equipment: list[str] = Field(default_factory=list)
+    image_url: str | None = None
+    source_type: str | None = None
+    source_name: str | None = None
+    home_cookable_score: float | None = None
+    validation_warnings: list[str] = Field(default_factory=list)
+
+
+class _RecipeCandidateBatch(BaseModel):
+    """Root object every provider is asked to return -- an OBJECT, not a
+    bare JSON array, since `model_provider._parse_json_object`'s brace-scan
+    (reused by `generate_structured` for the Ollama/mock fallback path)
+    only recognizes `{...}`, and every native structured-output mechanism
+    (Gemini/OpenAI/Anthropic) requires an object-shaped JSON Schema root
+    too."""
+
+    candidates: list[_RecipeCandidatePayload] = Field(default_factory=list)
 
 
 class RecipeGenerationService:
@@ -20,11 +72,11 @@ class RecipeGenerationService:
     def generate(self, request: RecipeDiscoveryRequest) -> list[RecipeCandidate]:
         settings = get_settings()
         if settings.model_provider == "mock":
-            # This bypasses _generate_text entirely (mock mode makes no HTTP
-            # call at all), so record the ledger row here directly -- same
-            # convention as model_provider._record_mock_call, kept local
-            # since this call site is settings.model_provider-driven, not a
-            # provider_chain() loop.
+            # This bypasses generate_structured entirely (mock mode makes no
+            # HTTP call at all), so record the ledger row here directly --
+            # same convention as model_provider._record_mock_call, kept
+            # local since this call site is settings.model_provider-driven,
+            # not a provider_chain() loop.
             record_llm_call(
                 provider="mock",
                 model="mock",
@@ -38,25 +90,43 @@ class RecipeGenerationService:
             return []
 
         prompt = self._prompt(request)
-        # NOTE: this calls model_provider._generate_text directly rather
-        # than going through provider_chain()/generate_detailed_
+        # NOTE: this calls model_provider.generate_structured directly
+        # rather than going through provider_chain()/generate_detailed_
         # instructions_with_provider_chain's fallback-and-retry pattern --
         # a known pre-existing quirk of this service, not introduced or
         # fixed here (see ROADMAP 1.2 task notes). Ledger purpose tag:
-        # "recipe_generation".
-        text = _generate_text(
-            settings.model_provider, prompt, settings, purpose="recipe_generation"
+        # "recipe_generation". `text_fallback` reuses this service's own
+        # battle-tested `_extract_json` (fenced-block + substring scan) as
+        # the Ollama/mock parse_fallback extractor, rather than a second,
+        # weaker one -- see `generate_structured`'s `text_fallback` docstring.
+        batch = generate_structured(
+            settings.model_provider,
+            prompt,
+            _RecipeCandidateBatch,
+            settings,
+            purpose="recipe_generation",
+            text_fallback=self._text_fallback,
         )
-        payload = self._extract_json(text)
         candidates: list[RecipeCandidate] = []
-        for item in payload:
-            item = self._sanitize_candidate_payload(dict(item))
+        for payload_item in batch.candidates:
+            item = self._sanitize_candidate_payload(payload_item.model_dump())
             candidates.append(RecipeCandidate.model_validate(item))
         return candidates
 
+    def _text_fallback(self, text: str) -> dict[str, Any]:
+        """`generate_structured`'s `text_fallback` hook for
+        `_RecipeCandidateBatch` -- only reached on the Ollama/mock
+        `parse_fallback=True` path, and only when `_parse_json_object` can't
+        find a `{...}` object at all. Reuses `_extract_json` below, which
+        already handles a bare JSON array, a markdown-fenced block, or a
+        `{"candidates": [...]}`/`{"recipes": [...]}` wrapper -- whichever
+        shape a less-compliant model actually returns."""
+        return {"candidates": self._extract_json(text)}
+
     def _prompt(self, request: RecipeDiscoveryRequest) -> str:
         return f"""
-Return strict JSON only: an array of recipe candidate objects compatible with this schema:
+Return strict JSON only: an object {{"candidates": [...]}} whose "candidates" array
+holds recipe candidate objects compatible with this schema:
 candidate_id, title, cuisine, meal_type, description, ingredients, instructions,
 cook_time_min, difficulty, servings, calories, protein_g, carbs_g, fat_g, fiber_g,
 allergens, diet_tags, equipment, image_url, source_type, source_name, home_cookable_score,
@@ -118,7 +188,16 @@ Set source_type to "ai_generated". Mark nutrition as estimated in validation_war
         return snippets
 
     def _sanitize_candidate_payload(self, item: dict[str, Any]) -> dict[str, Any]:
-        item.setdefault("candidate_id", f"llm_{uuid4().hex[:12]}")
+        # `item.get(...)`, not `setdefault`: since `_RecipeCandidatePayload.
+        # model_dump()` (ROADMAP 2.1) always includes "candidate_id" as a
+        # key (explicitly `None` when the model didn't supply one), a plain
+        # `setdefault` would never fire -- it only sets a MISSING key, and
+        # this key is always present. A falsy check covers both "missing"
+        # (the pre-2.1 raw-dict shape, still exercised directly by
+        # tests/test_recipe_library_builder.py) and "present but None"
+        # (the new schema-validated shape) identically.
+        if not item.get("candidate_id"):
+            item["candidate_id"] = f"llm_{uuid4().hex[:12]}"
         item["source_type"] = "ai_generated"
         item["ingredients"] = self._coerce_ingredient_list(item.get("ingredients"))
         item["instructions"] = self._coerce_string_list(item.get("instructions"))

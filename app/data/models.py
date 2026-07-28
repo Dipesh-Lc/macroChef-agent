@@ -79,6 +79,17 @@ class LLMCall(Base):
     `app.observability.events`'s user_id contextvar docstring. `cost_usd`
     is a best-effort estimate from the static `PRICE_PER_MTOK` table in
     `app.observability.llm_ledger`, not billing-accurate.
+
+    `retries` and `parse_fallback` (ROADMAP.md Phase 2, Step 2.1) are only
+    ever non-default for calls made through `app.services.model_provider.
+    generate_structured` -- the plain `_generate_text` chokepoint always
+    writes `retries=0, parse_fallback=False` (it has no repair loop and no
+    JSON-mode fallback concept). `retries` is 0 (succeeded first try) or 1
+    (needed the one-shot "repair loop" retry with validation errors
+    appended to the prompt). `parse_fallback` is True only for Ollama/mock,
+    which have no native structured-output mechanism and fall back to a
+    JSON-mode prompt + regex/brace-scan extraction -- see
+    `generate_structured`'s docstring and `_STRUCTURED_PARSE_FALLBACK`.
     """
 
     __tablename__ = "llm_calls"
@@ -95,6 +106,8 @@ class LLMCall(Base):
     success: Mapped[bool] = mapped_column(Boolean)
     fallback_used: Mapped[bool] = mapped_column(Boolean)
     cost_usd: Mapped[float] = mapped_column(Float)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    parse_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
     )
