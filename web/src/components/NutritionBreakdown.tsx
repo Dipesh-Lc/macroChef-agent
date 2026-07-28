@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { IngredientContribution, Recipe } from "../api/types";
 import { formatGrams, formatKcal, formatPercent } from "../lib/format";
 import { macroDisplayState } from "../lib/macroDisplay";
@@ -19,6 +19,12 @@ import { macroDisplayState } from "../lib/macroDisplay";
  */
 export function NutritionBreakdown({ recipe }: { recipe: Recipe }) {
   const [expanded, setExpanded] = useState(false);
+  // `RecipeCard` (and therefore this component) renders once per recipe in
+  // a list (recommendation results, search results, meal lists) -- a
+  // hardcoded id here would duplicate across every card on the page and
+  // break `aria-controls`' one-to-one reference. `useId()` gives each
+  // instance its own stable, unique id.
+  const panelId = `nutrition-breakdown-panel-${useId()}`;
   const nutrition = recipe.nutrition;
   const state = macroDisplayState(recipe);
   const contributions: IngredientContribution[] = nutrition?.contributions ?? [];
@@ -30,15 +36,30 @@ export function NutritionBreakdown({ recipe }: { recipe: Recipe }) {
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        aria-controls={panelId}
         className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-cast-iron/60"
       >
         <span>Where these numbers come from</span>
         <span aria-hidden="true">{expanded ? "−" : "+"}</span>
       </button>
 
-      {expanded && (
-        <div className="flex flex-col gap-3 border-t border-dashed border-sage-line px-3 py-3 text-sm">
-          {!nutrition ? (
+      {/* Expand/collapse micro-interaction (ROADMAP Step 4.5, 150-200ms
+          ease-out): the CSS grid-rows `0fr`/`1fr` trick animates a smooth
+          height change without ever measuring/setting an explicit pixel
+          height. The panel stays mounted (not conditionally rendered) so
+          the collapse direction animates too, not just expand; screen
+          readers get `aria-hidden` instead so collapsed content is never
+          announced. Respects `prefers-reduced-motion` for free via the
+          global CSS reset in `index.css`. */}
+      <div
+        id={panelId}
+        aria-hidden={!expanded}
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
+      >
+        <div className="overflow-hidden">
+          <div className="flex flex-col gap-3 border-t border-dashed border-sage-line px-3 py-3 text-sm">
+            {!nutrition ? (
             <p className="text-cast-iron/70">
               No nutrition was computed for this recipe, so no macro numbers are shown above.
             </p>
@@ -147,7 +168,8 @@ export function NutritionBreakdown({ recipe }: { recipe: Recipe }) {
             </>
           )}
         </div>
-      )}
+        </div>
+      </div>
     </div>
   );
 }

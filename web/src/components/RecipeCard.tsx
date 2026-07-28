@@ -226,7 +226,12 @@ export function RecipeCard({
     : null;
 
   return (
-    <article className="overflow-hidden rounded-lg border border-sage-line bg-white shadow-sm">
+    // Hover lift (ROADMAP Step 4.5 micro-interaction, 150-200ms ease-out):
+    // `transform`/`box-shadow` only, never a layout-affecting property, so
+    // this never contributes to a results-swap-in layout shift. Respects
+    // `prefers-reduced-motion` for free via the global CSS reset in
+    // `index.css` (zeroes every `transition-duration`).
+    <article className="overflow-hidden rounded-lg border border-sage-line bg-white shadow-sm transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
       <div className="grid gap-4 p-4 sm:grid-cols-[160px_1fr]">
         <RecipeArt recipe={recipe} className="h-[120px] w-full sm:h-full" />
 
