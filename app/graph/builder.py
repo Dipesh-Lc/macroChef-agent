@@ -18,6 +18,7 @@ from app.graph.nodes import (
     substitution_node,
 )
 from app.graph.state import MacroChefState, ensure_state
+from app.observability.events import bind_user_id, reset_user_id
 from app.schemas.recommendation import RecommendationRequest, RecommendationResponse
 from app.services.analytics import get_analytics
 
@@ -133,9 +134,19 @@ def request_to_state(request: RecommendationRequest, user_id: str) -> MacroChefS
 
 
 def run_recommendation_graph(request: RecommendationRequest, user_id: str) -> RecommendationResponse:
-    graph = build_macrochef_graph()
-    state = request_to_state(request, user_id)
-    result = graph.invoke(state.model_dump())
+    # Bind user_id into the observability contextvar (ROADMAP 1.2) for the
+    # duration of this graph run -- intake_node may call vision extraction
+    # (app.services.vision_service -> model_provider._extract_inventory),
+    # several call-frames below, and the LLM ledger needs user_id there
+    # without threading it through every node's signature. See
+    # app.observability.events.bind_user_id's docstring.
+    user_id_token = bind_user_id(user_id)
+    try:
+        graph = build_macrochef_graph()
+        state = request_to_state(request, user_id)
+        result = graph.invoke(state.model_dump())
+    finally:
+        reset_user_id(user_id_token)
     final_state = ensure_state(result)
     response = RecommendationResponse(
         recommendations=final_state.final_recommendations,

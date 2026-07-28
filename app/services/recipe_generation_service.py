@@ -4,9 +4,13 @@ from typing import Any
 from uuid import uuid4
 
 from app.config import get_settings
+from app.observability.llm_ledger import record_llm_call
 from app.schemas.library import RecipeDiscoveryRequest
 from app.schemas.recipe_candidate import RecipeCandidate
-from app.services.model_provider import _generate_text  # type: ignore[attr-defined]
+from app.services.model_provider import (  # type: ignore[attr-defined]
+    _generate_text,
+    _is_fallback_provider,
+)
 from app.utils.quantity_parser import parse_quantity_string
 
 
@@ -16,10 +20,33 @@ class RecipeGenerationService:
     def generate(self, request: RecipeDiscoveryRequest) -> list[RecipeCandidate]:
         settings = get_settings()
         if settings.model_provider == "mock":
+            # This bypasses _generate_text entirely (mock mode makes no HTTP
+            # call at all), so record the ledger row here directly -- same
+            # convention as model_provider._record_mock_call, kept local
+            # since this call site is settings.model_provider-driven, not a
+            # provider_chain() loop.
+            record_llm_call(
+                provider="mock",
+                model="mock",
+                purpose="recipe_generation",
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency_ms=0.0,
+                success=True,
+                fallback_used=_is_fallback_provider("mock", settings),
+            )
             return []
 
         prompt = self._prompt(request)
-        text = _generate_text(settings.model_provider, prompt, settings)
+        # NOTE: this calls model_provider._generate_text directly rather
+        # than going through provider_chain()/generate_detailed_
+        # instructions_with_provider_chain's fallback-and-retry pattern --
+        # a known pre-existing quirk of this service, not introduced or
+        # fixed here (see ROADMAP 1.2 task notes). Ledger purpose tag:
+        # "recipe_generation".
+        text = _generate_text(
+            settings.model_provider, prompt, settings, purpose="recipe_generation"
+        )
         payload = self._extract_json(text)
         candidates: list[RecipeCandidate] = []
         for item in payload:

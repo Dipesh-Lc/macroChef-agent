@@ -10,6 +10,7 @@ from app.graph.library_nodes import (
     selected_candidate_validation_node,
 )
 from app.graph.library_state import RecipeLibraryBuilderState, ensure_library_state
+from app.observability.events import bind_user_id, reset_user_id
 from app.schemas.library import (
     RecipeDiscoveryRequest,
     RecipeDiscoveryResponse,
@@ -111,9 +112,20 @@ def save_request_to_state(
 def run_library_discovery_graph(
     request: RecipeDiscoveryRequest, user_id: str
 ) -> RecipeDiscoveryResponse:
-    graph = build_library_discovery_graph()
-    state = discovery_request_to_state(request, user_id)
-    result = graph.invoke(state.model_dump())
+    # See app.graph.builder.run_recommendation_graph's identical comment --
+    # discovery_node calls RecipeGenerationService (LLM-backed), several
+    # call-frames below, and the LLM ledger (ROADMAP 1.2) needs user_id
+    # there via this contextvar rather than a threaded parameter.
+    # run_library_save_graph is NOT bound here: it never calls into
+    # model_provider (save/index are pure persistence + retrieval-index
+    # writes), so there is no LLM call for it to attribute.
+    user_id_token = bind_user_id(user_id)
+    try:
+        graph = build_library_discovery_graph()
+        state = discovery_request_to_state(request, user_id)
+        result = graph.invoke(state.model_dump())
+    finally:
+        reset_user_id(user_id_token)
     final_state = ensure_library_state(result)
     return RecipeDiscoveryResponse(
         candidates=final_state.validated_candidates,
