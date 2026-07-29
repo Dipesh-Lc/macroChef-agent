@@ -194,7 +194,9 @@ export interface paths {
          *     each graph node executes, an `: heartbeat` comment line roughly every
          *     10s of silence (see docs/DEPLOY.md), and ends with exactly one terminal
          *     event: `result` (a full `RecommendationResponse`, identical shape to
-         *     what POST /recipes/recommend returns) or `error`.
+         *     what POST /recipes/recommend returns), `awaiting_input` (ROADMAP 3.2 --
+         *     the run paused on a low-confidence image/mixed inventory observation;
+         *     resume via `POST /runs/{thread_id}/resume`), or `error`.
          */
         post: operations["recommend_recipes_stream_recipes_recommend_stream_post"];
         delete?: never;
@@ -800,6 +802,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Chat Thread */
+        post: operations["create_chat_thread_chat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Chat Thread
+         * @description 404s identically for "no such thread_id" and "thread_id exists,
+         *     belongs to someone else" -- see `app.data.chat_thread_repository.
+         *     ChatThreadRepository.get_owned`'s docstring.
+         */
+        get: operations["get_chat_thread_chat__thread_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{thread_id}/message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Chat Message
+         * @description SSE turn endpoint: `token` (final content), `tool_call`/`tool_result`
+         *     (live, as each tool executes), terminal `message`, or `error`.
+         */
+        post: operations["post_chat_message_chat__thread_id__message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agent Note
+         * @description Human-only deletion path -- session-gated, ownership-checked
+         *     (`AgentNoteRepository.soft_delete` requires both `note_id` AND
+         *     `user_id` to match). The Chef agent has no delete tool at all; see
+         *     `app.agent.tools`'s module docstring.
+         */
+        delete: operations["delete_agent_note_chat_notes__note_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -919,6 +1004,48 @@ export interface components {
             typed_ingredients?: string | null;
             /** Image */
             image?: string | null;
+        };
+        /** ChatCreateRequest */
+        ChatCreateRequest: {
+            user_profile: components["schemas"]["UserProfile"];
+        };
+        /** ChatCreateResponse */
+        ChatCreateResponse: {
+            /** Thread Id */
+            thread_id: string;
+        };
+        /** ChatMessageRequest */
+        ChatMessageRequest: {
+            /** Message */
+            message: string;
+        };
+        /** ChatMessageView */
+        ChatMessageView: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant" | "tool";
+            /** Content */
+            content: string;
+            /** Tool Calls */
+            tool_calls?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ChatThreadStatusResponse */
+        ChatThreadStatusResponse: {
+            /** Thread Id */
+            thread_id: string;
+            /** Title */
+            title?: string | null;
+            /** Messages */
+            messages?: components["schemas"]["ChatMessageView"][];
         };
         /** CheckAllergenToolRequest */
         CheckAllergenToolRequest: {
@@ -3568,6 +3695,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvalReport"];
+                };
+            };
+        };
+    };
+    create_chat_thread_chat_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_chat_thread_chat__thread_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatThreadStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_chat_message_chat__thread_id__message_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_agent_note_chat_notes__note_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path: {
+                note_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

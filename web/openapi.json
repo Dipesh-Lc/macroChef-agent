@@ -375,7 +375,7 @@
           "recommendations"
         ],
         "summary": "Recommend Recipes Stream",
-        "description": "SSE variant of POST /recipes/recommend. Same request body, same\nsession gate, same rate-limit bucket as the synchronous endpoint (this\nreuses `require_recommend_rate_limit` directly rather than a parallel\nbucket -- a client hammering either endpoint hits the same limit).\n\nEmits one `node` SSE event per `RunEvent` (started/finished/failed) as\neach graph node executes, an `: heartbeat` comment line roughly every\n10s of silence (see docs/DEPLOY.md), and ends with exactly one terminal\nevent: `result` (a full `RecommendationResponse`, identical shape to\nwhat POST /recipes/recommend returns) or `error`.",
+        "description": "SSE variant of POST /recipes/recommend. Same request body, same\nsession gate, same rate-limit bucket as the synchronous endpoint (this\nreuses `require_recommend_rate_limit` directly rather than a parallel\nbucket -- a client hammering either endpoint hits the same limit).\n\nEmits one `node` SSE event per `RunEvent` (started/finished/failed) as\neach graph node executes, an `: heartbeat` comment line roughly every\n10s of silence (see docs/DEPLOY.md), and ends with exactly one terminal\nevent: `result` (a full `RecommendationResponse`, identical shape to\nwhat POST /recipes/recommend returns), `awaiting_input` (ROADMAP 3.2 --\nthe run paused on a low-confidence image/mixed inventory observation;\nresume via `POST /runs/{thread_id}/resume`), or `error`.",
         "operationId": "recommend_recipes_stream_recipes_recommend_stream_post",
         "parameters": [
           {
@@ -1723,6 +1723,318 @@
           }
         }
       }
+    },
+    "/chat": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Create Chat Thread",
+        "operationId": "create_chat_thread_chat_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/{thread_id}": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Get Chat Thread",
+        "description": "404s identically for \"no such thread_id\" and \"thread_id exists,\nbelongs to someone else\" -- see `app.data.chat_thread_repository.\nChatThreadRepository.get_owned`'s docstring.",
+        "operationId": "get_chat_thread_chat__thread_id__get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatThreadStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/{thread_id}/message": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Post Chat Message",
+        "description": "SSE turn endpoint: `token` (final content), `tool_call`/`tool_result`\n(live, as each tool executes), terminal `message`, or `error`.",
+        "operationId": "post_chat_message_chat__thread_id__message_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/notes/{note_id}": {
+      "delete": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Delete Agent Note",
+        "description": "Human-only deletion path -- session-gated, ownership-checked\n(`AgentNoteRepository.soft_delete` requires both `note_id` AND\n`user_id` to match). The Chef agent has no delete tool at all; see\n`app.agent.tools`'s module docstring.",
+        "operationId": "delete_agent_note_chat_notes__note_id__delete",
+        "parameters": [
+          {
+            "name": "note_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Note Id"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Agent Note Chat Notes  Note Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1892,6 +2204,121 @@
         },
         "type": "object",
         "title": "Body_extract_inventory_inventory_extract_post"
+      },
+      "ChatCreateRequest": {
+        "properties": {
+          "user_profile": {
+            "$ref": "#/components/schemas/UserProfile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_profile"
+        ],
+        "title": "ChatCreateRequest"
+      },
+      "ChatCreateResponse": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id"
+        ],
+        "title": "ChatCreateResponse"
+      },
+      "ChatMessageRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ChatMessageRequest"
+      },
+      "ChatMessageView": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "ChatMessageView"
+      },
+      "ChatThreadStatusResponse": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageView"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id"
+        ],
+        "title": "ChatThreadStatusResponse"
       },
       "CheckAllergenToolRequest": {
         "properties": {
