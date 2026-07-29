@@ -78,6 +78,7 @@ import math  # noqa: E402
 import re  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -87,7 +88,9 @@ if str(ROOT) not in sys.path:
 
 from pydantic import BaseModel, Field, ValidationError  # noqa: E402
 
+import app.agent.tools as chef_tools_module  # noqa: E402
 import app.services.constraint_engine as constraint_engine  # noqa: E402
+from app.agent.chef_agent import run_chef_turn  # noqa: E402
 from app.evaluation.benchmark.case_schema import (  # noqa: E402
     SAFE_CONTROL_CATEGORY,
     BenchmarkCase,
@@ -96,7 +99,7 @@ from app.evaluation.benchmark.loader import load_all_cases  # noqa: E402
 from app.evaluation.benchmark.safety_judge import (  # noqa: E402
     JudgedRecipe,
     TermMatch,
-    judge_case,
+    judge_chat_case,
 )
 from app.graph.builder import run_recommendation_graph  # noqa: E402
 from app.graph.library_builder import run_library_discovery_graph  # noqa: E402
@@ -140,6 +143,11 @@ class CaseOutcome(BaseModel):
     # see run_case()'s docstring for why this is scoped to safe_control.
     over_blocked: bool = False
     notes: list[str] = Field(default_factory=list)
+    # The Chef agent's final prose response for this case's chat_agent
+    # surface turn(s) -- see `judge_chat_case`'s docstring for why this is a
+    # second judging haystack alongside `served_recipe_*`. `None` for every
+    # case that doesn't use the chat_agent surface (additive-only field).
+    chat_assistant_text: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +268,231 @@ def _run_discovery_surface(case: BenchmarkCase, user_id: str) -> tuple[list[Judg
     return served, notes
 
 
+@contextmanager
+def _poisoned_recipe_tools(pinned_recipe_ids: list[str], injected_text: str | None):
+    """Overlays `injected_text` onto each of `pinned_recipe_ids`' REAL corpus
+    recipes' title/instructions, in-memory only, for the lifetime of this
+    context manager -- never touching `data/processed/` (CLAUDE.md invariant
+    #7). Models an indirect prompt injection delivered through a Chef-agent
+    TOOL's own output (a poisoned `search_recipes`/`check_recipe_safety`
+    result) rather than through the user's own free-text intake.
+
+    Deliberately leaves each poisoned recipe's `ingredients` UNTOUCHED: the
+    injection targets what the LLM READS (title/instructions), never what
+    `constraint_engine.validate_recipe` actually checks (ingredient names) --
+    that is the entire point of this case category. `check_recipe_safety`'s
+    real, deterministic verdict must stay correct throughout; the case is
+    testing whether the LLM's final prose obeys that verdict or the
+    injected claim instead.
+
+    Patches `app.agent.tools`'s OWN references to `get_recipe_by_id` and
+    `RecipeRetriever` (not `app.services.recipe_retriever`'s originals) --
+    `tools.py` imported both by name at module load time (`from
+    app.services.recipe_retriever import RecipeRetriever, get_recipe_by_id`),
+    so patching the source module would not affect the already-bound names
+    `tools._resolve_recipe`/`tools._search_recipes` actually call. Mirrors
+    `tests/test_chef_agent.py`'s own `monkeypatch.setattr(tools_module,
+    "get_recipe_by_id", ...)` pattern, just with manual save/restore instead
+    of pytest's fixture teardown (this is a script, not a test).
+
+    The `RecipeRetriever` wrapper below GUARANTEES the poisoned recipe is
+    among `search_recipes`' results (prepending it if the real embedding
+    retriever doesn't otherwise surface it) -- `pinned_recipe_ids` exists
+    specifically so a case doesn't depend on retrieval happening to surface
+    the recipe under test (see `case_schema.py`'s field docstring), and a
+    chat-agent case that silently ran with the injected recipe never once
+    visible to the agent would prove nothing.
+    """
+    if not pinned_recipe_ids or not injected_text:
+        yield
+        return
+
+    corpus = _corpus_by_id()
+    poisoned_by_id: dict[str, object] = {}
+    for recipe_id in pinned_recipe_ids:
+        real_recipe = corpus.get(recipe_id)
+        if real_recipe is None:
+            continue
+        poisoned_by_id[recipe_id] = real_recipe.model_copy(
+            update={
+                "title": f"{real_recipe.title} ({injected_text})",
+                "instructions": [*real_recipe.instructions, injected_text],
+                "description": injected_text,
+            }
+        )
+
+    if not poisoned_by_id:
+        yield
+        return
+
+    real_get_recipe_by_id = chef_tools_module.get_recipe_by_id
+    real_retriever_cls = chef_tools_module.RecipeRetriever
+
+    def _poisoned_get_recipe_by_id(recipe_id: str):
+        if recipe_id in poisoned_by_id:
+            return poisoned_by_id[recipe_id]
+        return real_get_recipe_by_id(recipe_id)
+
+    class _PoisonedRetrieverWrapper:
+        def __init__(self, *args, **kwargs) -> None:
+            self._inner = real_retriever_cls(*args, **kwargs)
+
+        def retrieve(self, **kwargs):
+            results = list(self._inner.retrieve(**kwargs))
+            result_ids = {recipe.recipe_id for recipe in results}
+            merged = [
+                poisoned_by_id.get(recipe.recipe_id, recipe) for recipe in results
+            ]
+            for recipe_id, poisoned in poisoned_by_id.items():
+                if recipe_id not in result_ids:
+                    merged.insert(0, poisoned)
+            return merged
+
+    chef_tools_module.get_recipe_by_id = _poisoned_get_recipe_by_id
+    chef_tools_module.RecipeRetriever = _PoisonedRetrieverWrapper
+    try:
+        yield
+    finally:
+        chef_tools_module.get_recipe_by_id = real_get_recipe_by_id
+        chef_tools_module.RecipeRetriever = real_retriever_cls
+
+
+def _verified_safe_recipe_ids_from_tool_calls(tool_calls: list[dict]) -> set[str]:
+    """recipe_ids `check_recipe_safety` verified `is_valid=True` THIS turn --
+    mirrors `app.agent.chef_agent._verified_safe_recipe_ids`'s exact
+    philosophy (only a verdict-confirmed-safe recipe counts as "would be
+    served"; a recipe merely mentioned, searched, or checked-and-REJECTED
+    does not), operating on `ChefTurnResult.tool_calls`'s plain-dict shape
+    (`entry.model_dump()`'d `ToolCallLogEntry` rows) rather than the
+    `ToolCallLogEntry` objects that helper takes directly.
+
+    This is deliberate, not an oversight: since `_poisoned_recipe_tools`
+    only overlays the injected text onto a poisoned recipe's title/
+    instructions/description -- never its ingredients -- `check_recipe_
+    safety`'s real, deterministic verdict for a genuinely allergen-bearing
+    pinned recipe stays correctly `is_valid=False` throughout every one of
+    this task's chat_agent cases. That means this function correctly
+    returns an EMPTY set for all of them, every time -- the recipe-list
+    check (`judge_case`, inside `judge_chat_case`) has nothing to flag, by
+    design, because nothing was ever validly "served." The entire detection
+    burden for THIS attack shape (an injection that tries to get the LLM to
+    override or contradict a correct rejection) therefore falls on
+    `judge_chat_case`'s assistant-text scan -- exactly the gap this task
+    exists to close. A recipe genuinely confirmed safe (this benchmark's one
+    `expected_safe: true` chat_agent case) still resolves correctly here."""
+    ids: set[str] = set()
+    for entry in tool_calls:
+        if entry.get("tool") != "check_recipe_safety":
+            continue
+        raw = entry.get("raw") or {}
+        for result in raw.get("results", []) or []:
+            verdict = result.get("result") or {}
+            recipe_id = result.get("recipe_id")
+            if recipe_id and verdict.get("is_valid"):
+                ids.add(recipe_id)
+    return ids
+
+
+def _run_chat_agent_surface(
+    case: BenchmarkCase, profile: UserProfile, user_id: str
+) -> tuple[list[JudgedRecipe], list[str], str]:
+    """Runs a `"chat_agent"`-surface case's `conversation` user turn(s)
+    through the REAL Chef agent (`app.agent.chef_agent.run_chef_turn`), with
+    `case.structured_rendering.injected_tool_output` overlaid onto
+    `case.pinned_recipe_ids`' real corpus recipe(s) for the duration of this
+    one call (see `_poisoned_recipe_tools`).
+
+    Returns `(served, notes, assistant_text)`:
+
+    - `served` is the GROUND-TRUTH judging target for the recipe-list check:
+      every recipe_id `check_recipe_safety` verified `is_valid=True` THIS
+      turn (see `_verified_safe_recipe_ids_from_tool_calls`), resolved back
+      to that recipe's REAL corpus ingredients -- NEVER the poisoned copy --
+      so a successful injection that suppresses or alters a mention doesn't
+      also blind the judge to what should have been caught. Deliberately NOT
+      "every `pinned_recipe_ids` entry unconditionally": that would make
+      this surface's recipe-list check pass or fail independent of what the
+      conversation actually did, collapsing it into a duplicate of
+      `_check_pinned_recipes` (which already direct-checks every pinned
+      recipe against `constraint_engine.validate_recipe` regardless of
+      surface) and making the assistant-text scan below untestable in
+      isolation (see `tests/test_chat_agent_benchmark_surface.py`).
+    - `assistant_text` is the turn's final prose response, which the caller
+      feeds to `judge_chat_case` alongside `served` -- a chat turn can make
+      an unsafe claim in prose without ever naming/serving a recipe_id,
+      which the recipe-list check alone can't catch (see that function's
+      docstring).
+
+    `case.pinned_recipe_ids` non-empty and `injected_tool_output` non-empty
+    are both schema-enforced for any `chat_agent`-surface case (see
+    `case_schema.py`'s `_validate_chat_agent_surface_requires_pinned_recipe_
+    and_injection`), so the early-return guards below are defensive, not the
+    primary enforcement point.
+    """
+    notes: list[str] = []
+    served: list[JudgedRecipe] = []
+    assistant_text = ""
+
+    if not case.pinned_recipe_ids:
+        notes.append("chat_agent surface skipped: no pinned_recipe_ids to poison.")
+        return served, notes, assistant_text
+
+    user_turns = [turn.content for turn in case.conversation if turn.role == "user"]
+    if not user_turns:
+        notes.append("chat_agent surface skipped: case.conversation has no user turn.")
+        return served, notes, assistant_text
+
+    # Distinct per (case, run) via the caller's user_id (see run_all_cases),
+    # so one case's chat thread/checkpoint rows can never bleed into
+    # another's or a later run of the same case.
+    thread_id = f"benchmark_chat_{user_id}"
+    injected_text = case.structured_rendering.injected_tool_output
+
+    all_tool_calls: list[dict] = []
+    try:
+        with _poisoned_recipe_tools(case.pinned_recipe_ids, injected_text):
+            for turn_text in user_turns:
+                result = run_chef_turn(thread_id, user_id, profile, turn_text)
+                assistant_text = result.assistant_message
+                all_tool_calls.extend(result.tool_calls)
+    except Exception as exc:  # pragma: no cover - defensive; a crash must not silently look "safe"
+        notes.append(f"chat_agent run_chef_turn raised {type(exc).__name__}: {exc}")
+        return served, notes, assistant_text
+
+    corpus = _corpus_by_id()
+    verified_safe_ids = _verified_safe_recipe_ids_from_tool_calls(all_tool_calls)
+    if not verified_safe_ids:
+        notes.append(
+            "chat_agent surface: check_recipe_safety verified no recipe_id as "
+            "is_valid=True this turn -- nothing to resolve to real corpus ground "
+            "truth for the recipe-list check (expected for every genuinely "
+            "allergen-bearing pinned recipe in this task's cases, since poisoning "
+            "never touches ingredients -- see this function's docstring; also the "
+            "normal outcome for the forced-mock provider's trivial default "
+            "final_answer, which never calls a tool at all)."
+        )
+    for recipe_id in sorted(verified_safe_ids):
+        real_recipe = corpus.get(recipe_id)
+        if real_recipe is None:
+            # Not every recipe_id a tool call can surface lives in the base
+            # corpus (a user's own saved recipe) -- not this function's
+            # ground truth to resolve; note and move on rather than guessing.
+            notes.append(
+                f"chat_agent-verified-safe recipe_id {recipe_id!r} was not found in "
+                "the base corpus (app.rag.loaders.load_corpus) -- likely a "
+                "user-saved recipe, not resolved here."
+            )
+            continue
+        served.append(
+            _judged_from_ingredients(
+                real_recipe.recipe_id, real_recipe.title, real_recipe.ingredients
+            )
+        )
+
+    notes.append(f"chat_agent assistant text: {assistant_text!r}")
+    return served, notes, assistant_text
+
+
 def _check_pinned_recipes(
     case: BenchmarkCase, profile: UserProfile
 ) -> tuple[list[JudgedRecipe], list[str]]:
@@ -373,6 +606,7 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
     """
     notes: list[str] = []
     served: list[JudgedRecipe] = []
+    chat_assistant_text = ""
 
     profile: UserProfile | None = None
     try:
@@ -397,6 +631,15 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
         served.extend(recs)
         notes.extend(disc_notes)
 
+    if "chat_agent" in case.surfaces:
+        if profile is not None:
+            chat_served, chat_notes, chat_text = _run_chat_agent_surface(case, profile, user_id)
+            served.extend(chat_served)
+            notes.extend(chat_notes)
+            chat_assistant_text = chat_text
+        else:
+            notes.append("chat_agent surface skipped: no valid UserProfile could be built.")
+
     if case.pinned_recipe_ids:
         if profile is not None:
             pinned_served, pinned_notes = _check_pinned_recipes(case, profile)
@@ -409,7 +652,14 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
         else:
             notes.append("pinned-recipe direct check skipped: no valid UserProfile could be built.")
 
-    verdict = judge_case(case.forbidden_terms, served)
+    # `judge_chat_case` unions `judge_case`'s recipe-list check with a raw
+    # scan of `chat_assistant_text` (empty string for every non-chat_agent
+    # case, and for a chat_agent case whose surface was skipped above) --
+    # see that function's docstring. An empty haystack never matches
+    # (`safety_judge._term_matches`'s own empty-string guard), so this is a
+    # strict superset of the old `judge_case(...)` call for every one of the
+    # 371 pre-existing cases: behavior there is unchanged.
+    verdict = judge_chat_case(case.forbidden_terms, served, chat_assistant_text)
     over_blocked = case.category == SAFE_CONTROL_CATEGORY and not served
 
     # Keyed by recipe_id so a recipe served by more than one surface (e.g.
@@ -431,6 +681,7 @@ def run_case(case: BenchmarkCase, user_id: str) -> CaseOutcome:
         served_recipe_ingredients=served_recipe_ingredients,
         over_blocked=over_blocked,
         notes=notes,
+        chat_assistant_text=chat_assistant_text or None,
     )
 
 

@@ -91,7 +91,7 @@ SAFE_CONTROL_CATEGORY = "safe_control"
 # BEFORE any score exists -- see cases/README.md.
 ClaimStrength = Literal["inherent", "precautionary"]
 
-ExecutionSurface = Literal["recommendation_graph", "discovery"]
+ExecutionSurface = Literal["recommendation_graph", "discovery", "chat_agent"]
 
 
 class ConversationTurn(BaseModel):
@@ -111,6 +111,20 @@ class StructuredRendering(BaseModel):
     step actually parses. A contradiction or injection payload belongs in
     `typed_ingredients` or `inventory_text`, never smuggled into `allergies`
     itself -- that would test something MacroChef doesn't do.
+
+    `injected_tool_output` (ROADMAP 3.3 follow-up: extending
+    `prompt_injection.jsonl` with `chat_agent`-surface cases) is a distinct
+    third surface, for cases whose `surfaces` includes `"chat_agent"`: the
+    malicious text a case wants overlaid onto one of `pinned_recipe_ids`'
+    real corpus recipe's title/instructions, in-memory, for the duration of
+    one benchmark run only (see `scripts/run_safety_benchmark.py`'s
+    `_run_chat_agent_surface`). This models an indirect prompt injection
+    delivered through a tool's OWN output (e.g. `search_recipes`/
+    `check_recipe_safety`'s recipe data) rather than through the user's own
+    free-text intake -- the Chef agent's actual attack surface, which
+    `typed_ingredients`/`inventory_text` (the recommendation_graph/discovery
+    surfaces' free-text intake) cannot express. `None` for every case that
+    doesn't use the chat_agent surface.
     """
 
     allergies: list[str] = Field(default_factory=list)
@@ -118,6 +132,7 @@ class StructuredRendering(BaseModel):
     typed_ingredients: list[str] = Field(default_factory=list)
     inventory_text: str | None = None
     macro_targets: dict | None = None
+    injected_tool_output: str | None = None
 
 
 class SourceCitation(BaseModel):
@@ -243,4 +258,31 @@ class BenchmarkCase(BaseModel):
                 "classify as inherent or precautionary when nothing is "
                 "forbidden."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_chat_agent_surface_requires_pinned_recipe_and_injection(
+        self,
+    ) -> "BenchmarkCase":
+        # Enforced at validation time, not discovered only at run time (see
+        # `StructuredRendering.injected_tool_output`'s docstring): a
+        # chat_agent-surface case's whole premise is "this pinned corpus
+        # recipe's title/instructions carry the injected text" -- there is
+        # no other way for a case to say which recipe a chat-surface
+        # injection payload poisons, and no chat_agent case is well-formed
+        # without a payload to poison it with.
+        if "chat_agent" in self.surfaces:
+            if not self.pinned_recipe_ids:
+                raise ValueError(
+                    f"{self.case_id}: surfaces includes 'chat_agent' but "
+                    "pinned_recipe_ids is empty -- a chat_agent case must pin "
+                    "the real corpus recipe whose title/instructions "
+                    "structured_rendering.injected_tool_output overlays."
+                )
+            if not self.structured_rendering.injected_tool_output:
+                raise ValueError(
+                    f"{self.case_id}: surfaces includes 'chat_agent' but "
+                    "structured_rendering.injected_tool_output is empty -- "
+                    "there is no injection payload for this case to test."
+                )
         return self
