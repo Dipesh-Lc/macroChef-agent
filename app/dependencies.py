@@ -316,6 +316,17 @@ require_reindex_rate_limit = _rate_limit_dependency(
     lambda settings: settings.rate_limit_reindex_window_seconds,
 )
 
+# ROADMAP.md Phase 3, Step 3.3 -- POST /chat/{thread_id}/message gets its OWN
+# bucket, not require_recommend_rate_limit: a chat turn's cost (an LLM call
+# per ReAct step, plus whatever tool calls it triggers) is a different unit
+# from one recommend request -- see Settings.rate_limit_chat_message_max's
+# comment.
+require_chat_message_rate_limit = _rate_limit_dependency(
+    "chat_message",
+    lambda settings: settings.rate_limit_chat_message_max,
+    lambda settings: settings.rate_limit_chat_message_window_seconds,
+)
+
 
 # ---------------------------------------------------------------------------
 # Safety-tools rate limit (app/api/routes_safety_tools.py, Phase 5) -- keyed

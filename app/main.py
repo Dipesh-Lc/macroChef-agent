@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.routes_admin import router as admin_router
+from app.api.routes_chat import router as chat_router
 from app.api.routes_day_planner import router as day_planner_router
 from app.api.routes_evals import router as evals_router
 from app.api.routes_feedback import router as feedback_router
@@ -301,6 +302,10 @@ def create_app() -> FastAPI:
     app.include_router(session_router)
     app.include_router(admin_router)
     app.include_router(evals_router)
+    # ROADMAP 3.3: the "Chef" conversational tool-calling agent -- additive,
+    # session-gated, its own rate-limit bucket (see app.dependencies.
+    # require_chat_message_rate_limit).
+    app.include_router(chat_router)
 
     # LAST: mounts the built SPA (if present) + its catch-all client-routing
     # fallback. Must stay after every app.include_router(...) call above --

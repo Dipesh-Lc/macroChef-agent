@@ -104,6 +104,20 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
 - **Accept:** either a documented, tested cleanup policy exists, or a
   measured growth-rate note justifying deferral is added here.
 
+### B7. `POST /chat` (thread creation) has no rate limit
+
+- **Where:** `app/api/routes_chat.py`'s `create_chat_thread` — session-gated
+  via `get_session_user` only, unlike `POST /chat/{thread_id}/message`
+  (`require_chat_message_rate_limit`).
+- **Problem:** a caller could mint unbounded `ChatThread` rows. Not a safety
+  issue (no allergy/diet logic involved), just unbounded resource usage.
+  Flagged by the ROADMAP 3.3 second advisor review (approved overall) as
+  non-blocking.
+- **Fix:** add a rate-limit dependency (new or shared bucket, executor's
+  call) to `create_chat_thread`.
+- **Accept:** repeated thread creation past a reasonable threshold is
+  rejected; test pinning the limit.
+
 ## Frontend
 
 ### F1. `web/openapi.json` freshness is unenforced
