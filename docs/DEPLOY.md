@@ -50,10 +50,24 @@ branch, with the `deploy` input left at its default `true`:
    `az containerapp update` so every dispatch ships the latest image,
    secrets, and env vars as a new revision.
 
-Ordinary `git push` / pull requests only ever run the `test`/`web` jobs —
-nothing builds, pushes, or deploys automatically. Deploys are a deliberate,
-human-triggered action, never a side effect of pushing to `main`: everything
-is prepared by CI, a human clicks "Run workflow".
+Ordinary pull requests (any branch) only ever run the `test`/`web`/
+`pgvector-check` jobs — nothing builds, pushes, or deploys. **Production**
+deploys are a deliberate, human-triggered action, never a side effect of
+pushing to `main`: everything is prepared by CI, a human clicks "Run
+workflow". **Staging is the one exception** (ROADMAP.md Phase 5, Step
+5.3): an ordinary `git push` to `main` (not a PR, not `workflow_dispatch`)
+auto-deploys to a separate, small-SKU `ca-macrochef-staging` Container App
+in the same resource group/ACR/environment, then runs a smoke test (`/health`
+polled until it's up, `/evals/latest`, one `/recipes/recommend` call) —
+see the `staging-deploy`/`staging-smoke` jobs. This never touches prod's
+`ca-macrochef` app, image tags, or Postgres database: staging builds its own
+`:staging-<sha>`-tagged image, runs with `MODEL_PROVIDER=mock` (never spends
+real LLM money on an unsupervised trigger) and no `DATABASE_URL` override
+(falls back to an ephemeral sqlite file inside the container, never prod's
+Neon Postgres — a staging revision restart starts with an empty DB, which is
+correct for a disposable environment, not a bug). The staging URL is printed
+to the job's `$GITHUB_STEP_SUMMARY`, mirroring the `deploy` job's existing
+"Print live URL" step.
 
 **Database migrations (ROADMAP.md Phase 5, Step 5.1):** as of this step, the
 `deploy` job runs `alembic upgrade head` against the prod Postgres (Neon,
@@ -346,6 +360,11 @@ hobby-scope clearance still applies.
 and `HUGGING_FACE_TOKEN` — not consumed by the deploy workflow today;
 the HF token is for the Batch 2 dataset publication human gate.)
 
+**Staging (ROADMAP 5.3) needs no new secrets** — `staging-deploy` reuses
+`AZURE_CREDENTIALS` (same subscription-scope Contributor SP) and
+`SESSION_SECRET` only. `DATABASE_URL`/`GEMINI_API_KEY`/`POSTHOG_API_KEY` are
+deliberately never passed to staging (see "What's automated" above).
+
 ## Resource naming (in the workflow's `env:` block — change there, not here)
 
 ```yaml
@@ -354,6 +373,7 @@ AZURE_REGION: italynorth
 RESOURCE_GROUP: rg-macrochef
 ACA_ENV_NAME: cae-macrochef
 ACA_APP_NAME: ca-macrochef
+ACA_STAGING_APP_NAME: ca-macrochef-staging   # ROADMAP 5.3, same RG/ACR/environment as prod
 ACR_NAME: acrmacrochef01   # must be globally unique across all of Azure
 ```
 
