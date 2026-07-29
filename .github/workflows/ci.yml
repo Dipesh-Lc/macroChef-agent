@@ -22,6 +22,7 @@ env:
   RESOURCE_GROUP: rg-macrochef
   ACA_ENV_NAME: cae-macrochef
   ACA_APP_NAME: ca-macrochef
+  ACA_STAGING_APP_NAME: ca-macrochef-staging
   ACR_NAME: acrmacrochef01
 
 jobs:
@@ -184,6 +185,231 @@ jobs:
         run: >-
           pytest tests/test_vector_store_contract.py tests/test_alembic_migrations.py
           tests/test_rate_limiting.py -v --tb=short
+
+  # ---------------------------------------------------------------------
+  # ROADMAP.md Phase 5, Step 5.3: staging auto-deploys on every ordinary
+  # push to main (no workflow_dispatch gate) -- deliberately the opposite
+  # trigger condition from `preflight`/`build-and-push`/`deploy` below,
+  # which stay manual-promote-only. This keeps the existing human-gate
+  # philosophy for PRODUCTION (a human still pulls that trigger) while
+  # giving every merge a disposable, low-stakes environment to sanity-check
+  # against first. Same image build process as prod (same Dockerfile, same
+  # commit) -- just its own tag/app/SKU, never the prod image itself.
+  # ---------------------------------------------------------------------
+
+  staging-deploy:
+    name: Auto-deploy to staging
+    needs: [test, web, pgvector-check]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      staging_url: ${{ steps.url.outputs.staging_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install containerapp extension
+        run: az extension add --name containerapp --upgrade -y
+
+      # Idempotent, mirrors preflight/deploy's own "create if absent"
+      # pattern below -- staging reuses the SAME resource group, ACR, and
+      # Container Apps environment as prod (no new Azure account/resource
+      # class the human needs to provision beyond what AZURE_CREDENTIALS
+      # already grants); only the Container App itself is staging-specific.
+      - name: Create resource group (if absent)
+        run: |
+          set -euo pipefail
+          az group show --name "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az group create --name "$RESOURCE_GROUP" --location "$AZURE_REGION"
+
+      - name: Create ACR (if absent)
+        run: |
+          set -euo pipefail
+          az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az acr create \
+              --name "$ACR_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --sku Basic \
+              --admin-enabled false
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build and push staging image
+        # Tagged distinctly from prod's `:latest`/`:<sha>` tags (never
+        # overwrites or aliases the production image) -- built from the
+        # exact same Dockerfile/commit, so "same image" per this step's
+        # acceptance criterion means "same build process," not "the literal
+        # artifact prod is running" (prod's own build only happens on a
+        # manual workflow_dispatch promote, a separate trigger entirely).
+        run: |
+          set -euo pipefail
+          IMAGE="$ACR_NAME.azurecr.io/macrochef-api:staging-${{ github.sha }}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "STAGING_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Create Container Apps environment (if absent)
+        run: |
+          set -euo pipefail
+          az containerapp env show \
+            --name "$ACA_ENV_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az containerapp env create \
+              --name "$ACA_ENV_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --location "$AZURE_REGION"
+
+      - name: Create staging Container App (if absent)
+        run: |
+          set -euo pipefail
+          # Small SKU per this step's acceptance criterion -- half of
+          # prod's 1.0 CPU/2.0Gi. Still needs enough headroom for
+          # torch+MiniLM+Chroma at import time (see prod's own comment on
+          # why 0.5/1Gi crash-looped for THIS app on first deploy) --
+          # 0.75/1.5Gi is a deliberate middle ground, not the same 0.5/1Gi
+          # that already failed once for the identical image.
+          az containerapp show \
+            --name "$ACA_STAGING_APP_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null || \
+            az containerapp create \
+              --name "$ACA_STAGING_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --environment "$ACA_ENV_NAME" \
+              --image "$STAGING_IMAGE" \
+              --target-port 8000 \
+              --ingress external \
+              --registry-server "$ACR_NAME.azurecr.io" \
+              --registry-identity system \
+              --min-replicas 1 \
+              --max-replicas 1 \
+              --cpu 0.75 --memory 1.5Gi
+
+      - name: Update staging revision — image, secrets, env vars
+        run: |
+          set -euo pipefail
+          # No new secrets/managed-Postgres for staging -- CLAUDE.md's
+          # human gate on provisioning hosting/managed-DB accounts applies
+          # here, so this deploy asks for nothing new from the human.
+          # DATABASE_URL is left UNSET -- app.config.Settings' own default
+          # (sqlite:///./macrochef.db) applies, an ephemeral file inside
+          # the container's own filesystem, NEVER prod's Postgres; a fresh
+          # revision (or a container restart) starts with an empty DB,
+          # which is the correct, safe behavior for a disposable staging
+          # environment, not a bug to fix here.
+          # MODEL_PROVIDER=mock + MODEL_PROVIDER_FALLBACKS unset:
+          # deliberately never spends real LLM API money on an
+          # unsupervised, auto-triggered deploy -- CLAUDE.md's money gate
+          # ("anything with nontrivial spend needs approval with a cost
+          # estimate first") extends to what this workflow can trigger
+          # with zero human review between a merge and this job running.
+          # SESSION_SECRET is reused from the SAME repo secret prod already
+          # has -- sessions here are anonymous (no real user accounts, see
+          # app.dependencies), so sharing the HMAC signing secret across
+          # environments carries no meaningful security cost and needs no
+          # new secret from the human.
+          az containerapp secret set \
+            --name "$ACA_STAGING_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --secrets \
+              session-secret="${{ secrets.SESSION_SECRET }}"
+
+          az containerapp update \
+            --name "$ACA_STAGING_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$STAGING_IMAGE" \
+            --min-replicas 1 \
+            --max-replicas 1 \
+            --cpu 0.75 --memory 1.5Gi \
+            --set-env-vars \
+              SESSION_SECRET=secretref:session-secret \
+              MODEL_PROVIDER=mock \
+              EMBEDDING_PROVIDER=local \
+              PORT=8000
+
+      - name: Resolve staging URL
+        id: url
+        run: |
+          set -euo pipefail
+          FQDN=$(az containerapp show \
+            --name "$ACA_STAGING_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "staging_url=https://$FQDN" >> "$GITHUB_OUTPUT"
+
+      - name: Print staging URL
+        run: |
+          echo "## Staging deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.url.outputs.staging_url }}" >> "$GITHUB_STEP_SUMMARY"
+
+  staging-smoke:
+    name: Staging smoke test
+    needs: staging-deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for the new revision to accept traffic
+        # A fresh `containerapp update` doesn't guarantee the new revision
+        # is already serving by the time the previous job's Azure CLI call
+        # returns -- poll /health with a bounded retry budget rather than a
+        # single immediate request that could flake on a slow cold start.
+        run: |
+          set -euo pipefail
+          URL="${{ needs.staging-deploy.outputs.staging_url }}"
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "Staging is up after $attempt attempt(s)."
+              exit 0
+            fi
+            echo "Attempt $attempt: /health returned $code, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Staging never returned 200 from /health after 20 attempts."
+          exit 1
+
+      - name: Hit /evals/latest
+        run: |
+          set -euo pipefail
+          URL="${{ needs.staging-deploy.outputs.staging_url }}"
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/evals/latest")
+          if [ "$code" != "200" ]; then
+            echo "::error::GET /evals/latest returned $code, expected 200."
+            exit 1
+          fi
+
+      - name: One mock-provider recommend call
+        # Mints an anonymous session (cookie-based, matching how the real
+        # SPA does it) then drives one real /recipes/recommend call through
+        # the full graph -- MODEL_PROVIDER=mock on this deploy (see the
+        # staging-deploy job above) guarantees this costs nothing and calls
+        # no real provider, while still proving the whole request path
+        # (session auth, rate limiter, graph execution, response schema)
+        # actually works end-to-end on the freshly deployed revision.
+        run: |
+          set -euo pipefail
+          URL="${{ needs.staging-deploy.outputs.staging_url }}"
+          COOKIES="$(mktemp)"
+
+          session_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -c "$COOKIES" -X POST "$URL/session" \
+            -H "X-Requested-With: XMLHttpRequest")
+          if [ "$session_code" != "204" ]; then
+            echo "::error::POST /session returned $session_code, expected 204."
+            exit 1
+          fi
+
+          recommend_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -b "$COOKIES" -X POST "$URL/recipes/recommend" \
+            -H "Content-Type: application/json" \
+            -H "X-Requested-With: XMLHttpRequest" \
+            -d '{"input_type": "text", "typed_ingredients": "chicken, rice, broccoli", "user_profile": {}}')
+          if [ "$recommend_code" != "200" ]; then
+            echo "::error::POST /recipes/recommend returned $recommend_code, expected 200."
+            exit 1
+          fi
+          echo "Staging smoke test passed: /health, /evals/latest, /recipes/recommend all OK."
 
   # ---------------------------------------------------------------------
   # Everything below this line only runs for a manual workflow_dispatch on
