@@ -28,6 +28,14 @@
 import { apiStream } from "../api/client";
 import type { RecommendationRequest, RecommendationResponse } from "../api/types";
 
+// ROADMAP.md Step 4.3: the Chef chat turn stream (`POST /chat/{thread_id}/
+// message`, `app.api.routes_chat._stream_chat_turn`). Same POST-SSE
+// transport/heartbeat contract as `streamRecommend` below (this backend
+// module mirrors `app.api.routes_stream`'s worker-thread + polling
+// architecture byte-for-byte, per that module's own docstring), so this
+// reuses the identical `parseSseStream` + `apiStream` plumbing rather than a
+// second parser.
+
 /** One `RunEvent` (`app.observability.events.RunEvent`) relayed live as a
  * `node` SSE event -- see that Pydantic model for the authoritative shape;
  * this is its JSON-serialized (`mode="json"`) form. */
@@ -195,5 +203,97 @@ export async function* streamRecommend(
     }
     // Unknown/future event type (e.g. a later `awaiting_input`, ROADMAP
     // Step 3.2) -- deliberately ignored, not yielded; see module docstring.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chef chat turn stream (ROADMAP.md Step 4.3, consuming `POST /chat/
+// {thread_id}/message` from Step 3.3 -- `app.api.routes_chat`).
+// ---------------------------------------------------------------------------
+
+/** One live `tool_call` SSE event -- `app.agent.chef_agent.tools_node` emits
+ * this the instant a tool starts executing, before its result exists. */
+export interface ChatToolCallEvent {
+  tool: string;
+  args_summary: string;
+  call_id: string;
+}
+
+/** One live `tool_result` SSE event, correlated to its `tool_call` sibling
+ * by `call_id`. `raw` is the tool's own small JSON-serializable payload
+ * (`app.agent.tools.ToolResult.raw`) -- shape varies per tool, see
+ * `ToolCallChip`'s per-tool rendering. */
+export interface ChatToolResultEvent {
+  call_id: string;
+  summary: string;
+  raw: Record<string, unknown>;
+}
+
+/** The terminal turn's answer, carried as a SINGLE `token` event -- see
+ * `app.api.routes_chat._stream_chat_turn`'s docstring: `generate_structured`
+ * is one blocking structured call, not a token-streaming API, so this event
+ * delivers the whole final answer in one `delta` rather than fabricating
+ * incremental deltas. Kept as its own event type (rather than folded into
+ * `message` below) so the wire vocabulary stays ready for real incremental
+ * streaming later without a breaking change. */
+export interface ChatTokenEvent {
+  delta: string;
+}
+
+/** The terminal `message` event -- same content as the `token` event's
+ * `delta` (this backend always emits exactly one of each per turn, `token`
+ * first), plus this turn's full tool-call history for callers that want it. */
+export interface ChatMessageEvent {
+  role: "assistant";
+  content: string;
+  tool_calls: Record<string, unknown>[] | null;
+}
+
+/** One parsed, typed event from the chat turn stream. */
+export type ChatStreamEvent =
+  | { type: "tool_call"; data: ChatToolCallEvent }
+  | { type: "tool_result"; data: ChatToolResultEvent }
+  | { type: "token"; data: ChatTokenEvent }
+  | { type: "message"; data: ChatMessageEvent }
+  | { type: "error"; data: StreamErrorEvent };
+
+/**
+ * Stream `POST /chat/{thread_id}/message` (session-gated, rate-limited --
+ * see `app.dependencies.require_chat_message_rate_limit`) and yield each
+ * relayed event live: zero or more `tool_call`/`tool_result` pairs (in
+ * arrival order -- a `tool_call` always precedes its matching `tool_result`,
+ * see `app.agent.chef_agent.tools_node`), then exactly one `token` and one
+ * terminal `message`, OR one terminal `error`. Any unrecognized SSE event
+ * type is silently skipped, mirroring `streamRecommend`'s same forward-
+ * compatibility posture above.
+ */
+export async function* streamChatMessage(
+  threadId: string,
+  message: string,
+  signal?: AbortSignal,
+): AsyncGenerator<ChatStreamEvent> {
+  const response = await apiStream(`/chat/${encodeURIComponent(threadId)}/message`, {
+    method: "POST",
+    json: { message },
+    sessionRequired: true,
+    signal,
+  });
+
+  if (!response.body) {
+    throw new Error("Streaming response had no readable body");
+  }
+
+  for await (const { event, data } of parseSseStream(response.body)) {
+    if (event === "tool_call") {
+      yield { type: "tool_call", data: data as ChatToolCallEvent };
+    } else if (event === "tool_result") {
+      yield { type: "tool_result", data: data as ChatToolResultEvent };
+    } else if (event === "token") {
+      yield { type: "token", data: data as ChatTokenEvent };
+    } else if (event === "message") {
+      yield { type: "message", data: data as ChatMessageEvent };
+    } else if (event === "error") {
+      yield { type: "error", data: data as StreamErrorEvent };
+    }
   }
 }

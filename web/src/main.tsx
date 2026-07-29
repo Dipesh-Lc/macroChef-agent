@@ -21,7 +21,7 @@ import MyRecipesPage from "./pages/MyRecipesPage";
 import RecipeSearchPage from "./pages/RecipeSearchPage";
 import SharedPlanPage from "./pages/SharedPlanPage";
 import EvalsPage from "./pages/EvalsPage";
-import { ComingSoonPage } from "./components/ComingSoonPage";
+import ChatPage from "./pages/ChatPage";
 
 const queryClient = new QueryClient();
 
@@ -44,15 +44,7 @@ createRoot(rootElement).render(
             <Route path="search" element={<RecipeSearchPage />} />
             <Route path="shared/:shareId" element={<SharedPlanPage />} />
             <Route path="evals" element={<EvalsPage />} />
-            <Route
-              path="chat"
-              element={
-                <ComingSoonPage
-                  title="Chat with Chef — coming soon"
-                  message="The tool-calling Chef agent (ROADMAP Phase 3.3) isn't built yet. In the meantime, try the planner for allergy-safe, macro-targeted recommendations."
-                />
-              }
-            />
+            <Route path="chat" element={<ChatPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
