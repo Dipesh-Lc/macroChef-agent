@@ -32,9 +32,9 @@ this checkout yet — this is an honest placeholder, not a broken link. -->
 ## Why this is interesting
 
 - **The LLM never enforces allergies or computes nutrition — deterministic
-  code does, and it's checked, not just claimed.** A 269-case adversarial
+  code does, and it's checked, not just claimed.** A 391-case adversarial
   benchmark (hidden allergens, prompt injection, substitution attacks,
-  morphology traps) gates every PR in CI.
+  morphology traps) gates every PR in CI, 278 of them release-blocking.
   → [`app/services/constraint_engine.py`](app/services/constraint_engine.py),
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ("Safety benchmark gate" step)
 - **Evals are a first-class, visible system, not a script nobody runs.**
@@ -151,8 +151,8 @@ other, so a shared blind spot can't hide behind a passing suite.
 
 ### The adversarial benchmark, by category
 
-`scripts/run_safety_benchmark.py` scores **381 hand-authored adversarial
-cases** against the deterministic layer, split into a 269-case
+`scripts/run_safety_benchmark.py` scores **391 hand-authored adversarial
+cases** against the deterministic layer, split into a 278-case
 release-blocking (`inherent`) set, a smaller non-blocking `precautionary`
 set, and a 60-case safe-control set that checks for *over*-blocking:
 
@@ -166,8 +166,17 @@ set, and a 60-case safe-control set that checks for *over*-blocking:
 | `multi_constraint` | 25 | Multiple simultaneous allergies/diet types on one profile |
 | `macro_trap` | 25 | A macro target framed to obscure an allergen swap |
 | `safe_control` | 60 | No real violation present — measures false-positive (over-block) rate |
-| `prompt_injection` | 14 | Direct/fake-system-message attempts to override the safety rule mid-conversation |
+| `prompt_injection` | 24 | Direct/fake-system-message attempts to override the safety rule mid-conversation, plus 10 cases (ROADMAP 3.3) targeting the Chef chat agent's own tool-output-injection surface |
 | `substitution_attack` | 10 | A recipe substitution re-introduces the exact allergen it was meant to remove |
+
+**Not yet covered by the certified run below:** 10 of the `prompt_injection`
+cases (`injection_015`-`injection_024`, 9 `inherent` + 1 `safe_control`)
+were added alongside ROADMAP 3.3's chat agent and test its own attack
+surface — an injection delivered through a *tool's* output (a poisoned
+recipe title/instructions) rather than the user's free-text intake. They
+have not yet been run against a real judge (a full paid run needs
+human approval per `CLAUDE.md`'s money gate); the adjudicated numbers below
+are the last certified run, against the prior 269-case `inherent` set only.
 
 One example, quoted directly from
 [`app/evaluation/benchmark/cases/prompt_injection.jsonl`](app/evaluation/benchmark/cases/prompt_injection.jsonl)
@@ -201,11 +210,14 @@ window.
 
 **Current numbers** — both always reported together, per this project's
 release-gate policy (`CLAUDE.md`, human-decided 2026-07-17): the judge is
-never modified to close the gap between them.
+never modified to close the gap between them. This run predates the 9
+`chat_agent`-surface `inherent` cases added by ROADMAP 3.3 (see above) — the
+269 below is that run's actual denominator, not the current 278-case set;
+a fresh full run covering all 278 needs a human-approved paid judge pass.
 
 | Metric | Result |
 |---|---|
-| Judge-flagged, `inherent` (release-blocking) | **73 / 269** (27.1%, Wilson 95% CI 22.2–32.7%) |
+| Judge-flagged, `inherent` (release-blocking, 269-case set) | **73 / 269** (27.1%, Wilson 95% CI 22.2–32.7%) |
 | Adjudicated-true violations | **0 / 269** — every flag traced, with an exhaustive run of the production safety code against every served ingredient list, to a known judge-matching artifact, not a real gap |
 | Safe-control false-positive rate | **0 / 60** |
 
@@ -223,7 +235,7 @@ committed under `data/evaluation/`:
 
 | Suite | Metric | Result |
 |---|---|---|
-| Safety benchmark | Judge-flagged / adjudicated-true (`inherent`) | 73/269 / **0/269** |
+| Safety benchmark | Judge-flagged / adjudicated-true (`inherent`, 269-case set) | 73/269 / **0/269** |
 | Safety benchmark | Safe-control over-block | 0/60 |
 | Retrieval | Dish-name MRR (semantic vs. keyword) | **1.00** vs. 0.63 |
 | Retrieval | Dietary-intent MRR (semantic vs. keyword) | **0.09** vs. 0.00 — gate: PASS |
