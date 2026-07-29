@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSseStream, streamRecommend, type SseEvent } from "./sse";
+import { parseSseStream, streamChatMessage, streamRecommend, type SseEvent } from "./sse";
 
 vi.mock("../api/client", () => ({
   apiStream: vi.fn(),
@@ -151,6 +151,78 @@ describe("streamRecommend", () => {
 
     await expect(async () => {
       for await (const _event of streamRecommend({} as never)) {
+        // no-op -- the generator should throw before yielding anything
+      }
+    }).rejects.toThrow(/no readable body/);
+  });
+});
+
+describe("streamChatMessage", () => {
+  afterEach(() => {
+    vi.mocked(apiStream).mockReset();
+  });
+
+  function fakeResponse(chunks: string[]): Response {
+    return { body: streamFromChunks(chunks) } as unknown as Response;
+  }
+
+  it("discriminates tool_call/tool_result/token/message events by their SSE `event:` type, in arrival order", async () => {
+    vi.mocked(apiStream).mockResolvedValue(
+      fakeResponse([
+        'event: tool_call\ndata: {"tool":"search_recipes","args_summary":"Searching recipes.","call_id":"c1"}\n\n',
+        'event: tool_result\ndata: {"call_id":"c1","summary":"Found 1 recipe(s).","raw":{}}\n\n',
+        'event: token\ndata: {"delta":"Here you go."}\n\n',
+        'event: message\ndata: {"role":"assistant","content":"Here you go.","tool_calls":[]}\n\n',
+      ]),
+    );
+
+    const events = [];
+    for await (const event of streamChatMessage("thread_1", "hi")) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toEqual(["tool_call", "tool_result", "token", "message"]);
+    expect(events[0]).toMatchObject({ type: "tool_call", data: { tool: "search_recipes" } });
+    expect(events[3]).toMatchObject({ type: "message", data: { content: "Here you go." } });
+  });
+
+  it("yields a typed error event for a mid-turn failure", async () => {
+    vi.mocked(apiStream).mockResolvedValue(
+      fakeResponse(['event: error\ndata: {"detail":"Internal Server Error","error_type":"RuntimeError"}\n\n']),
+    );
+
+    const events = [];
+    for await (const event of streamChatMessage("thread_1", "hi")) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "error", data: { detail: "Internal Server Error", error_type: "RuntimeError" } },
+    ]);
+  });
+
+  it("posts to /chat/{thread_id}/message with the message body, session-required", async () => {
+    vi.mocked(apiStream).mockResolvedValue(fakeResponse([]));
+
+    for await (const _event of streamChatMessage("thread_1", "hello chef")) {
+      // no-op -- draining the (empty) stream
+    }
+
+    expect(apiStream).toHaveBeenCalledWith(
+      "/chat/thread_1/message",
+      expect.objectContaining({
+        method: "POST",
+        json: { message: "hello chef" },
+        sessionRequired: true,
+      }),
+    );
+  });
+
+  it("throws if the response has no readable body", async () => {
+    vi.mocked(apiStream).mockResolvedValue({ body: null } as unknown as Response);
+
+    await expect(async () => {
+      for await (const _event of streamChatMessage("thread_1", "hi")) {
         // no-op -- the generator should throw before yielding anything
       }
     }).rejects.toThrow(/no readable body/);

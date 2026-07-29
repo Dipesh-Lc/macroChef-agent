@@ -7,6 +7,9 @@ import { apiRequest } from "./client";
 import type {
   BatchPlanRequest,
   BatchPlanResponse,
+  ChatCreateRequest,
+  ChatCreateResponse,
+  ChatThreadStatusResponse,
   DayPlanRequest,
   DayPlanResponse,
   DeleteRecipeResponse,
@@ -352,5 +355,37 @@ export async function getLatestEvalReport(): Promise<EvalReport | EvalReportNotA
   return apiRequest<EvalReport | EvalReportNotAvailable>("/evals/latest", {
     method: "GET",
     timeoutMs: EVAL_REPORT_TIMEOUT_MS,
+  });
+}
+
+/**
+ * Session-required: bootstraps a session and sends the CSRF header. Mints a
+ * new Chef chat thread and binds `request.user_profile` to it ONCE --
+ * `app.api.routes_chat.create_chat_thread`'s docstring: this is the only
+ * call in the thread's lifetime that ever sends a `UserProfile`, so the
+ * caller (`ChatPage`) must collect allergies/diet type BEFORE calling this,
+ * never default to an empty profile with no way to attach one later (the
+ * single most safety-relevant frontend decision in ROADMAP Step 4.3).
+ */
+export async function createChatThread(request: ChatCreateRequest): Promise<ChatCreateResponse> {
+  return apiRequest<ChatCreateResponse>("/chat", {
+    method: "POST",
+    json: request,
+    sessionRequired: true,
+  });
+}
+
+/**
+ * Session-required: bootstraps a session and sends the CSRF header. 404s
+ * (surfaced as `NotFoundError`, see `api/client.ts`) identically for "no
+ * such thread_id" and "thread_id exists, belongs to someone else" -- see
+ * `app.api.routes_chat.get_chat_thread`'s docstring. `ChatPage` treats a 404
+ * here as a stale localStorage thread id (there is no server-side thread
+ * list to reconcile against) and drops it from the sidebar.
+ */
+export async function getChatThread(threadId: string): Promise<ChatThreadStatusResponse> {
+  return apiRequest<ChatThreadStatusResponse>(`/chat/${encodeURIComponent(threadId)}`, {
+    method: "GET",
+    sessionRequired: true,
   });
 }

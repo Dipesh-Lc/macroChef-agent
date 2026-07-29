@@ -124,3 +124,14 @@ export interface EvalReportNotAvailable {
   status: "not_generated";
   message: string;
 }
+
+// ROADMAP 4.3: the Chef chat agent's HTTP surface (`app.api.routes_chat`,
+// ROADMAP Phase 3.3). `POST /chat/{thread_id}/message` itself returns SSE,
+// not JSON -- its event payloads (`ChatToolCallEvent`/etc.) live in
+// `lib/sse.ts` instead, mirroring `RecommendationRequest`/`NodeRunEvent`'s
+// same JSON-schema-vs-SSE-event split above.
+export type ChatCreateRequest = components["schemas"]["ChatCreateRequest"];
+export type ChatCreateResponse = components["schemas"]["ChatCreateResponse"];
+export type ChatMessageRequest = components["schemas"]["ChatMessageRequest"];
+export type ChatMessageView = components["schemas"]["ChatMessageView"];
+export type ChatThreadStatusResponse = components["schemas"]["ChatThreadStatusResponse"];
