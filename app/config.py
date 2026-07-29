@@ -182,6 +182,18 @@ class Settings(BaseSettings):
         default=3600.0, alias="RATE_LIMIT_SHARE_VIEW_WINDOW_SECONDS"
     )
 
+    # POST /chat/{thread_id}/message (app/api/routes_chat.py, ROADMAP.md
+    # Phase 3, Step 3.3) -- a NEW bucket, not shared with rate_limit_
+    # recommend_max: one chat "turn" can drive several tool calls (including
+    # LLM calls for the ReAct loop itself and, per-turn, a USDA lookup via
+    # ground_nutrition) -- a materially different cost unit than one
+    # recommend request, so it gets its own budget rather than competing
+    # with /recipes/recommend's.
+    rate_limit_chat_message_max: int = Field(default=30, alias="RATE_LIMIT_CHAT_MESSAGE_MAX")
+    rate_limit_chat_message_window_seconds: float = Field(
+        default=3600.0, alias="RATE_LIMIT_CHAT_MESSAGE_WINDOW_SECONDS"
+    )
+
     # POST /session (app/api/routes_session.py, SPA rebuild W0) -- the
     # anonymous session-mint/validate endpoint. Keyed by caller IP, not a
     # verified session (this endpoint is pre-identity by definition -- see

@@ -219,6 +219,109 @@ class GraphRun(Base):
     )
 
 
+class ChatThread(Base):
+    """ROADMAP.md Phase 3, Step 3.3: one "Chef" conversational-agent thread.
+
+    `id` mirrors `SharedPlan.id`/`GraphRun.id`'s pattern -- `secrets.
+    token_urlsafe(16)`, minted by `app.api.routes_chat`, NOT a sequential
+    integer. `id` doubles as the LangGraph `thread_id` for the chef
+    checkpointer (`app.agent.chef_agent`), namespaced via `checkpoint_ns=
+    "chef"` so it can never collide with a `GraphRun` id used by the
+    recommend graph's checkpointer, even though both mint ids the same way
+    (see `app.agent.chef_agent`'s module docstring).
+
+    `user_profile` is bound ONCE, at thread-creation time (client-supplied
+    in the `POST /chat` body) and stored here as a JSON blob -- advisor-
+    reviewed decision (Phase 3.3 design consult addendum): unlike the
+    recommend graph (where `UserProfile` is per-request, from
+    `RecommendationRequest.user_profile`), a chat thread is multi-turn over
+    a persisted conversation, so the profile has nowhere else to live
+    between turns. Every tool wrapper that needs it (`check_recipe_safety`,
+    `propose_substitutions`, `build_day_plan`) closes over THIS stored
+    value -- it is never an LLM-controllable tool-call argument, the same
+    invariant-#3-flavored treatment `get_user_context`'s `user_id` needs.
+
+    Cross-user access is 404 (mirrors `GraphRun`'s identical "no oracle for
+    exists-but-not-yours" collapse, same rationale: 128 bits of
+    unguessability via `secrets.token_urlsafe` already makes hiding
+    existence cheap, and no legitimate client needs to tell the two cases
+    apart) -- see `app.data.chat_thread_repository.ChatThreadRepository.
+    get_owned`.
+    """
+
+    __tablename__ = "chat_threads"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    owner_user_id: Mapped[str] = mapped_column(String(128), index=True)
+    user_profile: Mapped[str] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class ChatMessage(Base):
+    """One turn's worth of persisted chat transcript (ROADMAP.md Phase 3,
+    Step 3.3) -- `role="user"` for the human's message, `role="assistant"`
+    for the Chef agent's final answer for a turn, `role="tool"` for one row
+    per tool call executed during a turn (display/audit trail for the chat
+    UI's tool-call chips, ROADMAP Phase 4.3).
+
+    `tool_calls_json` is the JSON-serialized tool-call history for THIS
+    message: for an `assistant` row, the full list of `(tool, args, result)`
+    entries the response gate (`app.agent.chef_agent.evaluate_response_
+    gate`) checked before this message was released -- the durable record
+    of what was actually consulted, never re-derived after the fact. For a
+    `tool` row, that single call's own entry. `None` for `user` rows.
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    thread_id: Mapped[str] = mapped_column(String(64), index=True)
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
+    )
+
+
+class AgentNote(Base):
+    """Long-term per-user memory the Chef agent can APPEND to via its one
+    `remember(note)` tool (ROADMAP.md Phase 3, Step 3.3) -- never edited or
+    deleted by the LLM (see `app.data.agent_note_repository.
+    AgentNoteRepository`'s docstring: `remember()` is the only LLM-facing
+    write; deletion is human-only, via `DELETE /chat/notes/{id}`).
+
+    `is_active` is a soft-delete flag, doing double duty for two DISTINCT
+    lifecycle events (advisor-reviewed decision, Q2): (1) a human deleting a
+    note via the REST endpoint, and (2) automatic oldest-first eviction when
+    a user's 31st active note would be created (hard cap: `AgentNoteRepository.
+    MAX_ACTIVE_NOTES`) -- `remember()` never refuses a new note; it evicts the
+    oldest active one instead, since the user just explicitly asked to
+    remember something. Both cases are indistinguishable from a query's point
+    of view (`is_active=False` either way), which is fine: a human viewing
+    "my notes" only ever needs to see the currently-active set.
+    """
+
+    __tablename__ = "agent_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    note: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
+    )
+
+
 class LLMCacheEntry(Base):
     """Response-level cache for `app.services.model_provider.
     generate_structured` calls (ROADMAP.md Phase 2, Step 2.3) -- see
