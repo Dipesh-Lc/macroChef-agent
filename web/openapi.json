@@ -443,6 +443,242 @@
         }
       }
     },
+    "/runs": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Start Run",
+        "description": "Mints a new `thread_id` bound to the verified session identity,\ninvokes the checkpointed graph once, and returns either\n`status=\"awaiting_input\"` (inventory_confirmation_node paused on a\nlow-confidence image/mixed observation -- resume via\n`POST /runs/{thread_id}/resume`) or `status=\"completed\"` (identical\n`RecommendationResponse` shape to `POST /recipes/recommend`, just\nwrapped).",
+        "operationId": "start_run_runs_post",
+        "parameters": [
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{thread_id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Run",
+        "description": "Reads the current run status WITHOUT re-running the graph -- proves\nan interrupted run's state actually persisted in the checkpointer\n(tests/test_hitl_resume.py case 1).",
+        "operationId": "get_run_runs__thread_id__get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{thread_id}/resume": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Resume Run",
+        "description": "Resumes an interrupted run with the human-corrected inventory. The\nownership check happens FIRST, before the checkpointer is ever touched\n-- a thread_id minted by user A is never readable or resumable by user\nB (tests/test_hitl_resume.py case 3).",
+        "operationId": "resume_run_runs__thread_id__resume_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          },
+          {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Requested-With"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/library/discover": {
       "post": {
         "tags": [
@@ -5096,6 +5332,23 @@
         ],
         "title": "RejectedRecipe"
       },
+      "ResumeRunRequest": {
+        "properties": {
+          "confirmed_inventory": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedIngredient"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Confirmed Inventory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirmed_inventory"
+        ],
+        "title": "ResumeRunRequest"
+      },
       "RetrievalCategoryResult": {
         "properties": {
           "category": {
@@ -5202,6 +5455,50 @@
         ],
         "title": "RetrievalSuite",
         "description": "See `app.evaluation.eval_retrieval` / `scripts/evaluate_retrieval.py`\nfor the full methodology. `skipped` is True when the Chroma collection\nhasn't been built (e.g. a bare checkout with no baked index) -- this is\nNOT a failure, just \"nothing to score yet\"."
+      },
+      "RunStatusResponse": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_input",
+              "completed"
+            ],
+            "title": "Status"
+          },
+          "awaiting": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Awaiting"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecommendationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id",
+          "status"
+        ],
+        "title": "RunStatusResponse"
       },
       "SafetyBenchmarkBucket": {
         "properties": {

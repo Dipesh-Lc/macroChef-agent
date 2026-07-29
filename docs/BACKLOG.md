@@ -78,6 +78,32 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
 - **Accept:** attributes asserted in tests; comment block explains the
   CSRF interplay next to the existing CORS comment.
 
+### B6. `GraphRun`/checkpoint storage growth for never-interrupted stream runs
+
+- **Where:** `app/api/routes_stream.py`'s `_stream_recommend` (the
+  `hitl_capable` branch, ROADMAP 3.2) calls `app.api.routes_runs.
+  invoke_hitl_graph` for every `POST /recipes/recommend/stream` request
+  once `langgraph` is installed — not just ones that end up pausing on a
+  low-confidence inventory observation. `app.data.models.GraphRun` mints
+  one ownership row per call, and the shared checkpointer
+  (`app.graph.builder._get_checkpointer`, sqlite or Postgres) persists a
+  full checkpoint per run, even for plain-text requests that never
+  interrupt and are never resumed.
+- **Problem:** unbounded growth of the `GraphRun` table and the
+  langgraph-checkpoint tables (`checkpoints`, `checkpoint_blobs`,
+  `checkpoint_writes`) for runs nobody will ever resume, plus extra load
+  on the single lock-guarded sqlite/Postgres connection compared to the
+  pre-3.2 uncheckpointed path. Flagged by the ROADMAP 3.2 second advisor
+  review (approved overall) as a real gap in the step's own
+  `routes_stream.py` docstring, which already promised this entry.
+- **Fix:** some retention/cleanup policy for completed, never-resumed
+  `GraphRun` rows and their checkpoint rows (e.g. a periodic sweep
+  deleting rows past a TTL where `status != "awaiting_input"`), or
+  confirm via measurement that row-growth at expected traffic is
+  negligible and defer further.
+- **Accept:** either a documented, tested cleanup policy exists, or a
+  measured growth-rate note justifying deferral is added here.
+
 ## Frontend
 
 ### F1. `web/openapi.json` freshness is unenforced

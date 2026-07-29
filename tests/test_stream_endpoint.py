@@ -15,7 +15,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.data.graph_run_repository as graph_run_repo_module
 import app.graph.builder as builder_module
+import app.graph.nodes as nodes_module
 import app.services.memory_service as memory_service_module
 import app.services.recipe_retriever as recipe_retriever_module
 from app.config import get_settings
@@ -23,6 +25,7 @@ from app.data.db import Base
 from app.data.recipe_library_repository import RecipeLibraryRepository
 from app.dependencies import SESSION_TOKEN_HEADER, mint_session_token
 from app.main import create_app
+from app.schemas.inventory import InventoryObservation
 from app.schemas.recommendation import RecommendationResponse
 
 
@@ -235,3 +238,112 @@ def test_mid_graph_exception_yields_clean_error_event(
     assert etype == "error"
     assert data["detail"] == "Internal Server Error"
     assert data["error_type"] == "RuntimeError"
+
+
+# ---------------------------------------------------------------------------
+# ROADMAP.md Phase 3, Step 3.2: the stream itself can pause. This is the
+# literal "upload photo -> stream pauses -> confirm -> resume" README demo
+# flow ROADMAP.md's Step 3.2 acceptance criterion names -- node events relay
+# live right up through inventory_confirmation_node's interrupt, the stream
+# ends in a NEW `awaiting_input` terminal event (not `result`/`error`)
+# carrying a resumable `thread_id`, and POST /runs/{thread_id}/resume
+# (unmodified from app.api.routes_runs) produces the final plan.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _isolated_graph_run_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GraphRunRepository (the thread_id -> owner_user_id ownership check)
+    needs its own isolated DB for this test, same as
+    tests/test_hitl_resume.py's fixture of the same purpose -- not
+    `autouse` here since the other tests in this file never touch
+    `/runs`."""
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(bind=engine)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    monkeypatch.setattr(graph_run_repo_module, "SessionLocal", test_session_local)
+
+
+@pytest.fixture()
+def _checkpoint_db(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Points the checkpointed graph's SqliteSaver at a real file, mirrors
+    tests/test_hitl_resume.py's `_use_checkpoint_db`."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'stream_hitl_checkpoints.db'}")
+    get_settings.cache_clear()
+    builder_module._get_checkpointer.cache_clear()
+    yield
+    builder_module._get_checkpointer.cache_clear()
+
+
+def test_stream_pauses_with_awaiting_input_then_resume_completes(
+    isolated_session_factory,
+    _isolated_graph_run_db,
+    _checkpoint_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_extract(image_path):
+        return [
+            InventoryObservation(
+                raw_name="shrimp paste",
+                normalized_name="shrimp paste",
+                confidence=0.4,
+                source="vision",
+                needs_confirmation=True,
+            )
+        ]
+
+    monkeypatch.setattr(nodes_module, "extract_inventory_from_image", fake_extract)
+    monkeypatch.setenv("MACROCHEF_ENABLE_VISION", "true")
+    get_settings.cache_clear()
+
+    client = _client()
+    headers = _auth_headers("stream_hitl_user")
+    payload = _recommend_payload({"input_type": "image", "image_path": "fake.jpg"})
+
+    with client.stream(
+        "POST", "/recipes/recommend/stream", json=payload, headers=headers
+    ) as response:
+        assert response.status_code == 200
+        raw_lines = list(response.iter_lines())
+
+    events = _parse_sse(raw_lines)
+    assert events, "no SSE events were received"
+
+    # Node events still relay live, right up through the pause -- the
+    # ROADMAP's own framing ("every second shows the system reasoning")
+    # still applies to a run that ends up pausing. `interrupt()` raises
+    # `GraphInterrupt` on this (the pausing) call -- see
+    # app.graph.nodes.inventory_confirmation_node and
+    # app.observability.events.traced_node's docstring -- so the node
+    # genuinely never returns here: it emits `started` but never `finished`
+    # (that only happens on the later RESUME call, once interrupt() returns
+    # a value instead of raising). Asserting `finished` here would be
+    # asserting something that cannot happen given real LangGraph semantics.
+    node_events = [(etype, data) for etype, data in events if etype == "node"]
+    finished_nodes = [data["node"] for etype, data in node_events if data["status"] == "finished"]
+    started_nodes = [data["node"] for etype, data in node_events if data["status"] == "started"]
+    failed_nodes = [data["node"] for etype, data in node_events if data["status"] == "failed"]
+    assert "intake_node" in finished_nodes
+    assert "inventory_confirmation_node" in started_nodes
+    assert "inventory_confirmation_node" not in finished_nodes
+    assert "inventory_confirmation_node" not in failed_nodes
+
+    terminal_event_types = {"result", "error", "awaiting_input"}
+    terminal_types = [etype for etype, _ in events if etype in terminal_event_types]
+    assert terminal_types == ["awaiting_input"], (
+        "expected exactly one terminal `awaiting_input` event, not `result`/`error`"
+    )
+
+    awaiting_data = events[-1][1]
+    thread_id = awaiting_data["thread_id"]
+    assert thread_id
+    assert awaiting_data["awaiting"]["reason"] == "low_confidence_inventory"
+
+    resume_payload = {"confirmed_inventory": [{"name": "miso paste", "quantity": "1 tbsp"}]}
+    resumed = client.post(f"/runs/{thread_id}/resume", json=resume_payload, headers=headers)
+    assert resumed.status_code == 200
+    resumed_body = resumed.json()
+    assert resumed_body["status"] == "completed"
+    assert resumed_body["result"]["errors"] == []

@@ -203,6 +203,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Run
+         * @description Mints a new `thread_id` bound to the verified session identity,
+         *     invokes the checkpointed graph once, and returns either
+         *     `status="awaiting_input"` (inventory_confirmation_node paused on a
+         *     low-confidence image/mixed observation -- resume via
+         *     `POST /runs/{thread_id}/resume`) or `status="completed"` (identical
+         *     `RecommendationResponse` shape to `POST /recipes/recommend`, just
+         *     wrapped).
+         */
+        post: operations["start_run_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description Reads the current run status WITHOUT re-running the graph -- proves
+         *     an interrupted run's state actually persisted in the checkpointer
+         *     (tests/test_hitl_resume.py case 1).
+         */
+        get: operations["get_run_runs__thread_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{thread_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Run
+         * @description Resumes an interrupted run with the human-corrected inventory. The
+         *     ownership check happens FIRST, before the checkpointer is ever touched
+         *     -- a thread_id minted by user A is never readable or resumable by user
+         *     B (tests/test_hitl_resume.py case 3).
+         */
+        post: operations["resume_run_runs__thread_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library/discover": {
         parameters: {
             query?: never;
@@ -2026,6 +2097,11 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ResumeRunRequest */
+        ResumeRunRequest: {
+            /** Confirmed Inventory */
+            confirmed_inventory: components["schemas"]["ConfirmedIngredient"][];
+        };
         /** RetrievalCategoryResult */
         RetrievalCategoryResult: {
             /** Category */
@@ -2068,6 +2144,21 @@ export interface components {
             gate_pass?: boolean | null;
             /** Categories */
             categories?: components["schemas"]["RetrievalCategoryResult"][];
+        };
+        /** RunStatusResponse */
+        RunStatusResponse: {
+            /** Thread Id */
+            thread_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "awaiting_input" | "completed";
+            /** Awaiting */
+            awaiting?: {
+                [key: string]: unknown;
+            } | null;
+            result?: components["schemas"]["RecommendationResponse"] | null;
         };
         /**
          * SafetyBenchmarkBucket
@@ -2716,6 +2807,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_run_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_runs__thread_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_run_runs__thread_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Token"?: string | null;
+                "X-Requested-With"?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunStatusResponse"];
                 };
             };
             /** @description Validation Error */

@@ -228,6 +228,51 @@ terminal `result`/`error` event. Two ACA ingress behaviors matter for this:
   the same single-writer/single-process posture the rest of this document
   already documents.
 
+## LangGraph checkpointer / true HITL (ROADMAP.md Phase 3, Step 3.2)
+
+`POST /runs` (`app/api/routes_runs.py`) is the checkpointed, pausable
+sibling of `POST /recipes/recommend` — additive, not a replacement; the
+existing sync/stream endpoints are provably unchanged (see that module's
+docstring for the full isolation argument: a `MacroChefState.hitl_enabled`
+flag, settable only from Python inside the `/runs` handler, never from any
+request body).
+
+- **Two compiled-graph singletons, one checkpointed, one not.**
+  `app.graph.builder.build_macrochef_graph()` (no checkpointer, used by the
+  old endpoints) and `get_compiled_macrochef_graph()` (checkpointed, used
+  only by `/runs`) are both `@lru_cache`d process-wide singletons built
+  from the same node/edge wiring. Compiling twice, rather than routing
+  every call through one checkpointed graph, means calls that can never
+  pause (the old endpoints) never write a checkpoint row at all — no
+  orphaned-row cleanup job needed.
+- **Checkpointer backend derives from `DATABASE_URL`, dialect-switched --**
+  no new env var. sqlite gets `SqliteSaver` (a real file, matching
+  `DATABASE_URL`'s path — never `:memory:`, so a paused run survives a
+  process restart); any Postgres `DATABASE_URL` gets `PostgresSaver`. Same
+  pattern ROADMAP 5.2 already applied to `app.rag.vector_store` and
+  `app.services.rate_limiter`.
+- **Checkpointer tables are NOT Alembic-managed.** `checkpoints`,
+  `checkpoint_writes`, etc. are created by the upstream
+  `langgraph-checkpoint-sqlite`/`-postgres` packages' own `.setup()`
+  (idempotent, migration-based) — advisor-reviewed decision: hand-copying
+  that DDL into this app's own Alembic revisions would silently drift the
+  moment the upstream package's schema changes on a version bump, and Step
+  5.1's schema-drift gate diffs the live DB against `Base.metadata`, which
+  never needs to see these tables either way. **`app.data.models.GraphRun`
+  (the `thread_id -> owner_user_id` ownership mapping) is different** — it
+  IS this app's own data, and does go through Alembic (`alembic/versions/
+  0004_graph_runs.py`).
+- **Cross-user resume returns 404, not 403** (advisor-reviewed): mirrors
+  `app.services.share_service.get_share`'s existing "no oracle for
+  exists-but-not-yours" collapse. `thread_id`s are `secrets.token_urlsafe(16)`
+  (128 bits), so hiding existence costs little, and no legitimate client
+  needs to tell "doesn't exist" from "isn't yours" apart.
+- **Real Postgres path not independently load-tested here** — same caveat
+  as ROADMAP 5.1's Alembic migrations before Step 5.2 closed that gap for
+  the vector store; worth a real verification pass (a live `psycopg`
+  connection via `PostgresSaver`) before this feature is relied on against
+  prod Postgres.
+
 ## Safety-benchmark gate status
 
 The release gate is **zero adjudicated-true `inherent` violations** on the
