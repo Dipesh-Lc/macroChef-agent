@@ -3,8 +3,8 @@ from typing import Any
 
 from app.config import get_settings
 from app.data.recipe_library_repository import RecipeLibraryRepository
-from app.rag.chroma_client import collection_count, query_collection
 from app.rag.loaders import load_corpus, recipes_by_id
+from app.rag.vector_store import get_vector_store
 from app.schemas.recipe import Recipe
 from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
 from app.utils.logging import get_logger
@@ -15,10 +15,12 @@ logger = get_logger(__name__)
 def build_metadata_filter(
     cuisine_preference: str | None, meal_type: str | None
 ) -> dict[str, Any] | None:
-    """Chroma `where` clause for exact cuisine/meal_type metadata filtering.
+    """Vector-store `where` clause for exact cuisine/meal_type metadata
+    filtering (supported identically by both the Chroma and pgvector
+    backends -- see `app.rag.pgvector_store`'s where-clause translator).
 
     Module-level (not just RecipeRetriever._build_metadata_filter) so
-    callers that query Chroma directly -- e.g. the retrieval eval in
+    callers that query the vector store directly -- e.g. the retrieval eval in
     app.evaluation.eval_retrieval, which measures the semantic path in
     isolation from the keyword-fallback mixing in .retrieve() -- can still
     apply the same metadata pre-filter production actually uses, rather than
@@ -68,21 +70,22 @@ class RecipeRetriever:
         query = self._build_query(ingredients, cuisine_preference, meal_type)
 
         try:
-            if collection_count() > 0:
-                # No `where` filter here: a hard Chroma equality filter on
+            store = get_vector_store()
+            if store.count() > 0:
+                # No `where` filter here: a hard equality filter on
                 # cuisine/meal_type would exclude every recipe missing that
                 # metadata key entirely (recipe_indexing_service drops None
-                # values before writing to Chroma, so ~most of the corpus has
-                # no "cuisine" key at all -- not cuisine=null, the key is
-                # absent). A hard filter can never match an absent key, which
-                # was silently collapsing cuisine-filtered search down to the
-                # handful of hand-curated seed recipes that happen to carry a
-                # cuisine tag. Instead, run the semantic query unfiltered and
-                # apply the same soft cuisine/meal_type boost keyword_search
-                # already uses (_metadata_boost) to re-rank afterward -- an
-                # untagged recipe just doesn't get the boost, it isn't
-                # excluded.
-                recipe_ids = query_collection(query, n_results=limit * 3)
+                # values before writing to the vector store, so ~most of the
+                # corpus has no "cuisine" key at all -- not cuisine=null, the
+                # key is absent). A hard filter can never match an absent key,
+                # which was silently collapsing cuisine-filtered search down
+                # to the handful of hand-curated seed recipes that happen to
+                # carry a cuisine tag. Instead, run the semantic query
+                # unfiltered and apply the same soft cuisine/meal_type boost
+                # keyword_search already uses (_metadata_boost) to re-rank
+                # afterward -- an untagged recipe just doesn't get the boost,
+                # it isn't excluded.
+                recipe_ids = store.query(query, n_results=limit * 3)
                 semantic = [
                     recipes_by_id[recipe_id]
                     for recipe_id in recipe_ids

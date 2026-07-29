@@ -17,9 +17,10 @@ win) instead. This test proves, at full corpus scale:
   (b) allergy filtering (the `retrieve()` -> `validate_recipe` path) still
       rejects unsafe recipes once the retriever is backed by the full corpus.
 
-Deterministic in CI: `collection_count` is monkeypatched to 0 so `retrieve()`
-falls through to the pure-Python `keyword_search` path, independent of
-Chroma/embedding-provider state.
+Deterministic in CI: the vector store's `count()` is monkeypatched to 0 so
+`retrieve()` falls through to the pure-Python `keyword_search` path,
+independent of Chroma/pgvector/embedding-provider state (ROADMAP 5.2 made
+the backend swappable -- see `app.rag.vector_store`).
 """
 
 from app.schemas.user import MacroTargets, UserProfile
@@ -33,8 +34,13 @@ class FakeLibraryRepository:
         return []
 
 
+class _EmptyVectorStore:
+    def count(self) -> int:
+        return 0
+
+
 def _retriever(monkeypatch) -> RecipeRetriever:
-    monkeypatch.setattr(retriever_module, "collection_count", lambda: 0)
+    monkeypatch.setattr(retriever_module, "get_vector_store", lambda: _EmptyVectorStore())
     return RecipeRetriever(library_repository=FakeLibraryRepository())
 
 

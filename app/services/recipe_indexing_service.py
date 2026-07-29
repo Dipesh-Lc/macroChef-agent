@@ -1,6 +1,6 @@
 from app.data.recipe_library_repository import RecipeLibraryRepository
-from app.rag.chroma_client import get_chroma_collection, reset_chroma_collection
 from app.rag.loaders import load_corpus
+from app.rag.vector_store import get_vector_store
 from app.schemas.recipe import Recipe
 from app.services.constraint_engine import derive_allergen_labels
 from app.services.nutrition_view import macro_display_state, trusted_per_serving
@@ -89,34 +89,6 @@ def recipe_index_metadata(recipe: Recipe) -> dict[str, str | int | float | bool 
     return {key: value for key, value in metadata.items() if value is not None}
 
 
-DEFAULT_MAX_BATCH_SIZE = 5461
-"""Fallback only -- used when the collection can't report its own limit
-(e.g. a lightweight test fake with no `_client`). The real limit is always
-queried at runtime via `_resolve_max_batch_size` so this stays correct if
-chromadb's own ceiling ever changes."""
-
-
-def _resolve_max_batch_size(collection, default: int = DEFAULT_MAX_BATCH_SIZE) -> int:
-    """Ask the underlying Chroma client for its actual max batch size.
-
-    `collection.upsert(...)` raises `ValueError` if given more items than
-    the client's `get_max_batch_size()` in one call (observed at 5,461 on
-    the installed chromadb version). Querying it at runtime -- rather than
-    hardcoding a constant -- means this stays correct if that limit ever
-    changes in a future chromadb release.
-    """
-    client = getattr(collection, "_client", None)
-    get_max_batch_size = getattr(client, "get_max_batch_size", None)
-    if callable(get_max_batch_size):
-        try:
-            resolved = int(get_max_batch_size())
-            if resolved > 0:
-                return resolved
-        except Exception:
-            pass
-    return default
-
-
 class RecipeIndexingService:
     def __init__(self, repository: RecipeLibraryRepository | None = None):
         self.repository = repository or RecipeLibraryRepository()
@@ -128,26 +100,18 @@ class RecipeIndexingService:
         if not recipes:
             return 0
         try:
-            collection = get_chroma_collection()
-            max_batch_size = _resolve_max_batch_size(collection)
-
+            store = get_vector_store()
             ids = [recipe.recipe_id for recipe in recipes]
             documents = [build_recipe_search_document(recipe) for recipe in recipes]
             metadatas = [recipe_index_metadata(recipe) for recipe in recipes]
-
-            indexed = 0
-            for start in range(0, len(recipes), max_batch_size):
-                end = start + max_batch_size
-                collection.upsert(
-                    ids=ids[start:end],
-                    documents=documents[start:end],
-                    metadatas=metadatas[start:end],
-                )
-                indexed += len(ids[start:end])
-            return indexed
+            # Batch-size chunking (Chroma's per-call item cap) lives inside
+            # the backend's own `upsert` now -- pgvector has no equivalent
+            # limit, so only ChromaVectorStore.upsert chunks internally.
+            return store.upsert(ids=ids, documents=documents, metadatas=metadatas)
         except Exception as exc:
             logger.warning(
-                "Could not index recipes in Chroma; keyword fallback remains available: %s",
+                "Could not index recipes in the vector store; keyword fallback remains "
+                "available: %s",
                 exc,
             )
             return 0
@@ -156,7 +120,7 @@ class RecipeIndexingService:
         return self.index_recipes(self._collect_recipes(include_base, include_user))
 
     def rebuild_index_clean(self, include_base: bool = True, include_user: bool = True) -> int:
-        """Drop-and-recreate the Chroma collection, then index from scratch.
+        """Drop-and-recreate the vector store's index, then index from scratch.
 
         `index_recipes` uses `upsert`, which never prunes ids that are no
         longer present in the source (e.g. a corpus re-import with a smaller
@@ -164,7 +128,7 @@ class RecipeIndexingService:
         survive a re-run.
         """
         recipes = self._collect_recipes(include_base, include_user)
-        reset_chroma_collection()
+        get_vector_store().reset()
         return self.index_recipes(recipes)
 
     def _collect_recipes(self, include_base: bool, include_user: bool) -> list[Recipe]:

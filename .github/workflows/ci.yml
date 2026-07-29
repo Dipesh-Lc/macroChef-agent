@@ -134,17 +134,68 @@ jobs:
         working-directory: web
         run: npm run build
 
+  # ROADMAP.md Phase 5, Step 5.2: separate job (not folded into `test`)
+  # because it needs a real Postgres+pgvector service container — `test`
+  # above stays fast/dependency-free for the default (chroma/sqlite) path.
+  # Exercises: the pgvector `VectorStore` contract
+  # (tests/test_vector_store_contract.py, both backends — Chroma cases run
+  # here too, redundantly with `test`, since the file is one module), the
+  # 0002/0003 migrations against a REAL Postgres, not just sqlite
+  # (tests/test_alembic_migrations.py — the sqlite-only cases run again
+  # here too, harmlessly), and the shared Postgres-backed rate limiter
+  # (tests/test_rate_limiting.py's Postgres-only cases). Production still
+  # defaults to VECTOR_BACKEND=chroma / sqlite DATABASE_URL (see
+  # .env.example) — this job doesn't change what ships, it proves the
+  # Postgres-backed paths actually work before anyone flips those env vars.
+  pgvector-check:
+    name: pgvector backend contract + migration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: macrochef
+          POSTGRES_PASSWORD: macrochef
+          POSTGRES_DB: macrochef
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U macrochef"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pgvector contract + real-Postgres migration + shared-rate-limiter tests
+        env:
+          EMBEDDING_PROVIDER: hash
+          TEST_POSTGRES_URL: postgresql://macrochef:macrochef@localhost:5432/macrochef
+        run: >-
+          pytest tests/test_vector_store_contract.py tests/test_alembic_migrations.py
+          tests/test_rate_limiting.py -v --tb=short
+
   # ---------------------------------------------------------------------
   # Everything below this line only runs for a manual workflow_dispatch on
-  # the default branch. Ordinary pushes and PRs stop at the `test`/`web`
-  # jobs. Production promotion is a deliberate human action (CLAUDE.md
-  # "Human gates: Public actions" — deploy pushes are pulled, not
-  # automatic).
+  # the default branch. Ordinary pushes and PRs stop at the `test`/`web`/
+  # `pgvector-check` jobs. Production promotion is a deliberate human
+  # action (CLAUDE.md "Human gates: Public actions" — deploy pushes are
+  # pulled, not automatic).
   # ---------------------------------------------------------------------
 
   preflight:
     name: Azure permission preflight
-    needs: [test, web]
+    needs: [test, web, pgvector-check]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&

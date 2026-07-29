@@ -58,10 +58,15 @@ def isolated_session_factory(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture(autouse=True)
 def _force_keyword_retrieval(monkeypatch: pytest.MonkeyPatch):
     """Force RecipeRetriever.retrieve onto its deterministic keyword-search
-    path -- whatever this developer's real, shared Chroma store happens to
+    path -- whatever this developer's real, shared vector store happens to
     have persisted is an irrelevant (and flaky) variable to control out
     here. Mirrors tests/test_recommendation_isolation.py."""
-    monkeypatch.setattr(recipe_retriever_module, "collection_count", lambda: 0)
+
+    class _EmptyVectorStore:
+        def count(self) -> int:
+            return 0
+
+    monkeypatch.setattr(recipe_retriever_module, "get_vector_store", lambda: _EmptyVectorStore())
 
 
 def _client() -> TestClient:

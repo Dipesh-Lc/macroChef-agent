@@ -104,8 +104,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.evaluation.eval_retrieval import METHODS, load_eval_queries, run_retrieval_eval  # noqa: E402
-from app.rag.chroma_client import collection_count  # noqa: E402
+from app.evaluation.eval_retrieval import (  # noqa: E402
+    METHODS,
+    load_eval_queries,
+    run_retrieval_eval,
+)
+from app.rag.vector_store import get_vector_store  # noqa: E402
 
 METHOD_LABELS = {
     "semantic": "Semantic (RAG/Chroma)",
@@ -243,11 +247,11 @@ def _run_gate(category_aggregates: dict[str, dict[str, dict[str, float]]]) -> bo
 
 
 def main() -> int:
-    count = collection_count()
-    print(f"Chroma collection size: {count} recipes")
+    count = get_vector_store().count()
+    print(f"Vector store size: {count} recipes")
     if count == 0:
         print(
-            "** Chroma collection is empty -- run scripts/ingest_recipes.py first. "
+            "** Vector store is empty -- run scripts/ingest_recipes.py first. "
             "Semantic and hybrid scores will be 0 for every query. **"
         )
 

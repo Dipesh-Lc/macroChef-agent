@@ -96,8 +96,8 @@ if str(ROOT) not in sys.path:
 
 from app.evaluation.eval_constraints import evaluate_constraint_set  # noqa: E402
 from app.evaluation.eval_retrieval import load_eval_queries, run_retrieval_eval  # noqa: E402
-from app.rag.chroma_client import collection_count  # noqa: E402
 from app.rag.loaders import load_corpus  # noqa: E402
+from app.rag.vector_store import get_vector_store  # noqa: E402
 from app.schemas.evals import (  # noqa: E402
     ConstraintProfileResult,
     ConstraintSuite,
@@ -252,11 +252,11 @@ def run_safety_suite(
 
 
 def run_retrieval_suite() -> RetrievalSuite:
-    if collection_count() == 0:
+    if get_vector_store().count() == 0:
         return RetrievalSuite(
             skipped=True,
             skip_reason=(
-                "Chroma collection is empty (data/chroma is not baked in this checkout -- "
+                "Vector store is empty (data/chroma is not baked in this checkout -- "
                 "it's built at Docker image build time / by scripts/ingest_recipes.py, and "
                 "is gitignored). Semantic and hybrid scores would be meaningless zeros, so "
                 "this suite is skipped rather than reported as a false regression."

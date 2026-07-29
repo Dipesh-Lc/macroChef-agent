@@ -23,7 +23,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# ROADMAP.md Phase 5, Step 5.2: set in CI's pgvector service job and locally
+# via `docker compose up pgvector` (see docker-compose.yml) to also verify
+# the 0002 migration (recipe_embeddings, gated to postgresql-only) against a
+# REAL Postgres, not just sqlite's no-op path. Skipped entirely otherwise --
+# these tests must never require Postgres to be running.
+TEST_POSTGRES_URL = os.environ.get("TEST_POSTGRES_URL")
 
 
 def _run_alembic(*args: str, db_path: Path) -> subprocess.CompletedProcess:
@@ -74,3 +83,81 @@ def test_schema_drift_gate_autogenerate_diff_is_empty(tmp_path):
         "the resulting migration.\n"
         f"{check_result.stdout}{check_result.stderr}"
     )
+
+
+@pytest.mark.skipif(
+    TEST_POSTGRES_URL is None,
+    reason="TEST_POSTGRES_URL not set (needs `docker compose up pgvector`, see docker-compose.yml)",
+)
+def test_migrations_apply_cleanly_and_drift_free_on_fresh_postgres():
+    """Real-Postgres analog of the two sqlite tests above, closing the gap
+    the 2026-07-28 handoff flagged: Step 5.1's Alembic path was verified
+    against sqlite only. Also proves the 0002 migration (pgvector's
+    `recipe_embeddings` table + HNSW index, a no-op on sqlite) actually runs
+    on Postgres, and that `alembic/env.py`'s `include_object` exclusion
+    keeps `alembic check` from proposing to drop that externally-managed
+    table (see that module's comment for why the exclusion is needed at
+    all -- confirmed by hand while building this: without it, `check`
+    reflects the live table, finds it absent from `Base.metadata`, and
+    flags it as drift to remove).
+    """
+    import uuid
+
+    import psycopg2
+
+    db_name = f"macrochef_alembic_test_{uuid.uuid4().hex[:8]}"
+    base_url = TEST_POSTGRES_URL.rsplit("/", 1)[0]
+    test_db_url = f"{base_url}/{db_name}"
+
+    admin_conn = psycopg2.connect(TEST_POSTGRES_URL)
+    admin_conn.autocommit = True
+    try:
+        with admin_conn.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{db_name}"')
+    finally:
+        admin_conn.close()
+
+    try:
+        env = os.environ.copy()
+        env["DATABASE_URL"] = test_db_url
+        env.setdefault("EMBEDDING_PROVIDER", "hash")
+
+        upgrade_result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
+        )
+        assert upgrade_result.returncode == 0, upgrade_result.stdout + upgrade_result.stderr
+
+        check_result = subprocess.run(
+            [sys.executable, "-m", "alembic", "check"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
+        )
+        assert check_result.returncode == 0, (
+            "Schema drift detected against real Postgres.\n"
+            f"{check_result.stdout}{check_result.stderr}"
+        )
+
+        verify_conn = psycopg2.connect(test_db_url)
+        try:
+            with verify_conn.cursor() as cur:
+                cur.execute("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+                assert cur.fetchone() is not None, "vector extension was not created"
+                cur.execute(
+                    "SELECT indexname FROM pg_indexes WHERE tablename = 'recipe_embeddings' "
+                    "AND indexname = 'ix_recipe_embeddings_embedding_hnsw'"
+                )
+                assert cur.fetchone() is not None, "HNSW index was not created"
+        finally:
+            verify_conn.close()
+    finally:
+        admin_conn = psycopg2.connect(TEST_POSTGRES_URL)
+        admin_conn.autocommit = True
+        try:
+            with admin_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
+                    (db_name,),
+                )
+                cur.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
+        finally:
+            admin_conn.close()

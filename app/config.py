@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./macrochef.db", alias="DATABASE_URL")
     recipe_data_path: str = "./data/processed/sample_recipes.jsonl"
     chroma_collection_name: str = "macrochef_recipes"
+    # ROADMAP.md Step 5.2: "chroma" (default) is the zero-dependency local
+    # backend -- embedded, single-writer, baked into the Docker image at
+    # build time. "pgvector" is the external, multi-writer-safe backend that
+    # retires the multi-replica blocker (see app.rag.vector_store,
+    # app.rag.pgvector_store). Selection happens ONLY here -- no call site
+    # branches on this value directly.
+    vector_backend: str = Field(default="chroma", alias="VECTOR_BACKEND")
     low_confidence_threshold: float = 0.75
     enable_vision: bool = Field(default=False, alias="MACROCHEF_ENABLE_VISION")
     fdc_api_key: str | None = Field(

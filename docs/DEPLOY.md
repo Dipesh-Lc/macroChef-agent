@@ -120,6 +120,33 @@ runs ONE container with ONE process:
   max-replicas=1` is deliberate (see "Cost implication" below).
 - Image size: ~3.42 GB (PyTorch dominates).
 
+**pgvector backend — an external, multi-writer-safe alternative (ROADMAP
+5.2, 2026-07-29):**
+
+- `app.rag.pgvector_store` implements the same `VectorStore` interface
+  (`app.rag.vector_store`) over Postgres + the `vector` extension, selected
+  via `VECTOR_BACKEND=pgvector` (default remains `chroma` — nothing above
+  changes unless this is set). Schema: `alembic/versions/
+  0002_pgvector_recipe_embeddings.py`, a no-op on sqlite. Seeding a
+  Postgres instance: `scripts/seed_pgvector.py` (a release-job step, not a
+  build-time step, since the data lives in the external DB, not the image).
+- Retrieval-quality parity verified (`scripts/evaluate_retrieval.py`, both
+  backends, `EMBEDDING_PROVIDER=hash`, 10,011-recipe corpus): aggregate
+  Recall@10 within 0.77 points (both HNSW/approximate-NN, so a small,
+  explainable delta on tiny-n categories is expected, not a regression) --
+  see `data/evaluation/vector_backend_parity_20260729.md` for the full
+  per-category breakdown and how to reproduce.
+- This alone does **not** unblock `max-replicas>1` — the per-process
+  in-memory rate limiter (`app.services.rate_limiter`) was the other half
+  of that blocker. ROADMAP 5.2 also added a Postgres-backed shared limiter
+  (same module, selected automatically when `DATABASE_URL` is
+  non-sqlite) so that blocker is cleared too, but **`max-replicas` in
+  `.github/workflows/ci.yml` was deliberately left at 1** — raising it is
+  a production topology change reserved for the maintainer (CLAUDE.md
+  invariant #8), now a one-line edit (`--max-replicas 1` → the desired
+  value, in both the `preflight`-adjacent deploy steps) once
+  `VECTOR_BACKEND=pgvector` is actually live in prod.
+
 **Corpus provenance and index freshness (2026-07-19):**
 
 - The corpus (`data/processed/imported_recipes.jsonl`,
@@ -349,6 +376,17 @@ persist reliably across restarts anyway). Scaling above one replica risks
 two processes fighting over the same on-disk Chroma segments. Both are
 open items for whenever traffic justifies horizontal scaling — the real
 fix is an external, multi-writer-safe vector store.
+
+**Update (ROADMAP 5.2, 2026-07-29): the real fix now exists but is not
+switched on.** `VECTOR_BACKEND=pgvector` (see "pgvector backend" above)
+plus the new Postgres-backed shared rate limiter together clear both
+technical blockers behind `max-replicas=1`. Neither `DATABASE_URL` nor
+`VECTOR_BACKEND` nor `--max-replicas` were changed in this deploy config —
+flipping all three (Postgres already provisioned for the app's other
+tables, `VECTOR_BACKEND=pgvector`, `scripts/seed_pgvector.py` run once,
+then raising `--max-replicas` in `.github/workflows/ci.yml`'s deploy step)
+is a deliberate production-topology change for the maintainer to make when
+traffic justifies it, not something this step did unilaterally.
 
 **Money gate resolved 2026-07-17: APPROVED by the human.** `min_replicas=1`/
 `max_replicas=1` is accepted (decision 4A); the resource size was then

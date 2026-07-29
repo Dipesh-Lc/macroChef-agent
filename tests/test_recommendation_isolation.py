@@ -84,10 +84,15 @@ def _force_keyword_retrieval(monkeypatch: pytest.MonkeyPatch):
     """Force RecipeRetriever.retrieve onto its deterministic keyword-search
     path. The identity-isolation property under test lives entirely in
     RecipeLibraryRepository.list_user_recipes scoping, not in retrieval
-    ranking -- whatever this developer's real, shared Chroma store happens
+    ranking -- whatever this developer's real, shared vector store happens
     to have persisted from prior corpus imports is an irrelevant (and
     environment-dependent, hence flaky) variable to control out here."""
-    monkeypatch.setattr(recipe_retriever_module, "collection_count", lambda: 0)
+
+    class _EmptyVectorStore:
+        def count(self) -> int:
+            return 0
+
+    monkeypatch.setattr(recipe_retriever_module, "get_vector_store", lambda: _EmptyVectorStore())
 
 
 def _client() -> TestClient:

@@ -23,3 +23,24 @@ services:
       - .env
     volumes:
       - .:/app
+
+  # ROADMAP.md Step 5.2: pgvector-backed Postgres for local verification of
+  # the pgvector VectorStore backend (app.rag.pgvector_store) and the
+  # Alembic migration that creates its table -- NOT wired into the `api`
+  # service by default (`api` still defaults to VECTOR_BACKEND=chroma /
+  # sqlite; see .env.example). Bring it up on its own to test the pgvector
+  # path: `docker compose up pgvector`, then point DATABASE_URL at
+  # localhost:5433 and set VECTOR_BACKEND=pgvector.
+  pgvector:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: macrochef
+      POSTGRES_PASSWORD: macrochef
+      POSTGRES_DB: macrochef
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+
+volumes:
+  pgvector_data:

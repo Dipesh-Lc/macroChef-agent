@@ -1,9 +1,37 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.data.db import Base
+
+
+class RateLimitHit(Base):
+    """ROADMAP.md Phase 5, Step 5.2: one row per accepted rate-limit hit,
+    backing `app.services.rate_limiter.PostgresRateLimiter` -- the shared,
+    cross-replica counterpart to the in-memory `RateLimiter` that module
+    docstrings elsewhere (that module, `docs/DEPLOY.md`) previously flagged
+    as a `max-replicas=1` blocker. `key` matches the existing
+    `"{bucket}:{user_id_or_caller_ip}"` convention `app.dependencies`'
+    rate-limit dependencies already build -- unchanged by which backend is
+    selected. `get_rate_limiter()` picks this backend only for a
+    non-sqlite `DATABASE_URL`; sqlite deployments (today's only shipped
+    topology) keep the in-memory limiter and never write here, so this
+    table sits unused-but-harmless on sqlite.
+
+    Rows are self-pruning: `PostgresRateLimiter.allow()` deletes every row
+    for `key` older than the sliding window on each call, so the table
+    never grows unbounded for an actively-used key -- there is no separate
+    cleanup job."""
+
+    __tablename__ = "rate_limit_hits"
+    __table_args__ = (Index("ix_rate_limit_hits_key_hit_at", "key", "hit_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    key: Mapped[str] = mapped_column(String(256))
+    hit_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 class Feedback(Base):

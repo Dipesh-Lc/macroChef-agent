@@ -227,14 +227,26 @@ def test_constraint_suite_flags_insane_when_baseline_rejects_something(
 
 # ---------------------------------------------------------------------------
 # Retrieval suite: skip path + gate reimplementation (synthetic, fast --
-# no Chroma/corpus I/O)
+# no vector-store/corpus I/O)
 # ---------------------------------------------------------------------------
 
 
-def test_retrieval_suite_skips_when_chroma_collection_is_empty(
+class _FakeVectorStoreCount:
+    """Stand-in for `app.rag.vector_store.VectorStore` (ROADMAP 5.2) --
+    only `.count()` matters to `run_retrieval_suite`'s empty-store skip
+    check."""
+
+    def __init__(self, count: int):
+        self._count = count
+
+    def count(self) -> int:
+        return self._count
+
+
+def test_retrieval_suite_skips_when_vector_store_is_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(run_all_evals, "collection_count", lambda: 0)
+    monkeypatch.setattr(run_all_evals, "get_vector_store", lambda: _FakeVectorStoreCount(0))
 
     suite = run_all_evals.run_retrieval_suite()
 
@@ -277,7 +289,7 @@ def _fake_run_retrieval_eval_result(*, dish_semantic_wins: bool, dietary_present
 def test_retrieval_suite_gate_pass_true_when_semantic_wins_both_gated_categories(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(run_all_evals, "collection_count", lambda: 100)
+    monkeypatch.setattr(run_all_evals, "get_vector_store", lambda: _FakeVectorStoreCount(100))
     monkeypatch.setattr(run_all_evals, "load_eval_queries", lambda: [])
     monkeypatch.setattr(
         run_all_evals,
@@ -299,7 +311,7 @@ def test_retrieval_suite_gate_pass_true_when_semantic_wins_both_gated_categories
 def test_retrieval_suite_gate_pass_false_when_semantic_loses_a_gated_category(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(run_all_evals, "collection_count", lambda: 100)
+    monkeypatch.setattr(run_all_evals, "get_vector_store", lambda: _FakeVectorStoreCount(100))
     monkeypatch.setattr(run_all_evals, "load_eval_queries", lambda: [])
     monkeypatch.setattr(
         run_all_evals,
@@ -321,7 +333,7 @@ def test_retrieval_suite_gate_is_non_vacuous_when_a_gated_category_is_missing(
 ) -> None:
     """Missing 'dietary' entirely must FAIL the gate, not vacuously pass it
     (mirrors scripts/evaluate_retrieval.py's own non-vacuous-gate rule)."""
-    monkeypatch.setattr(run_all_evals, "collection_count", lambda: 100)
+    monkeypatch.setattr(run_all_evals, "get_vector_store", lambda: _FakeVectorStoreCount(100))
     monkeypatch.setattr(run_all_evals, "load_eval_queries", lambda: [])
     monkeypatch.setattr(
         run_all_evals,

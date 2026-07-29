@@ -13,6 +13,8 @@ FastAPI dependencies that key it on the verified `get_session_user` id,
 never a client-supplied value).
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -274,3 +276,97 @@ def test_rate_limiter_keys_are_independent() -> None:
     assert limiter.allow("user_a", limit=1, window_seconds=60, now=0.0) is True
     assert limiter.allow("user_a", limit=1, window_seconds=60, now=1.0) is False
     assert limiter.allow("user_b", limit=1, window_seconds=60, now=1.0) is True
+
+
+# ---------------------------------------------------------------------------
+# PostgresRateLimiter (ROADMAP.md Phase 5, Step 5.2) -- shared, cross-replica
+# limiter backed by rate_limit_hits. Skipped unless TEST_POSTGRES_URL is set
+# (see docker-compose.yml's `pgvector` service -- same Postgres instance the
+# pgvector contract tests use; this table has nothing to do with vectors,
+# just a convenient already-running Postgres for CI/local testing).
+# ---------------------------------------------------------------------------
+
+TEST_POSTGRES_URL = os.environ.get("TEST_POSTGRES_URL")
+
+
+def _fresh_postgres_limiter(monkeypatch):
+    import app.services.rate_limiter as rate_limiter_module
+    from app.data.db import Base
+    from app.services.rate_limiter import PostgresRateLimiter
+
+    monkeypatch.setenv("DATABASE_URL", TEST_POSTGRES_URL)
+    rate_limiter_module._POSTGRES_LIMITER_ENGINES.clear()
+
+    from sqlalchemy import create_engine
+
+    engine = create_engine(TEST_POSTGRES_URL)
+    Base.metadata.create_all(bind=engine, tables=[Base.metadata.tables["rate_limit_hits"]])
+    engine.dispose()
+
+    limiter = PostgresRateLimiter()
+    limiter.reset()
+    return limiter
+
+
+@pytest.mark.skipif(
+    TEST_POSTGRES_URL is None, reason="TEST_POSTGRES_URL not set (`docker compose up pgvector`)"
+)
+def test_postgres_rate_limiter_allows_up_to_the_limit_then_blocks(monkeypatch) -> None:
+    limiter = _fresh_postgres_limiter(monkeypatch)
+    try:
+        assert limiter.allow("k", limit=3, window_seconds=60, now=0.0) is True
+        assert limiter.allow("k", limit=3, window_seconds=60, now=1.0) is True
+        assert limiter.allow("k", limit=3, window_seconds=60, now=2.0) is True
+        assert limiter.allow("k", limit=3, window_seconds=60, now=3.0) is False
+    finally:
+        limiter.reset()
+
+
+@pytest.mark.skipif(
+    TEST_POSTGRES_URL is None, reason="TEST_POSTGRES_URL not set (`docker compose up pgvector`)"
+)
+def test_postgres_rate_limiter_recovers_once_the_window_slides_past_old_hits(monkeypatch) -> None:
+    limiter = _fresh_postgres_limiter(monkeypatch)
+    try:
+        assert limiter.allow("k", limit=1, window_seconds=10, now=0.0) is True
+        assert limiter.allow("k", limit=1, window_seconds=10, now=5.0) is False
+        assert limiter.allow("k", limit=1, window_seconds=10, now=10.5) is True
+    finally:
+        limiter.reset()
+
+
+@pytest.mark.skipif(
+    TEST_POSTGRES_URL is None, reason="TEST_POSTGRES_URL not set (`docker compose up pgvector`)"
+)
+def test_postgres_rate_limiter_keys_are_independent(monkeypatch) -> None:
+    limiter = _fresh_postgres_limiter(monkeypatch)
+    try:
+        assert limiter.allow("user_a", limit=1, window_seconds=60, now=0.0) is True
+        assert limiter.allow("user_a", limit=1, window_seconds=60, now=1.0) is False
+        assert limiter.allow("user_b", limit=1, window_seconds=60, now=1.0) is True
+    finally:
+        limiter.reset()
+
+
+@pytest.mark.skipif(
+    TEST_POSTGRES_URL is None, reason="TEST_POSTGRES_URL not set (`docker compose up pgvector`)"
+)
+def test_get_rate_limiter_selects_postgres_backend_for_a_postgres_database_url(monkeypatch) -> None:
+    """Proves `get_rate_limiter()`'s dialect-based selection itself, not just
+    `PostgresRateLimiter` in isolation."""
+    import app.services.rate_limiter as rate_limiter_module
+    from app.services.rate_limiter import PostgresRateLimiter, RateLimiter
+
+    monkeypatch.setenv("DATABASE_URL", TEST_POSTGRES_URL)
+    rate_limiter_module.get_rate_limiter.cache_clear()
+    try:
+        assert isinstance(rate_limiter_module.get_rate_limiter(), PostgresRateLimiter)
+    finally:
+        rate_limiter_module.get_rate_limiter.cache_clear()
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    rate_limiter_module.get_rate_limiter.cache_clear()
+    try:
+        assert isinstance(rate_limiter_module.get_rate_limiter(), RateLimiter)
+    finally:
+        rate_limiter_module.get_rate_limiter.cache_clear()

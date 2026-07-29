@@ -33,6 +33,26 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+# ROADMAP.md Phase 5, Step 5.2: `recipe_embeddings` (app.rag.pgvector_store)
+# is deliberately NOT part of Base.metadata (see that module's docstring),
+# managed instead by its own hand-written migration (0002) that no-ops on
+# non-Postgres dialects. On a real Postgres DB, though, autogenerate/`check`
+# reflects EVERY table actually present and compares it against
+# target_metadata regardless of which MetaData created it -- without this
+# exclusion, `alembic check` would see recipe_embeddings sitting in the
+# live DB, find it absent from Base.metadata, and propose dropping it as
+# drift on every run. `include_object` scopes the comparison to exactly the
+# tables Base.metadata owns, leaving recipe_embeddings entirely to its own
+# migration.
+def include_object(object, name, type_, reflected, compare_to):
+    if type_ == "table" and name == "recipe_embeddings":
+        return False
+    table = getattr(object, "table", None)
+    if type_ == "index" and table is not None and table.name == "recipe_embeddings":
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -50,6 +70,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -69,7 +90,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

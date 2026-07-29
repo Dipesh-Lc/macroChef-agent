@@ -1,5 +1,5 @@
-"""Retrieval-quality evaluation: semantic (Chroma/RAG) vs. keyword baseline vs.
-the production hybrid path (`RecipeRetriever.retrieve()`).
+"""Retrieval-quality evaluation: semantic (vector store/RAG) vs. keyword
+baseline vs. the production hybrid path (`RecipeRetriever.retrieve()`).
 
 Methodology (see scripts/evaluate_retrieval.py for the CLI entrypoint and the
 printed methodology note, which is the canonical description of the gate):
@@ -9,21 +9,22 @@ printed methodology note, which is the canonical description of the gate):
   scripts/gen_retrieval_eval_queries.py (see that script's docstring) against
   the item-4-final corpus and checked in, so re-running this eval later
   always scores against the same ground truth even if the corpus changes.
-- The SEMANTIC path queries Chroma directly (`query_collection`) with the
-  query's free-text `description` -- this is RAG's core advantage: it can
-  consume an unstructured user query. It over-fetches (`limit *
-  OVERFETCH_FACTOR`) and then filters the returned ids down to the eval
-  corpus universe (`_eval_corpus_ids()`, i.e. `{r.recipe_id for r in
-  load_corpus()}`) BEFORE truncating to `limit` -- this exactly mirrors what
-  production `RecipeRetriever.retrieve()` does (`query_collection(...,
-  n_results=limit*3)` then filter to `recipe_id in recipes_by_id`). Without
-  this filter, raw Chroma results also surface `user_*` saved-library
-  recipes indexed by earlier `/library/reindex` runs -- ids that are outside
-  both `load_corpus()` and every query's pinned ground truth -- which
-  occupied top semantic ranks and were scored as misses. That made the
-  semantic arm strictly harsher than what a real user of `retrieve()`
-  experiences, and was a measurement bug, not a finding about embedding
-  quality.
+- The SEMANTIC path queries the configured `VectorStore` backend directly
+  (`app.rag.vector_store.get_vector_store().query(...)`, Chroma or pgvector
+  per `VECTOR_BACKEND` -- see ROADMAP 5.2) with the query's free-text
+  `description` -- this is RAG's core advantage: it can consume an
+  unstructured user query. It over-fetches (`limit * OVERFETCH_FACTOR`) and
+  then filters the returned ids down to the eval corpus universe
+  (`_eval_corpus_ids()`, i.e. `{r.recipe_id for r in load_corpus()}`) BEFORE
+  truncating to `limit` -- this exactly mirrors what production
+  `RecipeRetriever.retrieve()` does (`store.query(..., n_results=limit*3)`
+  then filter to `recipe_id in recipes_by_id`). Without this filter, raw
+  vector-store results also surface `user_*` saved-library recipes indexed by
+  earlier `/library/reindex` runs -- ids that are outside both
+  `load_corpus()` and every query's pinned ground truth -- which occupied top
+  semantic ranks and were scored as misses. That made the semantic arm
+  strictly harsher than what a real user of `retrieve()` experiences, and was
+  a measurement bug, not a finding about embedding quality.
 - The KEYWORD baseline calls `RecipeRetriever.keyword_search` -- the actual
   production keyword-fallback path -- with the query's structured
   `ingredients` / `cuisine_preference` / `meal_type` fields, since that is
@@ -65,8 +66,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from app.evaluation.retrieval_metrics import ndcg_at_k, recall_at_k, reciprocal_rank
-from app.rag.chroma_client import collection_count, query_collection
 from app.rag.loaders import load_corpus
+from app.rag.vector_store import get_vector_store
 from app.services.recipe_retriever import RecipeRetriever, build_metadata_filter
 from app.utils.logging import get_logger
 
@@ -146,11 +147,12 @@ def semantic_search_ids(
     ranks and get scored as misses, making this arm strictly harsher than
     the production semantic path it's meant to measure.
     """
-    if collection_count() == 0:
+    store = get_vector_store()
+    if store.count() == 0:
         return []
     where = build_metadata_filter(query.cuisine_preference, query.meal_type)
     universe = corpus_ids if corpus_ids is not None else _eval_corpus_ids()
-    raw_ids = query_collection(query.description, n_results=limit * OVERFETCH_FACTOR, where=where)
+    raw_ids = store.query(query.description, n_results=limit * OVERFETCH_FACTOR, where=where)
     return [recipe_id for recipe_id in raw_ids if recipe_id in universe][:limit]
 
 

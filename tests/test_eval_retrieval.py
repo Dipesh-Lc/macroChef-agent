@@ -10,7 +10,7 @@ from app.evaluation.eval_retrieval import (
     semantic_search_ids,
 )
 from app.evaluation.retrieval_metrics import reciprocal_rank
-from app.rag.chroma_client import collection_count
+from app.rag.vector_store import get_vector_store
 from app.services.recipe_retriever import RecipeRetriever
 
 
@@ -106,7 +106,7 @@ def test_run_retrieval_eval_computes_aggregate_from_per_query_rows(monkeypatch) 
     assert set(result["aggregate"]) == {"semantic", "keyword", "hybrid"}
 
 
-@pytest.mark.skipif(collection_count() == 0, reason="Chroma collection not populated")
+@pytest.mark.skipif(get_vector_store().count() == 0, reason="Vector store not populated")
 def test_semantic_and_keyword_paths_both_return_real_recipe_ids_for_a_known_query() -> None:
     """Real integration smoke test against the indexed corpus (skipped if the
     Chroma collection hasn't been built yet -- see scripts/ingest_recipes.py).
@@ -127,7 +127,7 @@ def test_semantic_and_keyword_paths_both_return_real_recipe_ids_for_a_known_quer
     )
 
 
-@pytest.mark.skipif(collection_count() == 0, reason="Chroma collection not populated")
+@pytest.mark.skipif(get_vector_store().count() == 0, reason="Vector store not populated")
 def test_hybrid_path_returns_real_recipe_ids_for_a_known_query() -> None:
     """Smoke test for the production hybrid path (`RecipeRetriever.retrieve()`)
     as scored by the eval: it must return ids and surface at least one
@@ -144,7 +144,7 @@ def test_hybrid_path_returns_real_recipe_ids_for_a_known_query() -> None:
     )
 
 
-@pytest.mark.skipif(collection_count() == 0, reason="Chroma collection not populated")
+@pytest.mark.skipif(get_vector_store().count() == 0, reason="Vector store not populated")
 def test_semantic_search_ids_filters_to_eval_corpus_universe() -> None:
     """Regression test for the universe-mismatch bug: every id
     `semantic_search_ids` returns must be a member of the eval corpus
@@ -164,7 +164,7 @@ def test_semantic_search_ids_filters_to_eval_corpus_universe() -> None:
     )
 
 
-@pytest.mark.skipif(collection_count() == 0, reason="Chroma collection not populated")
+@pytest.mark.skipif(get_vector_store().count() == 0, reason="Vector store not populated")
 def test_semantic_search_cuisine_filter_yields_perfect_mrr_by_construction() -> None:
     """Regression test for the universe-mismatch bug: under an exact-match
     cuisine `where` filter, every id Chroma returns that survives the

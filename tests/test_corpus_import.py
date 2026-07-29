@@ -83,27 +83,25 @@ def test_idempotent_rerun_produces_identical_file(tmp_path: Path) -> None:
 
 def test_rebuild_index_clean_drops_stale_vectors(monkeypatch) -> None:
     """A re-import with a smaller/corrected corpus must not leave orphaned
-    embeddings behind -- rebuild_index_clean drops and recreates the
-    collection instead of relying on upsert (which never prunes)."""
+    embeddings behind -- rebuild_index_clean drops and recreates the vector
+    store's index instead of relying on upsert (which never prunes). Tested
+    against the backend-agnostic `VectorStore` seam (ROADMAP 5.2), not a
+    Chroma-specific collection object."""
 
-    class FakeCollection:
+    class FakeVectorStore:
         def __init__(self):
             self.ids: set[str] = set()
 
         def upsert(self, ids, documents, metadatas):
             self.ids.update(ids)
+            return len(ids)
 
-    store = {"collection": FakeCollection()}
+        def reset(self):
+            self.ids = set()
+            return self
 
-    def fake_get_collection():
-        return store["collection"]
-
-    def fake_reset_collection():
-        store["collection"] = FakeCollection()
-        return store["collection"]
-
-    monkeypatch.setattr(recipe_indexing_service, "get_chroma_collection", fake_get_collection)
-    monkeypatch.setattr(recipe_indexing_service, "reset_chroma_collection", fake_reset_collection)
+    vector_store = FakeVectorStore()
+    monkeypatch.setattr(recipe_indexing_service, "get_vector_store", lambda: vector_store)
 
     recipe_a = Recipe(recipe_id="imp_a", title="Recipe A", ingredients=["rice"], instructions=["Cook."])
     recipe_b = Recipe(recipe_id="imp_b", title="Recipe B", ingredients=["beans"], instructions=["Cook."])
@@ -111,14 +109,14 @@ def test_rebuild_index_clean_drops_stale_vectors(monkeypatch) -> None:
     monkeypatch.setattr(recipe_indexing_service, "load_corpus", lambda: [recipe_a, recipe_b])
     service = RecipeIndexingService()
     service.rebuild_index_clean(include_base=True, include_user=False)
-    assert store["collection"].ids == {"imp_a", "imp_b"}
+    assert vector_store.ids == {"imp_a", "imp_b"}
 
     # Re-import with recipe_b dropped from the source (e.g. it failed a later
     # validation pass, or the corrected dataset no longer contains it).
     monkeypatch.setattr(recipe_indexing_service, "load_corpus", lambda: [recipe_a])
     service.rebuild_index_clean(include_base=True, include_user=False)
-    assert store["collection"].ids == {"imp_a"}
-    assert "imp_b" not in store["collection"].ids
+    assert vector_store.ids == {"imp_a"}
+    assert "imp_b" not in vector_store.ids
 
 
 def test_derive_allergen_labels_from_ingredient_names() -> None:
