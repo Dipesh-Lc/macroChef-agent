@@ -161,3 +161,84 @@ def test_migrations_apply_cleanly_and_drift_free_on_fresh_postgres():
                 cur.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
         finally:
             admin_conn.close()
+
+
+@pytest.mark.skipif(
+    TEST_POSTGRES_URL is None,
+    reason="TEST_POSTGRES_URL not set (needs `docker compose up pgvector`, see docker-compose.yml)",
+)
+def test_langgraph_checkpointer_tables_do_not_trip_the_drift_gate():
+    """ROADMAP.md Phase 3, Step 3.2 regression test. Confirmed by hand while
+    building this step: `PostgresSaver.setup()` creates `checkpoints`/
+    `checkpoint_blobs`/`checkpoint_writes`/`checkpoint_migrations` directly
+    (no Alembic migration involved -- see
+    app.graph.builder._select_checkpointer's docstring for why they're
+    deliberately NOT Alembic-managed). Without alembic/env.py's
+    `include_object` exclusion for these table names, `alembic check`
+    reflects them from the live DB, finds them absent from `Base.metadata`,
+    and proposes dropping them as drift -- this test proves that doesn't
+    happen, the same way the sibling test above proves it for 0002's
+    `recipe_embeddings`.
+    """
+    import uuid
+
+    import psycopg2
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from psycopg import Connection
+    from psycopg.rows import dict_row
+
+    db_name = f"macrochef_checkpointer_test_{uuid.uuid4().hex[:8]}"
+    base_url = TEST_POSTGRES_URL.rsplit("/", 1)[0]
+    test_db_url = f"{base_url}/{db_name}"
+
+    admin_conn = psycopg2.connect(TEST_POSTGRES_URL)
+    admin_conn.autocommit = True
+    try:
+        with admin_conn.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{db_name}"')
+    finally:
+        admin_conn.close()
+
+    try:
+        env = os.environ.copy()
+        env["DATABASE_URL"] = test_db_url
+        env.setdefault("EMBEDDING_PROVIDER", "hash")
+
+        upgrade_result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
+        )
+        assert upgrade_result.returncode == 0, upgrade_result.stdout + upgrade_result.stderr
+
+        # Mirrors app.graph.builder._select_checkpointer's Postgres branch
+        # exactly -- creates the checkpoint tables via the upstream
+        # package's own .setup(), entirely outside Alembic.
+        pg_conn = Connection.connect(
+            test_db_url, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        )
+        try:
+            PostgresSaver(pg_conn).setup()
+        finally:
+            pg_conn.close()
+
+        check_result = subprocess.run(
+            [sys.executable, "-m", "alembic", "check"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
+        )
+        assert check_result.returncode == 0, (
+            "Schema drift gate flagged the LangGraph checkpointer's own tables -- "
+            "alembic/env.py's include_object exclusion regressed.\n"
+            f"{check_result.stdout}{check_result.stderr}"
+        )
+    finally:
+        admin_conn = psycopg2.connect(TEST_POSTGRES_URL)
+        admin_conn.autocommit = True
+        try:
+            with admin_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
+                    (db_name,),
+                )
+                cur.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
+        finally:
+            admin_conn.close()

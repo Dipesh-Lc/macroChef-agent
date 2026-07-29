@@ -33,22 +33,44 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-# ROADMAP.md Phase 5, Step 5.2: `recipe_embeddings` (app.rag.pgvector_store)
-# is deliberately NOT part of Base.metadata (see that module's docstring),
-# managed instead by its own hand-written migration (0002) that no-ops on
-# non-Postgres dialects. On a real Postgres DB, though, autogenerate/`check`
-# reflects EVERY table actually present and compares it against
-# target_metadata regardless of which MetaData created it -- without this
-# exclusion, `alembic check` would see recipe_embeddings sitting in the
-# live DB, find it absent from Base.metadata, and propose dropping it as
-# drift on every run. `include_object` scopes the comparison to exactly the
-# tables Base.metadata owns, leaving recipe_embeddings entirely to its own
-# migration.
+# Tables deliberately NOT part of Base.metadata, each owned/versioned by
+# something other than this app's own Alembic migrations:
+#
+# - "recipe_embeddings" (ROADMAP 5.2, app.rag.pgvector_store): its own
+#   hand-written migration (0002), no-ops on non-Postgres dialects -- see
+#   that module's docstring.
+# - "checkpoints" / "checkpoint_blobs" / "checkpoint_writes" /
+#   "checkpoint_migrations" (ROADMAP 3.2, app.graph.builder.
+#   _select_checkpointer): created by the upstream langgraph-checkpoint-
+#   postgres package's own idempotent `.setup()` migrations, not by this
+#   app -- see that function's docstring for why hand-copying that DDL into
+#   an Alembic revision would be a drift trap the moment the upstream
+#   package's schema changes.
+#
+# On a real Postgres DB, autogenerate/`check` reflects EVERY table actually
+# present and compares it against target_metadata regardless of which
+# MetaData (or which package) created it -- without this exclusion,
+# `alembic check` would see each of the above sitting in the live DB, find
+# it absent from Base.metadata, and propose dropping it as drift on every
+# run (confirmed directly against a real Postgres instance while building
+# ROADMAP 3.2 -- the checkpoint tables tripped this exact gate the same way
+# recipe_embeddings did for 5.2). `include_object` scopes the comparison to
+# exactly the tables Base.metadata owns, leaving everything in this set
+# entirely to its own migration/setup mechanism.
+_EXCLUDED_FROM_DRIFT_GATE = {
+    "recipe_embeddings",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+    "checkpoint_migrations",
+}
+
+
 def include_object(object, name, type_, reflected, compare_to):
-    if type_ == "table" and name == "recipe_embeddings":
+    if type_ == "table" and name in _EXCLUDED_FROM_DRIFT_GATE:
         return False
     table = getattr(object, "table", None)
-    if type_ == "index" and table is not None and table.name == "recipe_embeddings":
+    if type_ == "index" and table is not None and table.name in _EXCLUDED_FROM_DRIFT_GATE:
         return False
     return True
 

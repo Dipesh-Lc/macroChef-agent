@@ -17,6 +17,20 @@ from app.schemas.waste_tracking import WasteNudge
 
 class MacroChefState(BaseModel):
     user_id: str = "demo_user"
+    # ROADMAP.md Phase 3, Step 3.2: gates whether inventory_confirmation_node
+    # is allowed to call `interrupt()` for a true HITL pause. Deliberately
+    # NOT settable from RecommendationRequest's wire schema -- the only
+    # writer is app.api.routes_runs's start-a-run handler, which sets this
+    # directly in Python when building initial state for the checkpointed
+    # graph (app.graph.builder.get_compiled_macrochef_graph). The existing
+    # POST /recipes/recommend and /recipes/recommend/stream endpoints never
+    # set it (default False), so they keep running the uncheckpointed graph
+    # to completion exactly as before this step -- same trust-boundary shape
+    # as `user_id` never coming from client-supplied data (invariant #3): a
+    # flag that decides whether a safety-adjacent pause is even reachable
+    # must not become client-settable, even by accident via a permissive
+    # schema default.
+    hitl_enabled: bool = False
     input_type: Literal["text", "image", "manual", "mixed"] = "text"
     image_path: str | None = None
     typed_ingredients: str | None = None

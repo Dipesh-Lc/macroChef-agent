@@ -13,6 +13,7 @@ from app.api.routes_health import router as health_router
 from app.api.routes_inventory import router as inventory_router
 from app.api.routes_library import router as library_router
 from app.api.routes_recommendations import router as recommendations_router
+from app.api.routes_runs import router as runs_router
 from app.api.routes_safety_tools import router as safety_tools_router
 from app.api.routes_session import router as session_router
 from app.api.routes_share import router as share_router
@@ -288,6 +289,10 @@ def create_app() -> FastAPI:
     # recommendations_router (both are under the same /recipes prefix; this
     # keeps the two recommend-flavored routers adjacent in this list).
     app.include_router(stream_router)
+    # ROADMAP 3.2: checkpointed HITL flow -- additive sibling of
+    # recommendations_router/stream_router, see app/api/routes_runs.py's
+    # module docstring for how it stays isolated from the two above.
+    app.include_router(runs_router)
     app.include_router(library_router)
     app.include_router(feedback_router)
     app.include_router(day_planner_router)

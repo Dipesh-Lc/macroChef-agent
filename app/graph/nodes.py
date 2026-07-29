@@ -108,6 +108,60 @@ def inventory_confirmation_node(state: MacroChefState | dict):
             ),
         )
 
+    low_confidence_observations = [
+        item for item in current.raw_inventory_observations if item.needs_confirmation
+    ]
+
+    # ROADMAP.md Phase 3, Step 3.2: true HITL pause. Hard-gated on
+    # `current.hitl_enabled` (see MacroChefState's field docstring) -- NOT
+    # just on input_type/low_confidence -- so this branch is unreachable
+    # from the existing POST /recipes/recommend and /recipes/recommend/
+    # stream endpoints (they build state with hitl_enabled defaulting
+    # False and never set it) and only reachable through
+    # app.api.routes_runs, which invokes the CHECKPOINTED compiled graph
+    # (app.graph.builder.get_compiled_macrochef_graph). Calling interrupt()
+    # against the uncheckpointed graph those old endpoints use would raise
+    # rather than pause -- see tests/test_hitl_resume.py's coverage of this
+    # invalid combination.
+    if (
+        current.hitl_enabled
+        and low_confidence_observations
+        and current.input_type in {"image", "mixed"}
+    ):
+        from langgraph.types import interrupt
+
+        # Payload carries both the low-confidence subset (what needs a
+        # human decision) and the full observation list (context for
+        # everything else already extracted) -- see spec discussion in
+        # docs/PHASE3_HITL_CHEF_SPEC.md section 1.2. The resumed value
+        # (via Command(resume=...), app.api.routes_runs.resume_run) is the
+        # caller's COMPLETE corrected inventory -- not just the corrected
+        # subset -- and becomes confirmed_inventory directly, mirroring
+        # the manual/text `confirmed_inventory`-already-set path above.
+        confirmed_from_human = interrupt(
+            {
+                "reason": "low_confidence_inventory",
+                "observations": [obs.model_dump() for obs in low_confidence_observations],
+                "all_observations": [
+                    obs.model_dump() for obs in current.raw_inventory_observations
+                ],
+            }
+        )
+        confirmed = [
+            ConfirmedIngredient.model_validate(item) for item in confirmed_from_human
+        ]
+        return state_update(
+            current,
+            confirmed_inventory=confirmed,
+            debug_trace=_trace(
+                current,
+                (
+                    "inventory_confirmation_node: human-confirmed "
+                    f"{len(confirmed)} ingredients after HITL pause."
+                ),
+            ),
+        )
+
     confirmed = _inventory_from_observations(current)
     if not confirmed:
         return state_update(
@@ -116,11 +170,7 @@ def inventory_confirmation_node(state: MacroChefState | dict):
             debug_trace=_trace(current, "inventory_confirmation_node: no confirmed inventory."),
         )
 
-    low_confidence = [
-        item.normalized_name
-        for item in current.raw_inventory_observations
-        if item.needs_confirmation
-    ]
+    low_confidence = [item.normalized_name for item in low_confidence_observations]
     message = (
         f"inventory_confirmation_node: auto-confirmed {len(confirmed)} ingredients"
         + (f"; needs review: {', '.join(low_confidence)}." if low_confidence else ".")

@@ -184,6 +184,41 @@ class SharedPlan(Base):
     )
 
 
+class GraphRun(Base):
+    """ROADMAP.md Phase 3, Step 3.2: `thread_id -> owner_user_id` ownership
+    mapping for the checkpointed HITL recommend graph
+    (`app.graph.builder.get_compiled_macrochef_graph`).
+
+    This table is deliberately separate from LangGraph's own checkpoint
+    tables (`checkpoints`, `checkpoint_writes`, ... -- created by
+    `SqliteSaver`/`PostgresSaver.setup()`, kept outside Alembic entirely,
+    see `app.graph.builder._select_checkpointer`'s docstring for why).
+    LangGraph checkpointers key purely by `thread_id`, with no concept of
+    an owning user -- `app.api.routes_runs`'s `get_run`/`resume_run` must
+    check `owner_user_id` here FIRST, before ever touching the
+    checkpointer, so a thread minted by one user can never be read or
+    resumed by another (invariant #3: identity for this check comes only
+    from the verified session token, never a client-supplied value).
+
+    `id` mirrors `SharedPlan.id`'s pattern -- `secrets.token_urlsafe(16)`,
+    minted by `app.api.routes_runs`, NOT a sequential integer -- so a
+    thread_id is not enumerable. Cross-user access returns 404 (matching
+    `app.services.share_service.get_share`'s existing "exists but isn't
+    yours" collapse -- advisor-reviewed decision, ROADMAP 3.2), not 403:
+    thread_ids already carry 128 bits of unguessability, so hiding
+    existence costs little, and no legitimate client needs to distinguish
+    "not found" from "not yours" here.
+    """
+
+    __tablename__ = "graph_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    owner_user_id: Mapped[str] = mapped_column(String(128), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+
 class LLMCacheEntry(Base):
     """Response-level cache for `app.services.model_provider.
     generate_structured` calls (ROADMAP.md Phase 2, Step 2.3) -- see
