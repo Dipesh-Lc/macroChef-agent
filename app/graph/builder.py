@@ -184,6 +184,23 @@ def _select_checkpointer(database_url: str):
     return saver
 
 
+@lru_cache(maxsize=1)
+def _get_checkpointer():
+    """The long-lived, connection-holding part of the checkpointed graph,
+    cached separately from `get_compiled_macrochef_graph` below (which is
+    deliberately NOT cached -- see that function's docstring). Caching only
+    the checkpointer/connection here -- not the compiled graph -- gets both
+    properties at once: the expensive resource (a DB connection, and for
+    Postgres a one-time `.setup()` migration) is opened exactly once per
+    process, while every call to `get_compiled_macrochef_graph()` still
+    re-wires fresh node references, so a test's monkeypatch of e.g.
+    `builder_module.recipe_retriever_node` is picked up immediately, the
+    same guarantee `build_macrochef_graph`'s docstring explains for the
+    uncheckpointed graph.
+    """
+    return _select_checkpointer(get_settings().database_url)
+
+
 def build_macrochef_graph():
     """Uncheckpointed compiled graph -- used by the EXISTING
     `POST /recipes/recommend` and `/recipes/recommend/stream` endpoints via
@@ -216,14 +233,24 @@ def build_macrochef_graph():
     return graph.compile()
 
 
-@lru_cache(maxsize=1)
 def get_compiled_macrochef_graph():
-    """Checkpointed process-wide singleton -- used ONLY by
-    `app.api.routes_runs` (ROADMAP.md Phase 3, Step 3.2's true HITL
-    entrypoint). MUST be built once and reused across requests: the
-    checkpointer holds a long-lived DB connection (sqlite) or connection
-    (Postgres) -- rebuilding it per-request would leak connections and
-    defeat the whole point of a persisted, resumable checkpoint.
+    """Checkpointed graph -- used by `app.api.routes_runs` and
+    `app.api.routes_stream`'s HITL branch (ROADMAP.md Phase 3, Step 3.2's
+    true HITL entrypoints; the latter closes ROADMAP.md:146's requirement
+    that the streaming endpoint itself can pause).
+
+    Deliberately NOT `@lru_cache`d itself -- same reasoning as
+    `build_macrochef_graph`'s docstring: LangGraph's `add_node` captures
+    node function references at COMPILE time, so caching the compiled
+    graph object would freeze in whatever `recipe_retriever_node` (etc.)
+    resolved to at first build, breaking the same node-monkeypatch
+    technique `test_stream_endpoint.py` relies on -- confirmed directly by
+    building this step (caching this function initially reintroduced the
+    exact regression `build_macrochef_graph` had already been reverted
+    for). The actual expensive, connection-holding resource --
+    `_get_checkpointer()` above -- IS cached separately, so this function
+    is cheap to call on every request: it only re-wires nodes/edges
+    (no I/O) and reuses the already-open checkpointer connection.
     """
     try:
         from langgraph.graph import END, START, StateGraph
@@ -231,8 +258,7 @@ def get_compiled_macrochef_graph():
         return SequentialMacroChefGraph()
 
     graph = _wire_graph(StateGraph(MacroChefState), START, END)
-    checkpointer = _select_checkpointer(get_settings().database_url)
-    return graph.compile(checkpointer=checkpointer)
+    return graph.compile(checkpointer=_get_checkpointer())
 
 
 def request_to_state(
@@ -248,10 +274,12 @@ def request_to_state(
     # read from `request` -- there is no such field on RecommendationRequest
     # and there must never be one (see MacroChefState.hitl_enabled's
     # docstring: a client-settable flag here would let a caller opt itself
-    # into a safety-adjacent pause path). Only app.api.routes_runs's
-    # start-a-run handler passes `hitl_enabled=True` explicitly, in code.
-    # Every existing caller (recommend_recipes, run_recommendation_graph via
-    # /recommend and /recommend/stream) omits it and gets False, unchanged.
+    # into a safety-adjacent pause path). Only app.api.routes_runs.
+    # invoke_hitl_graph (shared by that router's start_run and
+    # app.api.routes_stream's HITL branch) passes `hitl_enabled=True`
+    # explicitly, in code. recommend_recipes (POST /recommend) and the
+    # non-interrupting branch of POST /recommend/stream omit it and get
+    # False, unchanged.
     return MacroChefState(
         user_id=user_id,
         hitl_enabled=hitl_enabled,
@@ -267,10 +295,12 @@ def request_to_state(
 
 def build_recommendation_response(final_state: MacroChefState) -> RecommendationResponse:
     """Shared `MacroChefState -> RecommendationResponse` mapping -- used by
-    `run_recommendation_graph` below (the existing sync/stream endpoints)
-    and, since ROADMAP 3.2, by `app.api.routes_runs` for the "completed"
-    branch of the checkpointed HITL flow. Factored out so there is exactly
-    one place this mapping is defined, not two copies that could drift."""
+    `run_recommendation_graph` below (POST /recommend, and /recommend/stream's
+    non-interrupting/fallback branches) and, since ROADMAP 3.2, by
+    `app.api.routes_runs.status_from_invoke_result` for the "completed"
+    branch of the checkpointed HITL flow (both `/runs` and the streaming
+    HITL branch). Factored out so there is exactly one place this mapping
+    is defined, not two copies that could drift."""
     return RecommendationResponse(
         recommendations=final_state.final_recommendations,
         shopping_list=final_state.shopping_list,

@@ -115,14 +115,16 @@ def inventory_confirmation_node(state: MacroChefState | dict):
     # ROADMAP.md Phase 3, Step 3.2: true HITL pause. Hard-gated on
     # `current.hitl_enabled` (see MacroChefState's field docstring) -- NOT
     # just on input_type/low_confidence -- so this branch is unreachable
-    # from the existing POST /recipes/recommend and /recipes/recommend/
-    # stream endpoints (they build state with hitl_enabled defaulting
-    # False and never set it) and only reachable through
-    # app.api.routes_runs, which invokes the CHECKPOINTED compiled graph
-    # (app.graph.builder.get_compiled_macrochef_graph). Calling interrupt()
-    # against the uncheckpointed graph those old endpoints use would raise
-    # rather than pause -- see tests/test_hitl_resume.py's coverage of this
-    # invalid combination.
+    # from POST /recipes/recommend (always) and POST /recipes/recommend/
+    # stream's non-interrupting/fallback path (they build state with
+    # hitl_enabled defaulting False and never set it), and only reachable
+    # through app.api.routes_runs.invoke_hitl_graph -- shared by that
+    # router's start_run and routes_stream's HITL branch -- which invokes
+    # the CHECKPOINTED compiled graph (app.graph.builder.
+    # get_compiled_macrochef_graph). Calling interrupt() against the
+    # uncheckpointed graph the non-HITL paths use would raise rather than
+    # pause -- see tests/test_hitl_resume.py's coverage of this invalid
+    # combination.
     if (
         current.hitl_enabled
         and low_confidence_observations

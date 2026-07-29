@@ -281,6 +281,22 @@ def set_default_sink(sink: EventSink) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _is_graph_interrupt(exc: Exception) -> bool:
+    """True for `langgraph.errors.GraphInterrupt` (ROADMAP.md Phase 3, Step
+    3.2) -- see `traced_node`'s docstring for why this must not be reported
+    as a node failure. Import is lazy and guarded (matching
+    `app.graph.builder`'s narrowed-except convention for optional
+    `langgraph`) so this module never requires `langgraph` to be installed
+    just to define the decorator; if it isn't, `interrupt()` couldn't have
+    been called in the first place, so every exception here is a genuine
+    failure and this simply returns False."""
+    try:
+        from langgraph.errors import GraphInterrupt
+    except Exception:
+        return False
+    return isinstance(exc, GraphInterrupt)
+
+
 def _debug_trace_of(state: Any) -> list[str]:
     """Read `debug_trace` off either a Pydantic state model or the plain
     dict a node returns -- both `MacroChefState` and
@@ -304,6 +320,17 @@ def traced_node(
       `elapsed_ms`) if the node raises -- the original exception is always
       re-raised unchanged (callers must see the real exception, never one
       wrapped by this decorator).
+    - ROADMAP.md Phase 3, Step 3.2 exception: `langgraph.errors.
+      GraphInterrupt` is NOT a node failure -- it's how `interrupt()`
+      (app.graph.nodes.inventory_confirmation_node) implements a graceful
+      pause: LangGraph's own executor catches it above this decorator to
+      produce the `__interrupt__` result key, never surfacing it to
+      `graph.invoke()`'s caller as a raised exception. Emitting a `failed`
+      RunEvent here anyway would misreport a pause as an error in the very
+      SSE stream (app.api.routes_stream) built to demo this pause -- so
+      this decorator emits neither `finished` nor `failed` for it (the
+      terminal `awaiting_input` event already communicates the pause), and
+      still re-raises unchanged so LangGraph's own handling is untouched.
     - The event's human `summary` is the node's own new `debug_trace`
       entry/entries (nodes already write exactly one clear sentence about
       what they did -- see app.graph.nodes._trace /
@@ -353,6 +380,11 @@ def traced_node(
                 try:
                     result = fn(*args, **kwargs)
                 except Exception as exc:
+                    if _is_graph_interrupt(exc):
+                        # See this decorator's docstring: a pause, not a
+                        # failure -- no RunEvent, no OTel error status, just
+                        # re-raise so LangGraph's own executor can catch it.
+                        raise
                     elapsed_ms = (time.perf_counter() - start) * 1000
                     active_sink.emit(
                         RunEvent(

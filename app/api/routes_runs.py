@@ -1,15 +1,25 @@
 """ROADMAP.md Phase 3, Step 3.2 -- true LangGraph checkpointer + HITL
 inventory confirmation.
 
-Additive sibling of `app.api.routes_recommendations` / `routes_stream`: the
-existing `POST /recipes/recommend` and `/recipes/recommend/stream`
-endpoints are UNCHANGED (still call `run_recommendation_graph`, which runs
-the uncheckpointed `app.graph.builder.build_macrochef_graph()` singleton to
-completion every time -- `MacroChefState.hitl_enabled` defaults False and
-those endpoints never set it, so `inventory_confirmation_node` can never
-pause there; see that field's and node's docstrings). This router is the
-ONLY place `hitl_enabled=True` is ever set, and the only caller of the
-CHECKPOINTED `get_compiled_macrochef_graph()` singleton.
+Additive sibling of `app.api.routes_recommendations`: `POST
+/recipes/recommend` is UNCHANGED (still calls `run_recommendation_graph`,
+which runs the uncheckpointed `app.graph.builder.build_macrochef_graph()`
+singleton to completion every time -- `MacroChefState.hitl_enabled`
+defaults False and that endpoint never sets it, so
+`inventory_confirmation_node` can never pause there; see that field's and
+node's docstrings).
+
+`POST /recipes/recommend/stream` (`app.api.routes_stream`) is different:
+ROADMAP.md's own Step 3.2 acceptance criterion requires that endpoint to
+itself emit an `awaiting_input` SSE event when a run pauses (the literal
+"upload photo -> stream pauses -> confirm -> resume" README demo). Its
+non-interrupting response (no low-confidence image observation, or
+`langgraph` unavailable) is unchanged -- see that module's docstring for
+the exact branching. `invoke_hitl_graph`/`require_langgraph_runtime`/
+`thread_config`/`status_from_invoke_result` below are the shared internal
+helpers both this router and `routes_stream` call, so there is exactly one
+thread-minting/ownership code path, never two that could silently
+diverge.
 
 Ownership: every `thread_id` is bound to the minting user's verified
 session identity in `app.data.models.GraphRun` (never the checkpointer
@@ -52,7 +62,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 _THREAD_ID_BYTES = 16
 
 
-def _require_langgraph_runtime():
+def require_langgraph_runtime():
     graph = get_compiled_macrochef_graph()
     if isinstance(graph, SequentialMacroChefGraph):
         # Only reachable if the `langgraph` package itself failed to import
@@ -70,11 +80,11 @@ def _require_langgraph_runtime():
     return graph
 
 
-def _config(thread_id: str) -> dict:
+def thread_config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def _status_from_invoke_result(thread_id: str, result: dict) -> RunStatusResponse:
+def status_from_invoke_result(thread_id: str, result: dict) -> RunStatusResponse:
     interrupts = result.get("__interrupt__")
     if interrupts:
         return RunStatusResponse(
@@ -84,6 +94,31 @@ def _status_from_invoke_result(thread_id: str, result: dict) -> RunStatusRespons
     return RunStatusResponse(
         thread_id=thread_id, status="completed", result=build_recommendation_response(final_state)
     )
+
+
+def invoke_hitl_graph(request: RecommendationRequest, user_id: str) -> tuple[str, dict]:
+    """Mints a `thread_id`, records its ownership row, and invokes the
+    checkpointed graph once with `hitl_enabled=True`. Shared by `start_run`
+    below and `app.api.routes_stream`'s HITL streaming branch -- factored
+    out so there is exactly ONE place that mints a thread_id/ownership row,
+    never two independently-maintained copies that could silently diverge
+    (e.g. one forgetting the ownership row, reopening the cross-user-resume
+    gap invariant #3 exists to close). Callers must have already confirmed
+    the LangGraph runtime is available (`require_langgraph_runtime`) --
+    this function assumes `graph` is a real checkpointed graph, not
+    `SequentialMacroChefGraph`.
+    """
+    graph = require_langgraph_runtime()
+    thread_id = secrets.token_urlsafe(_THREAD_ID_BYTES)
+    GraphRunRepository().create(thread_id, user_id)
+
+    user_id_token = bind_user_id(user_id)
+    try:
+        state = request_to_state(request, user_id, hitl_enabled=True)
+        result = graph.invoke(state.model_dump(), config=thread_config(thread_id))
+    finally:
+        reset_user_id(user_id_token)
+    return thread_id, result
 
 
 @router.post("", response_model=RunStatusResponse)
@@ -98,19 +133,8 @@ def start_run(
     `POST /runs/{thread_id}/resume`) or `status="completed"` (identical
     `RecommendationResponse` shape to `POST /recipes/recommend`, just
     wrapped)."""
-    graph = _require_langgraph_runtime()
-
-    thread_id = secrets.token_urlsafe(_THREAD_ID_BYTES)
-    GraphRunRepository().create(thread_id, session_user_id)
-
-    user_id_token = bind_user_id(session_user_id)
-    try:
-        state = request_to_state(request, session_user_id, hitl_enabled=True)
-        result = graph.invoke(state.model_dump(), config=_config(thread_id))
-    finally:
-        reset_user_id(user_id_token)
-
-    return _status_from_invoke_result(thread_id, result)
+    thread_id, result = invoke_hitl_graph(request, session_user_id)
+    return status_from_invoke_result(thread_id, result)
 
 
 @router.get("/{thread_id}", response_model=RunStatusResponse)
@@ -121,8 +145,8 @@ def get_run(thread_id: str, session_user_id: str = Depends(get_session_user)) ->
     if GraphRunRepository().get_owned(thread_id, session_user_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    graph = _require_langgraph_runtime()
-    snapshot = graph.get_state(_config(thread_id))
+    graph = require_langgraph_runtime()
+    snapshot = graph.get_state(thread_config(thread_id))
     if snapshot.next:
         interrupts = [value for task in snapshot.tasks for value in task.interrupts]
         awaiting = interrupts[0].value if interrupts else None
@@ -147,15 +171,15 @@ def resume_run(
     if GraphRunRepository().get_owned(thread_id, session_user_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    graph = _require_langgraph_runtime()
+    graph = require_langgraph_runtime()
     from langgraph.types import Command
 
     resume_payload = [item.model_dump(mode="json") for item in request.confirmed_inventory]
 
     user_id_token = bind_user_id(session_user_id)
     try:
-        result = graph.invoke(Command(resume=resume_payload), config=_config(thread_id))
+        result = graph.invoke(Command(resume=resume_payload), config=thread_config(thread_id))
     finally:
         reset_user_id(user_id_token)
 
-    return _status_from_invoke_result(thread_id, result)
+    return status_from_invoke_result(thread_id, result)

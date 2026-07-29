@@ -51,15 +51,15 @@ def _isolated_graph_run_db(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_compiled_graph_cache():
-    """`get_compiled_macrochef_graph` is `@lru_cache`d process-wide (by
-    design -- the checkpointer holds a long-lived connection). Clear around
-    every test so one test's DATABASE_URL/checkpointer never leaks into the
-    next. (`build_macrochef_graph`, the uncheckpointed one, is deliberately
-    NOT cached -- see its own docstring -- so there's nothing to clear
-    there.)"""
-    builder_module.get_compiled_macrochef_graph.cache_clear()
+    """`get_compiled_macrochef_graph` itself is NOT cached (see its
+    docstring), but the checkpointer/connection it uses
+    (`_get_checkpointer`) IS `@lru_cache`d process-wide by design. Clear
+    around every test so one test's DATABASE_URL/checkpointer connection
+    never leaks into the next. (`build_macrochef_graph`, the uncheckpointed
+    graph, is also deliberately not cached -- nothing to clear there.)"""
+    builder_module._get_checkpointer.cache_clear()
     yield
-    builder_module.get_compiled_macrochef_graph.cache_clear()
+    builder_module._get_checkpointer.cache_clear()
 
 
 @pytest.fixture()
@@ -74,7 +74,7 @@ def _use_checkpoint_db(monkeypatch: pytest.MonkeyPatch, path) -> None:
     (ROADMAP 3.2) in production."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{path}")
     get_settings.cache_clear()
-    builder_module.get_compiled_macrochef_graph.cache_clear()
+    builder_module._get_checkpointer.cache_clear()
 
 
 def _mock_low_confidence_vision(
@@ -234,11 +234,11 @@ def test_process_restart_then_resume_works(
     assert start.json()["status"] == "awaiting_input"
     thread_id = start.json()["thread_id"]
 
-    # Simulate a process restart: tear down the compiled-graph singleton --
-    # the only thing holding the sqlite connection -- and rebuild it fresh
-    # against the SAME DATABASE_URL/file. If persistence were in-memory
-    # only, this checkpoint would be gone.
-    builder_module.get_compiled_macrochef_graph.cache_clear()
+    # Simulate a process restart: tear down the cached checkpointer
+    # connection -- the only thing holding the sqlite connection -- and
+    # let it reopen fresh against the SAME DATABASE_URL/file on next use.
+    # If persistence were in-memory only, this checkpoint would be gone.
+    builder_module._get_checkpointer.cache_clear()
     client_after_restart = _client()
 
     resume_payload = {"confirmed_inventory": [{"name": "miso paste"}]}
