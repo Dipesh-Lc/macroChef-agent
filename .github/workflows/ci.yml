@@ -12,6 +12,30 @@ on:
           for production promotion (see docs/DEPLOY.md).
         type: boolean
         default: true
+      alembic_action:
+        description: >-
+          One-off production-database maintenance (ROADMAP 5.1
+          brownfield-adoption gap): prod's schema predates Alembic (it was
+          created by the old app.data.db.init_db()'s create_all(), never
+          via a migration), so `alembic upgrade head` in the deploy job
+          below fails trying to re-create tables that already exist.
+          'none' (default) does nothing -- every ordinary run leaves this
+          alone. 'inspect' READS prod's current table list only (zero
+          writes) so you can confirm it matches what
+          alembic/versions/0001_baseline_schema.py expects before doing
+          anything else. 'stamp_0001' marks prod's alembic_version as
+          already at revision 0001 -- this writes ONE bookkeeping row,
+          runs NO schema DDL at all -- so that a future `alembic upgrade
+          head` correctly skips 0001 and only applies 0002 onward (the
+          genuinely new tables from this session, which do not exist in
+          prod yet). Run 'inspect' first, read its output, THEN
+          'stamp_0001' -- never skip straight to stamping.
+        type: choice
+        options:
+          - none
+          - inspect
+          - stamp_0001
+        default: none
 
 # Azure resource naming — change here to repoint the whole pipeline.
 # ACR_NAME must be globally unique across all of Azure (5-50 alphanumeric
@@ -185,6 +209,76 @@ jobs:
         run: >-
           pytest tests/test_vector_store_contract.py tests/test_alembic_migrations.py
           tests/test_rate_limiting.py -v --tb=short
+
+  # ---------------------------------------------------------------------
+  # One-off maintenance: see `alembic_action`'s own description above for
+  # the full "why" (prod predates Alembic; this fixes the resulting
+  # `alembic upgrade head` failure in the `deploy` job below). Runs ONLY on
+  # an explicit workflow_dispatch with `alembic_action` set to something
+  # other than 'none' -- an ordinary push/PR never touches this job, and
+  # the default keeps it a no-op even on a manual dispatch that only meant
+  # to set `deploy`.
+  # ---------------------------------------------------------------------
+
+  alembic-baseline-maintenance:
+    name: "One-off: inspect or stamp Alembic baseline (prod)"
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.alembic_action != 'none'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Inspect prod's current tables (read-only, zero writes)
+        if: inputs.alembic_action == 'inspect'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import os
+
+          from sqlalchemy import create_engine, inspect
+
+          url = os.environ["DATABASE_URL"]
+          if url.startswith("postgres://"):
+              # SQLAlchemy 2.x's psycopg2 dialect requires the postgresql://
+              # scheme; some providers (Neon included) hand out postgres://.
+              url = url.replace("postgres://", "postgresql://", 1)
+
+          engine = create_engine(url)
+          insp = inspect(engine)
+          tables = sorted(insp.get_table_names())
+
+          print("Tables currently in the production database:")
+          for table in tables:
+              print(f"  - {table}")
+
+          print()
+          print("Expected from alembic/versions/0001_baseline_schema.py "
+                "(feedback, session_memory, user_saved_recipes, shared_plans, "
+                "llm_calls, llm_cache_entries) -- confirm these ARE present "
+                "and that NOTHING from 0002 onward (recipe_embeddings, "
+                "rate_limit_hits, graph_runs, chat_threads, chat_messages, "
+                "agent_notes) is present yet, before running 'stamp_0001'.")
+          engine.dispose()
+          PY
+
+      - name: Stamp alembic_version at 0001 (writes one bookkeeping row, runs NO schema DDL)
+        if: inputs.alembic_action == 'stamp_0001'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: alembic stamp 0001
 
   # ---------------------------------------------------------------------
   # ROADMAP.md Phase 5, Step 5.3: staging auto-deploys on every ordinary

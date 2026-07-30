@@ -72,3 +72,23 @@ def test_staging_app_name_is_distinct_from_production() -> None:
     env = _load_workflow()["env"]
     assert env["ACA_APP_NAME"] != env["ACA_STAGING_APP_NAME"]
     assert env["ACA_STAGING_APP_NAME"] == "ca-macrochef-staging"
+
+
+def test_alembic_baseline_maintenance_job_defaults_to_a_no_op() -> None:
+    """One-off fix for the ROADMAP 5.1 brownfield-adoption gap (prod's
+    schema predates Alembic): this job must never fire on an ordinary
+    push/PR, and even on a workflow_dispatch it must stay inert unless the
+    operator explicitly picks something other than 'none' -- a future edit
+    that flips this default, or drops the explicit `!= 'none'` guard,
+    would risk running unattended production-database maintenance on
+    every promote."""
+    workflow = _load_workflow()
+    trigger_key = True if True in workflow else "on"
+    alembic_input = workflow[trigger_key]["workflow_dispatch"]["inputs"]["alembic_action"]
+    assert alembic_input["default"] == "none"
+    assert set(alembic_input["options"]) == {"none", "inspect", "stamp_0001"}
+
+    condition = workflow["jobs"]["alembic-baseline-maintenance"]["if"]
+    assert "workflow_dispatch" in condition
+    assert "refs/heads/main" in condition
+    assert "inputs.alembic_action != 'none'" in condition
