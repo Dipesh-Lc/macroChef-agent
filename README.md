@@ -243,11 +243,13 @@ full evidence trail behind this run.
 ## Evals & results
 
 `GET /evals/latest` and the [`/evals`](https://ca-macrochef.orangeplant-d8bf2180.italynorth.azurecontainerapps.io/evals)
-page exist and are wired end-to-end — but **no `data/evaluation/eval_report.json`
-has been generated and committed yet**, so the live page currently reads
-an honest "not yet generated" state rather than a stale or fabricated
-number. The table below is pulled from the last verified manual runs
-committed under `data/evaluation/`:
+page exist and are wired end-to-end, and `data/evaluation/eval_report.json`
+is now committed — generated via `scripts/run_all_evals.py`'s mock-provider,
+no-spend path (`MODEL_PROVIDER` is force-set to `mock` before any `app.*`
+import; there is no `--provider` flag on this script at all). The table
+below is pulled from the last verified manual runs committed under
+`data/evaluation/` (the official, human-run k=3 methodology against a real
+judge — a different, cost-gated path, see "The safety story" above):
 
 | Suite | Metric | Result |
 |---|---|---|
@@ -300,10 +302,12 @@ the embedded, single-writer Chroma store.
 **Known limits, stated plainly:** not medical advice; a fridge-photo vision
 intake path exists in the backend but is feature-flagged off; the
 checkpointed human-in-the-loop pause has no frontend entry point yet (see
-"Architecture" above); `/evals/latest` has no committed report yet; the 10
-newest adversarial benchmark cases (the Chef agent's own attack surface)
-haven't been through a certified judge run yet (see "The safety story"
-below). Deferred/lower-priority polish — non-root Docker user, image-size
+"Architecture" above); the 10 newest adversarial benchmark cases (the Chef
+agent's own attack surface) haven't been through a **certified, paid,
+real-judge** run yet (see "The safety story" below) — `/evals/latest`'s
+committed report is the fast, free, mock-provider sanity check (which does
+cover all 278 current `inherent` cases, 0 adjudicated-true), not a
+substitute for that certified run. Deferred/lower-priority polish — non-root Docker user, image-size
 reduction, and more — lives in [`docs/BACKLOG.md`](docs/BACKLOG.md), with
 file paths and acceptance criteria for each item, not just a name. A
 [demo script](docs/DEMO_SCRIPT.md) and a
