@@ -31,12 +31,23 @@ def _chroma_store(tmp_path, monkeypatch) -> ChromaVectorStore:
 
 
 def _pgvector_store():
+    from sqlalchemy import create_engine, text
+
     from app.rag.pgvector_store import PGVECTOR_METADATA, PgVectorStore, recipe_embeddings_table
 
-    engine = None
-    from sqlalchemy import create_engine
-
     engine = create_engine(TEST_POSTGRES_URL)
+    # This fixture builds the table directly rather than running the real
+    # migration (0002_pgvector_recipe_embeddings.py) -- deliberately, so
+    # these contract tests exercise PgVectorStore in isolation from Alembic
+    # state/ordering. But that migration is also the only other place that
+    # runs `CREATE EXTENSION IF NOT EXISTS vector`, so on a completely fresh
+    # Postgres (e.g. a brand-new CI service container that has never had
+    # any migration applied to it) the `vector` type doesn't exist yet
+    # unless this fixture creates the extension itself too. Idempotent
+    # (`IF NOT EXISTS`), so this is a no-op on a DB where the migration (or
+    # a prior test in this same run) already created it.
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     PGVECTOR_METADATA.create_all(bind=engine, tables=[recipe_embeddings_table])
     engine.dispose()
     return PgVectorStore()
