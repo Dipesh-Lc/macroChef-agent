@@ -86,7 +86,12 @@ def test_alembic_baseline_maintenance_job_defaults_to_a_no_op() -> None:
     trigger_key = True if True in workflow else "on"
     alembic_input = workflow[trigger_key]["workflow_dispatch"]["inputs"]["alembic_action"]
     assert alembic_input["default"] == "none"
-    assert set(alembic_input["options"]) == {"none", "inspect", "stamp_0001"}
+    assert set(alembic_input["options"]) == {
+        "none",
+        "inspect",
+        "backfill_llm_tables",
+        "stamp_0001",
+    }
 
     condition = workflow["jobs"]["alembic-baseline-maintenance"]["if"]
     assert "workflow_dispatch" in condition

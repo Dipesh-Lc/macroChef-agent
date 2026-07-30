@@ -23,17 +23,28 @@ on:
           alone. 'inspect' READS prod's current table list only (zero
           writes) so you can confirm it matches what
           alembic/versions/0001_baseline_schema.py expects before doing
-          anything else. 'stamp_0001' marks prod's alembic_version as
+          anything else. An 'inspect' run on 2026-07-30 found prod is
+          ALSO missing two of the six 0001 tables (llm_calls,
+          llm_cache_entries -- both added after prod's last successful
+          deploy, per ROADMAP 1.2/2.3): 'backfill_llm_tables' creates
+          exactly those two tables via
+          `Base.metadata.tables[...].create(engine, checkfirst=True)`
+          (schema taken from the live app.data.models ORM, so it's
+          guaranteed identical to what 0001 would have created; additive
+          only, never drops or alters anything, safe to re-run). Run
+          'inspect' first, then 'backfill_llm_tables' if it reports either
+          table missing, THEN 'stamp_0001' marks prod's alembic_version as
           already at revision 0001 -- this writes ONE bookkeeping row,
           runs NO schema DDL at all -- so that a future `alembic upgrade
           head` correctly skips 0001 and only applies 0002 onward (the
           genuinely new tables from this session, which do not exist in
-          prod yet). Run 'inspect' first, read its output, THEN
-          'stamp_0001' -- never skip straight to stamping.
+          prod yet). Never skip straight to stamping without inspecting
+          (and backfilling, if needed) first.
         type: choice
         options:
           - none
           - inspect
+          - backfill_llm_tables
           - stamp_0001
         default: none
 
@@ -271,6 +282,31 @@ jobs:
                 "and that NOTHING from 0002 onward (recipe_embeddings, "
                 "rate_limit_hits, graph_runs, chat_threads, chat_messages, "
                 "agent_notes) is present yet, before running 'stamp_0001'.")
+          engine.dispose()
+          PY
+
+      - name: Backfill missing 0001 tables (llm_calls, llm_cache_entries -- additive only)
+        if: inputs.alembic_action == 'backfill_llm_tables'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import os
+
+          from sqlalchemy import create_engine
+
+          from app.data.db import Base
+          import app.data.models  # noqa: F401 -- populates Base.metadata
+
+          url = os.environ["DATABASE_URL"]
+          if url.startswith("postgres://"):
+              url = url.replace("postgres://", "postgresql://", 1)
+
+          engine = create_engine(url)
+          for table_name in ("llm_cache_entries", "llm_calls"):
+              table = Base.metadata.tables[table_name]
+              table.create(engine, checkfirst=True)
+              print(f"Ensured table exists (checkfirst=True, no-op if already present): {table_name}")
           engine.dispose()
           PY
 
