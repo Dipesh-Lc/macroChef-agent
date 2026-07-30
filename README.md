@@ -67,28 +67,33 @@ this checkout yet — this is an honest placeholder, not a broken link. -->
 ```mermaid
 flowchart LR
     U[React 19 SPA] -->|fetch / SSE| A[FastAPI]
-    A --> G1[Recommend graph<br/>LangGraph]
+    A --> G1[Recommend graph<br/>LangGraph, checkpointed]
     A --> G2[Library-discovery graph<br/>LangGraph]
+    A --> G3[Chef chat agent<br/>LangGraph ReAct loop]
     G1 --> S[Deterministic services<br/>constraint_engine, planners,<br/>nutrition grounding, retrieval]
     G2 --> S
+    G3 -->|read/plan tools only| S
     S --> DB[(Postgres / SQLite)]
-    S --> VEC[(ChromaDB<br/>vector index)]
+    S --> VEC[(ChromaDB / pgvector<br/>vector index)]
     S --> FDC[USDA FoodData Central]
     G1 -.->|structured, schema-validated| LLM[LLM providers<br/>Gemini / OpenAI / Anthropic /<br/>Ollama / mock]
     G2 -.-> LLM
+    G3 -.-> LLM
     A --> OBS[Observability<br/>run events, LLM ledger, OTel]
 
     style S fill:#1f6f43,color:#fff
 ```
 
-Two independent LangGraph state machines, both with typed Pydantic
-node contracts and a hand-written sequential fallback if the LangGraph
-import ever fails. The LLM only touches free-text pantry parsing, optional
-instruction rewriting, and offline corpus tagging — every one of its
+Three LangGraph state machines (recommend, library-discovery, the Chef
+chat agent), all with typed Pydantic node contracts and a hand-written
+sequential fallback if the LangGraph import ever fails. The LLM only
+touches free-text pantry parsing, optional instruction rewriting, offline
+corpus tagging, and the Chef agent's tool-calling loop — every one of its
 outputs is re-validated by the deterministic services layer before it can
-reach a response. `pgvector` and a tool-calling chat agent are designed
-but not built (see "Known limits" below); Chroma and the recommend/library
-graphs are the whole retrieval and generation story today.
+reach a response, and the Chef agent has its own deterministic response
+gate on top (see below). Chroma is the default vector store; `pgvector` is
+a fully supported alternate backend behind the same interface (see
+`app/rag/vector_store.py`), selected via `VECTOR_BACKEND`.
 
 ```mermaid
 flowchart TD
@@ -113,18 +118,29 @@ flowchart TD
 
 Every node above is `@traced_node`-wrapped (`app/observability/events.py`):
 each emits a started/finished/failed event that `POST
-/recipes/recommend/stream` relays live as SSE. **There is no interrupt
-point in this graph today.** A LangGraph-checkpointed human-in-the-loop
-step (pause on a low-confidence vision observation, resume with a
-correction) is designed in detail but deliberately not built — it's a new
-LLM-adjacent attack surface next to the safety invariant above, and it's
-waiting on a real design review rather than a solo implementation. See
-[`docs/PHASE3_HITL_CHEF_SPEC.md`](docs/PHASE3_HITL_CHEF_SPEC.md) for the
-full spec and open questions. Same status for the tool-calling "Chef"
-chat agent — the frontend has a `/chat` route today, but it renders an
-honest "coming soon" page
-([`web/src/components/ComingSoonPage.tsx`](web/src/components/ComingSoonPage.tsx)),
-not a working feature.
+/recipes/recommend/stream` relays live as SSE. The graph is
+LangGraph-checkpointed with one real interrupt point:
+`inventory_confirmation_node` pauses on a low-confidence vision
+observation, and the run resumes via `POST /runs/{thread_id}/resume` with
+a human correction (`app/api/routes_runs.py`) — the streaming endpoint
+itself emits a terminal `awaiting_input` event when this happens
+(`app/api/routes_stream.py`). Backend and API are fully built and tested;
+the frontend has no click-through path to trigger this specific pause yet
+(no image-upload control — see `docs/BACKLOG.md`'s F3 entry), so it's
+demonstrable via the API/test suite today, not yet via the live UI.
+
+The tool-calling "Chef" chat agent (`app/agent/`) is fully built: a
+LangGraph ReAct loop over 7 read/plan tools wrapping the same deterministic
+services above (`search_recipes`, `check_recipe_safety`,
+`ground_nutrition`, `propose_substitutions`, `build_day_plan`,
+`get_user_context`, `remember`) — the LLM decides *which* tool to call and
+how to phrase the answer, never the safety/nutrition verdict itself. A
+second, deterministic response gate runs after the LLM finishes each turn
+and blocks (with an automatic retry, then a safe fallback) any answer that
+presents a recipe as safe without a `check_recipe_safety` call confirming
+it *this turn* — see `docs/CASE_STUDY.md` for two real bugs this gate's
+own review process found and closed. The frontend's `/chat` route
+(`web/src/pages/ChatPage.tsx`) is a working feature, not a placeholder.
 
 ## The safety story
 
@@ -282,13 +298,18 @@ with a pre-registered trigger for when to swap it — see
 the embedded, single-writer Chroma store.
 
 **Known limits, stated plainly:** not medical advice; a fridge-photo vision
-intake path exists in the backend but is feature-flagged off with no
-frontend entry point; the checkpointed human-in-the-loop step and the
-tool-calling chat agent are spec'd but not built (see "Architecture"
-above); `/evals/latest` has no committed report yet. Deferred/lower-priority
-polish — pgvector migration, staging CD, non-root Docker user, and more —
-lives in [`docs/BACKLOG.md`](docs/BACKLOG.md), with file paths and
-acceptance criteria for each item, not just a name.
+intake path exists in the backend but is feature-flagged off; the
+checkpointed human-in-the-loop pause has no frontend entry point yet (see
+"Architecture" above); `/evals/latest` has no committed report yet; the 10
+newest adversarial benchmark cases (the Chef agent's own attack surface)
+haven't been through a certified judge run yet (see "The safety story"
+below). Deferred/lower-priority polish — non-root Docker user, image-size
+reduction, and more — lives in [`docs/BACKLOG.md`](docs/BACKLOG.md), with
+file paths and acceptance criteria for each item, not just a name. A
+[demo script](docs/DEMO_SCRIPT.md) and a
+[case study](docs/CASE_STUDY.md) of two real war stories from this repo's
+own history (a data-completeness measurement bug, and not trusting a first
+"0/269" until it was independently re-verified) go deeper than this README.
 
 **Stack:** FastAPI, LangGraph, SQLAlchemy 2.x + Alembic, PostgreSQL (Neon)
 in prod / SQLite locally, ChromaDB + `sentence-transformers/all-MiniLM-L6-v2`,

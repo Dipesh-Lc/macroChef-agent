@@ -140,6 +140,27 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
   pasted into Slack/LinkedIn.
 - **Accept:** valid preview in an OG debugger.
 
+### F3. No image-upload UI for the HITL inventory-confirmation flow
+
+- **Where:** `web/src/pages/HomePage.tsx` (`input_type` is hardcoded to
+  `"text"`, no file input anywhere), `web/src/lib/sse.ts`'s `streamRecommend`
+  (the `awaiting_input` SSE event, emitted by the backend since ROADMAP 3.2,
+  is silently ignored — see that file's own comment).
+- **Problem:** discovered while writing `docs/DEMO_SCRIPT.md` (ROADMAP 6.3):
+  ROADMAP 3.2's own acceptance criterion is a live "upload photo -> stream
+  pauses -> confirm -> resume" demo, and the backend fully supports it
+  (`POST /runs`, the streaming `awaiting_input` event, `POST /runs/
+  {thread_id}/resume` — all tested end-to-end in `tests/test_hitl_resume.py`
+  and `tests/test_stream_endpoint.py`), but there is no click-through path
+  to it anywhere in the product UI. It can only be demonstrated via `curl`/
+  pytest today, not in front of an interviewer.
+- **Fix:** an image-upload control on `HomePage` (or a dedicated flow) that
+  sets `input_type: "image"`, plus `streamRecommend`/`HomePage` handling the
+  `awaiting_input` event (render the low-confidence observations, collect
+  corrections, call `POST /runs/{thread_id}/resume`) instead of dropping it.
+- **Accept:** `docs/DEMO_SCRIPT.md`'s HITL step can be performed by clicking
+  through the live UI, not narrated as an API-only capability.
+
 ## Data / evaluation
 
 ### D1. Legacy eval script status
