@@ -746,26 +746,50 @@ jobs:
           # otel-exporter-otlp-endpoint/-headers (ROADMAP.md Phase 1, Step
           # 1.3): a human still needs to create the hosted-backend account
           # and set these two repo secrets (docs/HUMAN_INPUTS.md entry
-          # H1) -- wired defensively here ahead of that, the same way
-          # posthog-api-key already is optional-by-blank-value. A missing
-          # GitHub secret evaluates to an empty string (never an error),
-          # and that's the exact same shape POSTHOG_API_KEY already takes
-          # when unset, which this deploy job has always handled fine: the
-          # secret gets set to "", the env var resolves to "", and
-          # app.observability.tracing.init_tracing treats a blank
-          # OTEL_EXPORTER_OTLP_ENDPOINT as disabled (see that module's
-          # no-op contract) -- so an unset secret here means tracing simply
-          # stays off in prod, not a broken deploy.
+          # H1). Unlike a plain --set-env-vars value, `az containerapp
+          # secret set` REJECTS an empty value outright
+          # (ContainerAppSecretInvalid: "value or keyVaultUrl and identity
+          # should be provided") -- posthog-api-key only gets away with
+          # being optional-by-blank-value because that GitHub secret
+          # already holds a real (if placeholder) string, not because
+          # Azure tolerates "" secrets in general. So wire the OTEL
+          # secret/env-var pair only when the GitHub secret is actually
+          # non-empty; until the human completes H1, both stay entirely
+          # unset, which app.observability.tracing.init_tracing already
+          # treats as disabled (see that module's no-op-when-blank
+          # contract) -- so tracing simply stays off, not a broken deploy.
+          SECRETS=(
+            database-url="${{ secrets.DATABASE_URL }}"
+            session-secret="${{ secrets.SESSION_SECRET }}"
+            gemini-api-key="${{ secrets.GEMINI_API_KEY }}"
+            posthog-api-key="${{ secrets.POSTHOG_API_KEY }}"
+          )
+          ENV_VARS=(
+            DATABASE_URL=secretref:database-url
+            SESSION_SECRET=secretref:session-secret
+            GEMINI_API_KEY=secretref:gemini-api-key
+            POSTHOG_API_KEY=secretref:posthog-api-key
+            MODEL_PROVIDER=gemini
+            MODEL_PROVIDER_FALLBACKS=mock
+            EMBEDDING_PROVIDER=local
+            PORT=8000
+          )
+
+          OTEL_ENDPOINT="${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}"
+          OTEL_HEADERS="${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}"
+          if [ -n "$OTEL_ENDPOINT" ]; then
+            SECRETS+=(otel-exporter-otlp-endpoint="$OTEL_ENDPOINT")
+            ENV_VARS+=(OTEL_EXPORTER_OTLP_ENDPOINT=secretref:otel-exporter-otlp-endpoint)
+          fi
+          if [ -n "$OTEL_HEADERS" ]; then
+            SECRETS+=(otel-exporter-otlp-headers="$OTEL_HEADERS")
+            ENV_VARS+=(OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-exporter-otlp-headers)
+          fi
+
           az containerapp secret set \
             --name "$ACA_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
-            --secrets \
-              database-url="${{ secrets.DATABASE_URL }}" \
-              session-secret="${{ secrets.SESSION_SECRET }}" \
-              gemini-api-key="${{ secrets.GEMINI_API_KEY }}" \
-              posthog-api-key="${{ secrets.POSTHOG_API_KEY }}" \
-              otel-exporter-otlp-endpoint="${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}" \
-              otel-exporter-otlp-headers="${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}"
+            --secrets "${SECRETS[@]}"
 
           # min-replicas=1 / max-replicas=1 is intentional, not a placeholder:
           # embedded Chroma (data/chroma) is a single-writer store. A second
@@ -784,17 +808,7 @@ jobs:
             --min-replicas 1 \
             --max-replicas 1 \
             --cpu 1.0 --memory 2.0Gi \
-            --set-env-vars \
-              DATABASE_URL=secretref:database-url \
-              SESSION_SECRET=secretref:session-secret \
-              GEMINI_API_KEY=secretref:gemini-api-key \
-              POSTHOG_API_KEY=secretref:posthog-api-key \
-              OTEL_EXPORTER_OTLP_ENDPOINT=secretref:otel-exporter-otlp-endpoint \
-              OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-exporter-otlp-headers \
-              MODEL_PROVIDER=gemini \
-              MODEL_PROVIDER_FALLBACKS=mock \
-              EMBEDDING_PROVIDER=local \
-              PORT=8000
+            --set-env-vars "${ENV_VARS[@]}"
 
       - name: Print live URL
         run: |
