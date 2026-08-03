@@ -622,6 +622,40 @@ def _model_json_schema(schema: type[BaseModel]) -> dict[str, Any]:
     return schema.model_json_schema()
 
 
+def _strip_additional_properties(node: Any) -> Any:
+    """Recursively drop every `additionalProperties` key from a JSON Schema
+    dict -- see `_gemini_response_schema`'s docstring for why."""
+    if isinstance(node, dict):
+        return {
+            key: _strip_additional_properties(value)
+            for key, value in node.items()
+            if key != "additionalProperties"
+        }
+    if isinstance(node, list):
+        return [_strip_additional_properties(item) for item in node]
+    return node
+
+
+def _gemini_response_schema(schema: type[BaseModel]) -> dict[str, Any]:
+    """`_model_json_schema`, Gemini-Developer-API-safe. Gemini's public
+    Developer API (unlike Vertex AI / Enterprise Agent Platform) rejects the
+    `additionalProperties` JSON-Schema keyword outright, wherever it appears
+    in the schema tree -- observed 2026-08-03: every real `ChefStep`
+    (`app.agent.chef_agent`) call failed with "additionalProperties is only
+    supported in Gemini Enterprise Agent Platform mode... not in Gemini
+    Developer API mode", because `ChefStep.tool_args: dict[str, Any]` (an
+    intentionally open-ended field -- each tool validates its own args
+    shape one layer down, see that module's docstring) makes Pydantic emit
+    `"additionalProperties": true` for that property. Every failed call
+    silently fell back through the provider chain to mock, which is why
+    this surfaced as chat always giving a generic non-answer rather than a
+    visible error. Only used for the Gemini call site -- OpenAI's strict
+    JSON mode relies on `additionalProperties: false` for its own
+    enforcement, so `_model_json_schema` stays unmodified for every other
+    provider."""
+    return _strip_additional_properties(_model_json_schema(schema))
+
+
 def _generate_text_with_gemini(prompt: str, settings: Settings, usage: _UsageInfo) -> str:
     from google.genai import types
 
@@ -1086,7 +1120,7 @@ def _generate_structured_with_gemini(
                     model=model,
                     temperature=0 if image_path is not None else 0.2,
                     response_mime_type="application/json",
-                    response_schema=_model_json_schema(schema),
+                    response_schema=_gemini_response_schema(schema),
                 ),
             )
             usage.model = model
