@@ -10,6 +10,15 @@ pgvector>=0.3.6
 langgraph>=0.2.0
 langgraph-checkpoint-sqlite>=2.0.0
 langgraph-checkpoint-postgres>=2.0.0
+# langgraph-checkpoint-postgres pulls in bare `psycopg` (v3), which -- unlike
+# psycopg2-binary above -- has no pure-Python fallback that works without a
+# system libpq: on the slim Docker base image (no libpq installed) this
+# raised `ImportError: no pq wrapper available` the first time a real chat
+# turn hit Postgres in prod (2026-08-03; GitHub Actions' hosted runners have
+# libpq preinstalled, which is why CI never caught this). Force the `binary`
+# extra so pip installs psycopg's prebuilt wheel (bundled libpq), the same
+# reason psycopg2-binary is used instead of plain psycopg2.
+psycopg[binary]>=3.1.0
 chromadb>=0.5.0
 sentence-transformers>=2.7.0
 numpy>=1.26.0
