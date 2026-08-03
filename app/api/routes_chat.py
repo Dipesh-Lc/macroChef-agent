@@ -55,8 +55,10 @@ from app.schemas.chat import (
     ChatThreadStatusResponse,
 )
 from app.schemas.user import UserProfile
+from app.utils.logging import get_logger
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = get_logger(__name__)
 
 # Opaque thread id length -- 128 bits, matching the house pattern used for
 # every other opaque public id in this codebase (app.api.routes_runs'
@@ -166,7 +168,18 @@ async def _stream_chat_turn(
         result = task.result()
     except Exception as exc:
         # Same deliberately-generic shape app.api.routes_stream uses for a
-        # mid-graph exception -- never the raw exception message.
+        # mid-graph exception -- never the raw exception message in the
+        # client-facing SSE event. Unlike routes_stream, this DOES log the
+        # full traceback server-side: routes_stream's graph nodes each emit
+        # their own structured events via app.observability.events, giving
+        # an independent trail if a node fails, but run_chef_turn has no
+        # such per-node tracing, so this except block was previously the
+        # ONLY place a chef-turn exception could ever surface -- and it
+        # logged nothing, silently discarding the traceback in prod (found
+        # 2026-08-03 debugging a live "Internal Server Error" with no
+        # corresponding log line anywhere, including tracing, which is
+        # unconfigured in prod pending docs/HUMAN_INPUTS.md H1).
+        logger.exception("Chef agent turn failed for thread %s", thread_id)
         yield _sse("error", {"detail": "Internal Server Error", "error_type": type(exc).__name__})
         return
 

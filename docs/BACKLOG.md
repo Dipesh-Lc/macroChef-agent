@@ -118,6 +118,25 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
 - **Accept:** repeated thread creation past a reasonable threshold is
   rejected; test pinning the limit.
 
+### B8. `routes_stream.py`'s mid-graph exception handler logs nothing
+
+- **Where:** `app/api/routes_stream.py`'s SSE generator, `except Exception
+  as exc:` around `task.result()` (~line 182) — same shape as
+  `routes_chat.py`'s equivalent block before it was fixed 2026-08-03.
+- **Problem:** identical bug to the one just fixed in `routes_chat.py`: a
+  mid-graph exception in `/recipes/recommend`'s streaming path becomes a
+  generic client-facing `error` SSE event with **zero server-side log
+  line**, discarding the traceback. Individual graph nodes DO emit
+  structured events via `app.observability.events` (so a node's own
+  start/finish is visible), but an exception itself is never logged. Only
+  surfaced because OTEL tracing is unconfigured in prod pending
+  `docs/HUMAN_INPUTS.md` H1, so there's currently no other way to see it.
+- **Fix:** same as the `routes_chat.py` fix — add `logger.exception(...)`
+  in that except block before yielding the SSE `error` event.
+- **Accept:** a forced mid-graph exception in a test produces a log line
+  via `caplog`/`pytest.ini`'s logging capture, not just the generic SSE
+  event.
+
 ## Frontend
 
 ### F1. `web/openapi.json` freshness is unenforced
