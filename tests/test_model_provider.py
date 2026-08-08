@@ -1,5 +1,6 @@
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -221,6 +222,53 @@ def test_generate_structured_gemini_passes_response_schema(
     assert rows[0].retries == 0
     assert rows[0].prompt_tokens == 10
     assert rows[0].completion_tokens == 5
+
+
+# ---------------------------------------------------------------------------
+# _gemini_response_schema / OpenSchemaError (2026-08-07 incident): the old
+# `_strip_additional_properties` silently deleted `additionalProperties`
+# everywhere, including on an OPEN dict field, turning it into a
+# propertyless object Gemini's constrained decoder could never fill --
+# exactly what happened to `app.agent.chef_agent.ChefStep.tool_args` (see
+# that field's docstring). Now any `additionalProperties` value other than
+# `False` must raise instead of silently stripping.
+# ---------------------------------------------------------------------------
+
+
+class _OpenDictSchema(BaseModel):
+    """A schema with an open-ended `dict[str, Any]` field -- deliberately
+    reproduces the shape that caused the incident, for a schema this test
+    owns rather than risking a future edit to a real production schema
+    silently losing this coverage."""
+
+    payload: dict[str, Any] = {}
+
+
+def test_gemini_response_schema_rejects_open_dict_field() -> None:
+    with pytest.raises(model_provider.OpenSchemaError):
+        model_provider._gemini_response_schema(_OpenDictSchema)
+
+
+def test_gemini_response_schema_for_chef_step_has_no_open_dicts() -> None:
+    """`ChefStep.tool_args` is now a plain `str` field (the incident fix),
+    so the schema Gemini actually receives must be free of every
+    `additionalProperties` key -- not just free of open ones."""
+    from app.agent.chef_agent import ChefStep
+
+    schema = model_provider._gemini_response_schema(ChefStep)
+
+    def _assert_no_additional_properties_key(node) -> None:
+        if isinstance(node, dict):
+            assert "additionalProperties" not in node, (
+                f"Unexpected additionalProperties in Gemini schema node: {node!r}"
+            )
+            for value in node.values():
+                _assert_no_additional_properties_key(value)
+        elif isinstance(node, list):
+            for item in node:
+                _assert_no_additional_properties_key(item)
+
+    _assert_no_additional_properties_key(schema)
 
 
 def test_generate_structured_openai_passes_json_schema(

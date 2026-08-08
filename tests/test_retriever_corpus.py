@@ -23,10 +23,12 @@ independent of Chroma/pgvector/embedding-provider state (ROADMAP 5.2 made
 the backend swappable -- see `app.rag.vector_store`).
 """
 
+from app.agent.tools import ToolContext, dispatch_tool_call
+from app.rag.loaders import load_corpus
 from app.schemas.user import MacroTargets, UserProfile
 from app.services import recipe_retriever as retriever_module
 from app.services.constraint_engine import validate_recipe
-from app.services.recipe_retriever import RecipeRetriever
+from app.services.recipe_retriever import RecipeRetriever, get_recipe_by_id
 
 
 class FakeLibraryRepository:
@@ -42,6 +44,42 @@ class _EmptyVectorStore:
 def _retriever(monkeypatch) -> RecipeRetriever:
     monkeypatch.setattr(retriever_module, "get_vector_store", lambda: _EmptyVectorStore())
     return RecipeRetriever(library_repository=FakeLibraryRepository())
+
+
+def test_get_recipe_by_id_resolves_an_imported_corpus_recipe() -> None:
+    """Regression test for the exact same class of bug this file exists for
+    (see the module docstring), found again 2026-08-07 one function over:
+    `get_recipe_by_id` (used by `app.agent.tools._resolve_recipe`, and by
+    `GET /recipes/{recipe_id}`) called `app.rag.loaders.recipes_by_id()`,
+    which loads ONLY the 25 seed recipes -- not `load_corpus()`'s seed-union-
+    imported set `RecipeRetriever` itself already used. So `search_recipes`
+    could surface an `imp_*` id that no other tool could ever resolve. See
+    `get_recipe_by_id`'s docstring (app/services/recipe_retriever.py) for
+    the fix."""
+    imported = next(recipe for recipe in load_corpus() if recipe.recipe_id.startswith("imp_"))
+
+    resolved = get_recipe_by_id(imported.recipe_id)
+
+    assert resolved is not None
+    assert resolved.recipe_id == imported.recipe_id
+
+
+def test_check_recipe_safety_resolves_an_imported_corpus_recipe_end_to_end() -> None:
+    """Same bug, exercised through the actual tool a chat turn calls: before
+    the fix, `check_recipe_safety` reported "Recipe not found" for every
+    imported recipe id `search_recipes` could ever return, even though
+    `validate_recipe` itself was never broken -- `_resolve_recipe` just
+    could never find the recipe to hand it."""
+    imported = next(recipe for recipe in load_corpus() if recipe.recipe_id.startswith("imp_"))
+    ctx = ToolContext(user_id="user_corpus_safety_check", user_profile=UserProfile())
+
+    result = dispatch_tool_call(ctx, "check_recipe_safety", {"recipe_ids": [imported.recipe_id]})
+
+    assert result.ok is True
+    rejection_reasons = [
+        entry["result"].get("rejection_reason") for entry in result.raw["results"]
+    ]
+    assert "Recipe not found" not in rejection_reasons
 
 
 def test_full_corpus_is_loaded_seed_union_imported(monkeypatch) -> None:

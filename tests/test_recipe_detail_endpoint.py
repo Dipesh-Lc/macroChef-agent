@@ -2,9 +2,11 @@
 recipe names in day/week plans) roadmap item.
 
 Pure lookup-by-id endpoint: no safety decision, no nutrition computation.
-It reuses `app.services.recipe_retriever.get_recipe_by_id`, which itself
-reuses `app.rag.loaders.recipes_by_id` -- both already covered elsewhere
-(see `tests/test_recipe_retriever.py`, `tests/test_loaders.py`). These
+It reuses `app.services.recipe_retriever.get_recipe_by_id`, which resolves
+against `app.rag.loaders.load_corpus()` (seed UNION imported -- fixed
+2026-08-07, previously the seed-25-only `recipes_by_id()`, see that
+function's docstring) -- already covered elsewhere (see
+`tests/test_recipe_retriever.py`, `tests/test_retriever_corpus.py`). These
 tests only check this route's own plumbing: 200 with the full `Recipe` body
 for a known id, 404 for an unknown one.
 """

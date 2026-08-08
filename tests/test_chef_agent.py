@@ -14,6 +14,7 @@ import logging
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -135,6 +136,100 @@ _SAFE_RECIPE = Recipe(
 
 
 # ---------------------------------------------------------------------------
+# 0. 2026-08-07 incident regression tests: `ChefStep.tool_args` wire format
+#    + `SearchRecipesArgs`' empty-payload guard. See `ChefStep`'s own
+#    docstring (app/agent/chef_agent.py) for the full incident writeup --
+#    Gemini's Developer API forced `tool_args` off `dict[str, Any]`, and the
+#    replacement schema-stripping fix silently turned an open object into a
+#    propertyless one, so Gemini always emitted `tool_args: {}` and
+#    `search_recipes` always searched for nothing.
+# ---------------------------------------------------------------------------
+
+
+def test_chef_step_tool_args_default_is_empty_json_object() -> None:
+    step = ChefStep()
+    assert step.tool_args == "{}"
+    assert step.tool_args_dict == {}
+
+
+def test_chef_step_tool_args_accepts_dict_and_json_string_equivalently() -> None:
+    """Both construction styles used throughout this file's OTHER tests
+    (dict, for convenience) and the real wire format (a JSON-encoded string,
+    what an actual provider response is parsed into) must end up equivalent
+    -- `tool_args_dict` is the one place downstream code (`llm_node`) reads
+    the parsed form from."""
+    from_dict = ChefStep(tool_args={"ingredients": ["rice"]})
+    from_string = ChefStep(tool_args='{"ingredients": ["rice"]}')
+
+    assert from_dict.tool_args_dict == {"ingredients": ["rice"]}
+    assert from_string.tool_args_dict == {"ingredients": ["rice"]}
+    assert from_dict.tool_args == from_string.tool_args
+
+
+def test_chef_step_tool_args_rejects_invalid_json() -> None:
+    with pytest.raises(ValidationError):
+        ChefStep(step_type="tool_call", tool="search_recipes", tool_args="not valid json")
+
+
+def test_chef_step_tool_args_rejects_non_object_json() -> None:
+    """A JSON array/number/string is syntactically valid JSON but not a
+    valid arguments object -- must still be rejected, not silently accepted
+    as `tool_args_dict == []` (which would blow up downstream at
+    `dispatch_tool_call`'s `{**args_dict, "tool": tool}` spread instead)."""
+    with pytest.raises(ValidationError):
+        ChefStep(step_type="tool_call", tool="search_recipes", tool_args="[1, 2, 3]")
+
+
+def test_mock_provider_produces_a_valid_chef_step() -> None:
+    """Pins the design assumption `ChefStep.tool_args: str = "{}"` leans on:
+    `model_provider._mock_schema_example` fills ONLY a schema's required
+    fields, and every `ChefStep` field (including `tool_args`) is optional
+    with a default -- so the mock provider's example is `{}`, which must
+    still validate into a legitimate `ChefStep` rather than erroring."""
+    from app.config import Settings
+    from app.services.model_provider import generate_structured
+
+    settings = Settings(MODEL_PROVIDER="mock")
+    step = generate_structured("mock", "irrelevant prompt", ChefStep, settings, purpose="test_mock")
+
+    assert isinstance(step, ChefStep)
+    assert step.tool_args_dict == {}
+
+
+def test_search_recipes_empty_payload_returns_ok_false_not_silent_success() -> None:
+    """The direct regression test: before this fix, `dispatch_tool_call(ctx,
+    "search_recipes", {})` returned `ok=True` with a useless search (see
+    `SearchRecipesArgs._require_some_search_criteria`'s docstring) -- the
+    exact shape of payload Gemini always emitted post-incident."""
+    ctx = ToolContext(user_id="user_empty_search", user_profile=UserProfile())
+
+    result = dispatch_tool_call(ctx, "search_recipes", {})
+
+    assert result.ok is False
+    assert result.error is not None
+
+
+def test_search_recipes_accepts_cuisine_only_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The validator must not over-restrict: a legitimate cuisine-only query
+    ("suggest an Italian dinner", no ingredients named) must still work."""
+    monkeypatch.setattr(tools_module, "RecipeRetriever", _FakeRetriever)
+    ctx = ToolContext(user_id="user_cuisine_only", user_profile=UserProfile())
+
+    result = dispatch_tool_call(ctx, "search_recipes", {"cuisine_preference": "Italian"})
+
+    assert result.ok is True
+
+
+def test_search_recipes_accepts_meal_type_only_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tools_module, "RecipeRetriever", _FakeRetriever)
+    ctx = ToolContext(user_id="user_meal_only", user_profile=UserProfile())
+
+    result = dispatch_tool_call(ctx, "search_recipes", {"meal_type": "dinner"})
+
+    assert result.ok is True
+
+
+# ---------------------------------------------------------------------------
 # 1. Tool-call sequence includes check_recipe_safety.
 # ---------------------------------------------------------------------------
 
@@ -252,6 +347,78 @@ class _FakeRetriever:
                 ingredients=[Ingredient(name="rice noodles")],
             )
         ]
+
+
+class _CapturingRetriever:
+    """Stand-in for RecipeRetriever that records the exact kwargs
+    `search_recipes` calls `.retrieve()` with -- proves a JSON-ENCODED
+    STRING `tool_args` (the real wire format post-incident-fix) survives
+    `ChefStep.tool_args_dict`'s parse, `llm_node`'s `pending_tool_args`
+    assignment, and `dispatch_tool_call`'s discriminated-union validation,
+    arriving at the retriever as real, non-empty ingredients -- not the
+    `{}` that reached this exact call site during the 2026-08-07 incident."""
+
+    last_kwargs: dict | None = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def retrieve(self, **kwargs):
+        _CapturingRetriever.last_kwargs = kwargs
+        return [
+            Recipe(
+                recipe_id="chicken_rice_bowl",
+                title="Chicken Rice Bowl",
+                ingredients=[Ingredient(name="chicken"), Ingredient(name="rice")],
+            )
+        ]
+
+
+def test_json_string_tool_args_reaches_retriever_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tools_module, "RecipeRetriever", _CapturingRetriever)
+    monkeypatch.setattr(
+        tools_module,
+        "get_recipe_by_id",
+        lambda recipe_id: (
+            Recipe(
+                recipe_id="chicken_rice_bowl",
+                title="Chicken Rice Bowl",
+                ingredients=[Ingredient(name="chicken"), Ingredient(name="rice")],
+            )
+            if recipe_id == "chicken_rice_bowl"
+            else None
+        ),
+    )
+    _CapturingRetriever.last_kwargs = None
+    _script_llm(
+        monkeypatch,
+        [
+            ChefStep(
+                step_type="tool_call",
+                tool="search_recipes",
+                # The real wire format: a JSON-encoded STRING, not a nested
+                # dict -- constructing ChefStep with a raw string literal
+                # here (rather than the dict convenience the other tests in
+                # this file use) exercises the exact path a real provider
+                # response takes.
+                tool_args='{"ingredients": ["chicken", "rice"]}',
+            ),
+            ChefStep(
+                step_type="tool_call",
+                tool="check_recipe_safety",
+                tool_args={"recipe_ids": ["chicken_rice_bowl"]},
+            ),
+            ChefStep(step_type="final_answer", content="Chicken Rice Bowl works for you."),
+        ],
+    )
+
+    result = run_chef_turn("thread-json-args-1", "user-a", UserProfile(), "chicken and rice please")
+
+    assert _CapturingRetriever.last_kwargs is not None
+    assert _CapturingRetriever.last_kwargs["ingredients"] == ["chicken", "rice"]
+    assert result.assistant_message == "Chicken Rice Bowl works for you."
 
 
 def test_response_gate_retry_fires_end_to_end(

@@ -622,9 +622,57 @@ def _model_json_schema(schema: type[BaseModel]) -> dict[str, Any]:
     return schema.model_json_schema()
 
 
+class OpenSchemaError(ValueError):
+    """Raised by `_gemini_response_schema` when a schema contains an
+    open-ended object node (`additionalProperties` true, or a nested schema
+    -- i.e. a Pydantic `dict[str, SomeType]` field) that Gemini's Developer
+    API cannot represent at all. Blindly stripping such a node (the old
+    behavior) doesn't make the schema Gemini-safe, it silently turns "any
+    properties allowed" into "no properties allowed" -- exactly the
+    2026-08-07 incident where `ChefStep.tool_args: dict[str, Any]` became a
+    propertyless object schema and Gemini's constrained decoder always
+    emitted `{}` for it, with no error anywhere in the pipeline (see
+    `app.agent.chef_agent.ChefStep`'s docstring for the full incident and
+    fix). Deliberately a subclass of `ValueError` so it's caught by the same
+    `except Exception` provider-chain fallback every other Gemini failure
+    already goes through (`_generate_chef_step`, `generate_structured`'s
+    callers) -- the fix for THIS error is always "give the field an explicit
+    `properties` shape" (e.g. a JSON-encoded `str` field), never a second
+    silent-strip."""
+
+
+def _reject_open_additional_properties(node: Any) -> None:
+    """Walk a JSON Schema tree (including `$defs`) and raise `OpenSchemaError`
+    on the first `additionalProperties` value that isn't `False` -- `False`
+    is Pydantic's harmless default emission for a closed model and safe to
+    drop; `True` or a nested schema means "arbitrary/typed extra keys
+    allowed", which has no Gemini-representable equivalent and must never be
+    silently discarded. Called before `_strip_additional_properties` so the
+    strip step is only ever removing keys that were already no-ops."""
+    if isinstance(node, dict):
+        additional = node.get("additionalProperties")
+        if additional is not None and additional is not False:
+            raise OpenSchemaError(
+                "Schema has an open-ended object (additionalProperties="
+                f"{additional!r}) that Gemini's Developer API cannot represent -- "
+                "give this field explicit properties (e.g. a discriminated union "
+                "one layer down, or a JSON-encoded `str` field like "
+                "app.agent.chef_agent.ChefStep.tool_args) instead of a bare "
+                "dict[str, ...]."
+            )
+        for value in node.values():
+            _reject_open_additional_properties(value)
+    elif isinstance(node, list):
+        for item in node:
+            _reject_open_additional_properties(item)
+
+
 def _strip_additional_properties(node: Any) -> Any:
     """Recursively drop every `additionalProperties` key from a JSON Schema
-    dict -- see `_gemini_response_schema`'s docstring for why."""
+    dict -- see `_gemini_response_schema`'s docstring for why. Only ever
+    called after `_reject_open_additional_properties` has confirmed every
+    remaining `additionalProperties` value is `False`, so this is a pure
+    no-op-key removal, never a semantic change."""
     if isinstance(node, dict):
         return {
             key: _strip_additional_properties(value)
@@ -643,17 +691,20 @@ def _gemini_response_schema(schema: type[BaseModel]) -> dict[str, Any]:
     in the schema tree -- observed 2026-08-03: every real `ChefStep`
     (`app.agent.chef_agent`) call failed with "additionalProperties is only
     supported in Gemini Enterprise Agent Platform mode... not in Gemini
-    Developer API mode", because `ChefStep.tool_args: dict[str, Any]` (an
-    intentionally open-ended field -- each tool validates its own args
-    shape one layer down, see that module's docstring) makes Pydantic emit
-    `"additionalProperties": true` for that property. Every failed call
-    silently fell back through the provider chain to mock, which is why
-    this surfaced as chat always giving a generic non-answer rather than a
-    visible error. Only used for the Gemini call site -- OpenAI's strict
-    JSON mode relies on `additionalProperties: false` for its own
-    enforcement, so `_model_json_schema` stays unmodified for every other
-    provider."""
-    return _strip_additional_properties(_model_json_schema(schema))
+    Developer API mode". The original fix (this function) just deleted the
+    keyword everywhere, which silently changed the schema's meaning for any
+    OPEN dict field (`additionalProperties: true`/schema-valued) rather than
+    making it Gemini-representable -- that's what caused the incident this
+    docstring describes; see `OpenSchemaError` for the full story. Now
+    raises loudly instead: `_reject_open_additional_properties` runs first
+    and only a harmless `additionalProperties: false` (Pydantic's default
+    closed-model emission) ever reaches the strip step below. Only used for
+    the Gemini call site -- OpenAI's strict JSON mode relies on
+    `additionalProperties: false` for its own enforcement, so
+    `_model_json_schema` stays unmodified for every other provider."""
+    root = _model_json_schema(schema)
+    _reject_open_additional_properties(root)
+    return _strip_additional_properties(root)
 
 
 def _generate_text_with_gemini(prompt: str, settings: Settings, usage: _UsageInfo) -> str:

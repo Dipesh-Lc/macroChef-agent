@@ -137,6 +137,40 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
   via `caplog`/`pytest.ini`'s logging capture, not just the generic SSE
   event.
 
+### B9. Shared, invalidation-safe corpus cache for `recipe_retriever.py`
+
+- **Where:** `app/services/recipe_retriever.py` — `RecipeRetriever.__init__`
+  (constructed fresh per `search_recipes` tool call, `app/agent/tools.py`'s
+  `_search_recipes`) and `get_recipe_by_id` (called by `_resolve_recipe`,
+  and by `GET /recipes/{recipe_id}` in `app/api/routes_recommendations.py`)
+  each independently call `app.rag.loaders.load_corpus()`, which parses the
+  ~21 MB `imported_recipes.jsonl` + ~23 MB `grounding.jsonl` (10,011
+  recipes) from disk every single call.
+- **Context:** found while fixing the 2026-08-07 `search_recipes` incident
+  (see `ChefStep.tool_args`'s docstring in `app/agent/chef_agent.py`) —
+  `get_recipe_by_id` was changed to call `load_corpus()` too (previously it
+  wrongly resolved against the 25-seed-only `recipes_by_id()`), so this is
+  now paid on *every* tool round-trip that resolves a recipe_id
+  (`check_recipe_safety`, `ground_nutrition`, `propose_substitutions`), not
+  just once per `search_recipes` call as before. Explicitly NOT fixed as
+  part of that incident — a naive `@lru_cache`/module-level cache was
+  rejected there because several tests monkeypatch `settings.recipe_path`
+  to point at an isolated test corpus, and a process-wide cache would leak
+  state across tests (and across a real prod process, ignore a corpus
+  rebuild until restart).
+- **Fix:** a cache keyed on something that changes when the corpus does —
+  e.g. the mtime/hash of `imported_recipes.jsonl` + `sample_recipes.jsonl`
+  + `grounding.jsonl`, invalidated automatically on a `scripts/`
+  regeneration — OR an app-lifespan-scoped singleton (built once in
+  `app/main.py`'s lifespan, matching `_get_checkpointer`'s pattern in
+  `app/graph/builder.py`) with an explicit test fixture that resets it,
+  covering both `RecipeRetriever.__init__` and `get_recipe_by_id`.
+- **Accept:** both call sites share one load per corpus generation, not one
+  per call; existing tests that monkeypatch `settings.recipe_path` (e.g.
+  `tests/test_retriever_corpus.py`) still pass unmodified; a corpus
+  regeneration (`scripts/import_corpus.py`) is picked up without a process
+  restart in dev.
+
 ## Frontend
 
 ### F1. `web/openapi.json` freshness is unenforced
@@ -195,7 +229,61 @@ below are re-seeded from the codebase review that produced `ROADMAP.md`).
   script: fold in, keep as dev tool (document at top of file), or delete.
 - **Accept:** no orphan eval scripts without a stated owner/purpose.
 
-### D2. Repo-root `macrochef.db` hygiene
+### D2. Adjudication pass needed for 19 un-adjudicated `inherent` judge flags at HEAD
+
+- **Where:** `scripts/run_safety_benchmark.py` (mock arm, free, deterministic
+  term-match judge) against `app/evaluation/benchmark/cases/`.
+- **Found:** while re-verifying the safety benchmark as part of the
+  2026-08-07 `search_recipes` incident fix (`app/agent/chef_agent.py`'s
+  `ChefStep.tool_args` docstring has that incident's own writeup — this
+  finding is unrelated to it; confirmed via a `git stash` A/B that the
+  benchmark result is byte-identical with and without that fix applied, so
+  it is NOT a regression from that change). Running the mock arm at HEAD
+  (commit `1748481`) reports 69/278 raw judge-flagged `inherent` violations
+  (`data/evaluation/safety_benchmark_report_20260807T225559Z.md`). That
+  number itself is expected and NOT the release-gate metric — the gate is
+  the **adjudicated-true** count, and the raw judge has documented
+  false-positive modes (see `data/evaluation/adjudication_20260717T145539Z.md`'s
+  convention doc). The verified "clean 0/269" status CLAUDE.md cites
+  (`scripts/verify_benchmark_evidence.py`, commit `0840e60`) is itself an
+  *adjudicated* number pinned to an older run whose raw flag count was
+  73/269 (`data/evaluation/safety_benchmark_report_20260727T190130Z.md`,
+  `adjudication_20260727T190130Z_clean_final.md`).
+- **The actual gap:** diffing today's 69 flagged case_ids against the 73
+  adjudicated at the clean-run commit, **19 are new and have never been
+  adjudicated**: `contradicted_013`, `contradicted_014`, `contradicted_017`,
+  `contradicted_022`, `contradicted_030`, `contradicted_032`,
+  `derivative_054`, `derivative_056`, `diet_015`, `diet_022`, `diet_032`,
+  `macro_016`, `macro_022`, `morphology_024`, `morphology_025`,
+  `morphology_031`, `multi_008`, `multi_018`, `subst_004` (23 other
+  previously-flagged ids cleared instead). The drift traces to post-clean-
+  run changes on `main` (`app/graph/builder.py`, `app/graph/nodes.py`,
+  `app/services/recipe_retriever.py`, a +303-line extension to
+  `scripts/run_safety_benchmark.py` itself under ROADMAP 3.3, and 10 new
+  injection cases added since).
+- **Rule (per CLAUDE.md's release-gate semantics, "ambiguity defaults to
+  TRUE_VIOLATION"):** an un-adjudicated flag can NOT be assumed a false
+  positive. The "clean 0/269" claim stays valid ONLY pinned to commit
+  `ef8fd05`/evidence `0840e60` — at HEAD the adjudicated-true `inherent`
+  rate is genuinely **unknown**, not known-zero. Do not update CLAUDE.md's
+  "Current verified status" line, and do not publish any "0 violations at
+  HEAD" claim, until this is resolved.
+- **Fix:** a human/agent adjudication pass over the 19 case_ids above,
+  following the existing per-case adjudication convention (see any
+  `data/evaluation/adjudication_*.md` for the format), then a fresh
+  `verify_benchmark_evidence.py`-style evidence commit. Free of API spend —
+  the mock arm and its judge are both deterministic and local; the cost is
+  adjudicator review labor, not money, so this does NOT need the CLAUDE.md
+  money human-gate. It DOES need a human to actually do or approve the
+  adjudication calls themselves (safety-adjacent judgment).
+- **Accept:** every one of the 19 case_ids has a written per-case
+  adjudication; a new evidence bundle + report timestamp is committed; if
+  any adjudicate TRUE_VIOLATION, CLAUDE.md's "Current verified status" line
+  is updated to reflect the real number (this would be a genuine, separate
+  CLAUDE.md "Safety regressions" human-gate item, handled on its own merits
+  at that point — not assumed here).
+
+### D3. Repo-root `macrochef.db` hygiene
 
 - **Where:** repo root (17 MB dev SQLite; correctly gitignored).
 - **Task:** move the default `DATABASE_URL` target to `data/macrochef.db`

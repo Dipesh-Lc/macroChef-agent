@@ -198,6 +198,40 @@ def test_semantic_path_still_ranks_matching_cuisine_above_untagged(monkeypatch) 
     )
 
 
+def test_build_query_omits_ingredients_clause_when_empty() -> None:
+    """2026-08-07 incident: an empty `ingredients` list used to still
+    produce the literal string "available ingredients: " -- a degenerate,
+    all-boilerplate query embedded and searched as if it were real
+    (`app.agent.chef_agent.ChefStep.tool_args`'s docstring has the full
+    incident writeup)."""
+    retriever = RecipeRetriever(library_repository=FakeLibraryRepository())
+
+    assert retriever._build_query([], None, None) == ""
+    assert retriever._build_query([], "Thai", None) == "preferred cuisine: Thai"
+    assert retriever._build_query(["rice"], None, None) == "available ingredients: rice"
+
+
+def test_empty_search_criteria_never_queries_the_vector_store(monkeypatch) -> None:
+    """Belt-and-suspenders alongside `SearchRecipesArgs`' own empty-payload
+    validator (`app.agent.tools`): even called directly (the recommend graph
+    also calls `retrieve()`, bypassing that validator entirely), a
+    completely empty search must never reach `store.query()` with a
+    meaningless embedding -- it should fall straight through to
+    `keyword_search`'s padded fallback instead."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("vector store must not be queried for an empty search")
+
+    fake_store = FakeVectorStore(count=5, query_fn=_boom)
+    monkeypatch.setattr(retriever_module, "get_vector_store", lambda: fake_store)
+    retriever = RecipeRetriever(library_repository=FakeLibraryRepository())
+
+    recipes = retriever.retrieve([], limit=5)
+
+    assert fake_store.captured_where == [], "store.query() must not have been called at all."
+    assert recipes, "keyword_search's padded fallback should still return candidates."
+
+
 def test_user_cannot_retrieve_another_users_private_recipes(monkeypatch) -> None:
     _empty_store(monkeypatch)
     private = Recipe(

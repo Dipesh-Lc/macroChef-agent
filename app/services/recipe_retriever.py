@@ -3,7 +3,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.data.recipe_library_repository import RecipeLibraryRepository
-from app.rag.loaders import load_corpus, recipes_by_id
+from app.rag.loaders import load_corpus
 from app.rag.vector_store import get_vector_store
 from app.schemas.recipe import Recipe
 from app.utils.ingredient_normalizer import ingredient_matches, normalize_ingredient
@@ -71,7 +71,14 @@ class RecipeRetriever:
 
         try:
             store = get_vector_store()
-            if store.count() > 0:
+            # An empty/whitespace query (all of ingredients, cuisine_preference,
+            # meal_type absent -- SearchRecipesArgs' own validator normally
+            # prevents this from the chat tool, but retrieve() is also called
+            # directly by the recommend graph, so this guard stays defensive
+            # here too) has no meaningful embedding to search against -- skip
+            # straight to keyword_search below rather than querying Chroma
+            # with a degenerate string (2026-08-07 incident).
+            if query.strip() and store.count() > 0:
                 # No `where` filter here: a hard equality filter on
                 # cuisine/meal_type would exclude every recipe missing that
                 # metadata key entirely (recipe_indexing_service drops None
@@ -225,7 +232,18 @@ class RecipeRetriever:
         cuisine_preference: str | None,
         meal_type: str | None,
     ) -> str:
-        parts = ["available ingredients: " + ", ".join(ingredients)]
+        """Empty `ingredients` used to still produce the literal string
+        "available ingredients: " (a trailing, empty clause) -- embedded and
+        queried against Chroma same as any real query, semantically closest
+        to boilerplate rather than any recipe (the 2026-08-07 incident: see
+        `app.agent.chef_agent.ChefStep.tool_args`'s docstring). Now the
+        ingredients clause is only added when there's something to search
+        for; `retrieve()` below additionally skips the semantic branch
+        entirely when every clause is empty, rather than relying on this
+        function alone."""
+        parts = []
+        if ingredients:
+            parts.append("available ingredients: " + ", ".join(ingredients))
         if cuisine_preference:
             parts.append(f"preferred cuisine: {cuisine_preference}")
         if meal_type:
@@ -239,4 +257,23 @@ class RecipeRetriever:
 
 
 def get_recipe_by_id(recipe_id: str) -> Recipe | None:
-    return recipes_by_id().get(recipe_id)
+    """Resolves against the full corpus (seed UNION imported), matching what
+    `RecipeRetriever.__init__` and `search_recipes` actually search over.
+
+    Previously this called `app.rag.loaders.recipes_by_id()`, which loads
+    ONLY the 25 hand-curated seed recipes via `load_recipes()` -- not
+    `load_corpus()`'s seed-union-imported set. So `search_recipes` could
+    surface an `imp_*` recipe id that this function could never resolve,
+    meaning `check_recipe_safety`/`ground_nutrition`/`propose_substitutions`
+    (all of which call `app.agent.tools._resolve_recipe` -> this function)
+    reported "recipe not found" for every one of the ~9,986 imported
+    recipes, even once `search_recipes` itself returned a relevant one (see
+    the 2026-08-07 incident writeup referenced from `app.agent.chef_agent.
+    ChefStep.tool_args`). `GET /recipes/{recipe_id}` (`app.api.routes_
+    recommendations`) uses this same function, so this fixes that 404 too.
+
+    No caching here: `RecipeRetriever.__init__` already re-pays `load_corpus`
+    per `search_recipes` tool call today, so this is parity, not a new perf
+    cost -- see docs/BACKLOG.md B9 for a shared, invalidation-safe corpus
+    cache covering both call sites."""
+    return {recipe.recipe_id: recipe for recipe in load_corpus()}.get(recipe_id)

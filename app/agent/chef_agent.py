@@ -44,13 +44,14 @@ auditable source of truth for cross-turn history, matching the "GET
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.memory import ToolCallLogEntry, TranscriptEntry, load_transcript, persist_turn
 from app.agent.prompts import (
@@ -84,12 +85,66 @@ MAX_TOOL_ITERATIONS = 6
 class ChefStep(BaseModel):
     """One LLM turn's decision: call a tool, or answer the user. See this
     module's docstring for why this is a flat schema (plain `str` fields)
-    rather than a discriminated union at this layer."""
+    rather than a discriminated union at this layer.
+
+    `tool_args` is a JSON-ENCODED STRING, not a nested object -- deliberate,
+    and the fix for a real production incident (2026-08-07): it used to be
+    `dict[str, Any]`, an intentionally open-ended field (each tool validates
+    its own args shape one layer down, in `app.agent.tools.dispatch_tool_call`
+    via a real discriminated union). Pydantic renders an open dict as
+    `additionalProperties: true`, which `model_provider._gemini_response_
+    schema` must strip for Gemini's Developer API (it rejects the keyword
+    outright) -- stripping left a PROPERTYLESS object schema, so Gemini's
+    constrained decoder always emitted `tool_args: {}`. Because every
+    individual tool's Args model tolerates missing fields with defaults, that
+    empty payload validated silently instead of erroring: `search_recipes`
+    always searched for nothing, returning whatever the embedding index
+    considers closest to the boilerplate `"available ingredients: "` prompt
+    (dressings, breadsticks) instead of the user's actual ingredients, with
+    no visible failure anywhere in the pipeline. A plain `str` field sidesteps
+    the problem structurally -- every provider's schema mechanism can
+    represent a string, and it's the same wire convention OpenAI's own
+    `function.arguments` already uses. `tool_args_dict` below is the only
+    place this gets parsed back to a dict; `_gemini_response_schema` also now
+    raises loudly (instead of silently stripping) if any OTHER schema ever
+    reintroduces an open dict, so this bug class can't recur unnoticed."""
 
     step_type: str = "final_answer"
     tool: str | None = None
-    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_args: str = "{}"
     content: str | None = None
+
+    @field_validator("tool_args", mode="before")
+    @classmethod
+    def _coerce_tool_args(cls, value: Any) -> Any:
+        """Accepts a dict directly too -- a construction convenience for
+        tests/programmatic callers (see tests/test_chef_agent.py's
+        `ChefStep(tool_args={...})` fixtures) -- as well as the JSON-encoded
+        string every real provider actually emits. Either way the stored
+        value is a JSON-object string by the time validation finishes; this
+        never touches the JSON SCHEMA Gemini receives, which is generated
+        from the `str` type annotation above, not from this validator."""
+        if isinstance(value, dict):
+            return json.dumps(value)
+        return value
+
+    @field_validator("tool_args")
+    @classmethod
+    def _tool_args_must_be_json_object(cls, value: str) -> str:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"tool_args must be valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("tool_args must be a JSON object, got " f"{type(parsed).__name__}")
+        return value
+
+    @property
+    def tool_args_dict(self) -> dict[str, Any]:
+        """Parsed form for every downstream consumer (`llm_node`,
+        `_args_summary`, `dispatch_tool_call`) -- all still work with plain
+        dicts, only the wire representation on this model changed."""
+        return json.loads(self.tool_args)
 
 
 def _generate_chef_step(prompt: str, settings: Settings) -> ChefStep:
@@ -135,8 +190,13 @@ def _build_prompt(state: ChefState) -> str:
     lines.append("")
     lines.append(
         "Respond with a single JSON object, either "
-        '{"step_type": "tool_call", "tool": "<tool name>", "tool_args": {...}} or '
-        '{"step_type": "final_answer", "content": "<your reply to the user>"}.'
+        '{"step_type": "tool_call", "tool": "<tool name>", "tool_args": '
+        '"<JSON-encoded string of the arguments object>"} or '
+        '{"step_type": "final_answer", "content": "<your reply to the user>"}. '
+        "IMPORTANT: tool_args must be a JSON string containing the escaped "
+        "arguments object, NOT a nested JSON object -- for example "
+        '{"step_type": "tool_call", "tool": "search_recipes", "tool_args": '
+        '"{\\"ingredients\\": [\\"chicken\\", \\"rice\\"]}"}.'
     )
     return "\n".join(lines)
 
@@ -378,7 +438,7 @@ def llm_node(state: ChefState | dict) -> dict:
             current,
             transcript=new_transcript,
             pending_tool=step.tool,
-            pending_tool_args=step.tool_args,
+            pending_tool_args=step.tool_args_dict,
             final_answer=None,
         )
 

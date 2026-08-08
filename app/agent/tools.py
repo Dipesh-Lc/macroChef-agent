@@ -25,7 +25,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, model_validator
 
 from app.data.agent_note_repository import AgentNoteRepository
 from app.data.db import SessionLocal
@@ -109,6 +109,29 @@ class SearchRecipesArgs(BaseModel):
     cuisine_preference: str | None = None
     meal_type: str | None = None
     limit: int = Field(default=8, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _require_some_search_criteria(self) -> SearchRecipesArgs:
+        """Defense-in-depth for the 2026-08-07 incident (see `app.agent.
+        chef_agent.ChefStep.tool_args`'s docstring for the root cause): every
+        field here defaults to empty/None, so a malformed or degenerate
+        `{}` payload used to validate silently into a no-op search --
+        `RecipeRetriever._build_query` would embed the literal string
+        "available ingredients: " and return whatever the index considers
+        closest to that boilerplate, with no visible error anywhere. Now a
+        payload with nothing to search on (no ingredients, no cuisine, no
+        meal type) raises here instead, so `dispatch_tool_call` returns
+        `ok=False` with a real error the model can see and retry against --
+        NOT a `min_length=1` on `ingredients` alone, which would wrongly
+        reject a legitimate cuisine-only/meal-type-only query like "suggest
+        an Italian dinner"."""
+        if not self.ingredients and not self.cuisine_preference and not self.meal_type:
+            raise ValueError(
+                "search_recipes needs at least one of ingredients, "
+                "cuisine_preference, or meal_type -- an empty payload can't "
+                "produce a meaningful search."
+            )
+        return self
 
 
 def _search_recipes(ctx: ToolContext, args: SearchRecipesArgs) -> ToolResult:
